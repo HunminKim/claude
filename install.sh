@@ -32,5 +32,9 @@ echo "      project-init@hunminkim"
 claude plugins install project-init@hunminkim --yes 2>/dev/null || \
   echo "      (이미 설치됨: project-init)"
 
+echo "      harness-check@hunminkim"
+claude plugins install harness-check@hunminkim --yes 2>/dev/null || \
+  echo "      (이미 설치됨: harness-check)"
+
 echo ""
 echo "=== 완료! Claude Code를 재시작하거나 /reload-plugins 를 실행하세요. ==="
