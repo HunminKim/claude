@@ -65,6 +65,7 @@ description: 프로젝트 초기화 스킬 — 새 프로젝트를 시작할 때
 아래 파일들을 생성한다. 이미 파일이 존재하면 덮어쓰기 전에 사용자에게 확인한다.
 
 ```
+README.md                  ← 프로젝트 소개         (기능 완료 시 업데이트)
 docs/
 ├── development_plan.md    ← 개발 계획서           (개발 전 작성)
 ├── context_note.md        ← 맥락 노트             (개발 전 작성)
@@ -136,6 +137,7 @@ tasks/
 문서 업데이트 자동화 흐름도 안내한다:
 - `technical_doc.md`, `completion_report.md`, `checklist.md` 는 @verifier가 소단위 완료마다 자동 업데이트
 - `deployment_guide.md` 는 개발 중 환경 관련 내용을 수시로 기록, 완료 후 정리
+- `README.md` 는 기능 완료 시 직접 업데이트 (새 기능·API 변경·사용법 변경 시)
 - `retrospective.md` 는 초기화 시 생성하지 않는다 — 사용자 완료 사인 후 `assets/templates/retrospective.md` 템플릿으로 생성한다
 
 그리고 아래 **개발 워크플로우**를 사용자에게 명시적으로 안내한다:
@@ -196,6 +198,10 @@ tasks/
 ### todo.md 템플릿
 
 `assets/templates/tasks/todo.md` 파일을 읽어 사용한다.
+
+### README.md 템플릿
+
+`assets/templates/README.md` 파일을 읽어 사용한다.
 
 ### CLAUDE.md 템플릿
 
