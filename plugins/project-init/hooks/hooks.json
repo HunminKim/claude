@@ -11,6 +11,16 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/detect_failure_loop.py",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
