@@ -45,6 +45,10 @@ docs/
 └── debug/                 ← 디버깅 패치 노트
     └── .gitkeep
 
+tasks/
+├── lessons.md             ← 행동 교정 패턴 누적    (사용자 교정 발생 시 업데이트)
+└── todo.md                ← 세션별 작업 계획       (복잡한 작업 시작 시 작성)
+
 .claude/agents/
 └── verifier.md            ← 기능 검증 전담 서브에이전트
 ```
@@ -153,6 +157,14 @@ docs/
 ### retrospective.md 템플릿
 
 `assets/templates/docs/retrospective.md` 파일을 읽어 사용한다.
+
+### lessons.md 템플릿
+
+`assets/templates/tasks/lessons.md` 파일을 읽어 사용한다.
+
+### todo.md 템플릿
+
+`assets/templates/tasks/todo.md` 파일을 읽어 사용한다.
 
 ### CLAUDE.md 템플릿
 
