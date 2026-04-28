@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "hunminkim",
+  "description": "HunminKim의 개인 Claude Code 플러그인 마켓플레이스",
+  "owner": {
+    "name": "HunminKim"
+  },
+  "plugins": [
+    {
+      "name": "project-init",
+      "description": "프로젝트 시작 시 docs/ 구조, CLAUDE.md, verifier 서브에이전트를 자동 생성하는 초기화 스킬",
+      "source": "./plugins/project-init",
+      "category": "development"
+    },
+    {
+      "name": "harness-check",
+      "description": "개발 중간에 에이전트 제어 인프라(훅, verifier, 문서 자동화) 상태를 독립 서브에이전트가 진단하고, 문제 발견 시 upstream 수정 레포트를 생성하는 하네스 점검 스킬",
+      "source": "./plugins/harness-check",
+      "category": "development"
+    }
+  ]
+}

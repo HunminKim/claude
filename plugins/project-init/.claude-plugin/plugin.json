@@ -1,0 +1,8 @@
+{
+  "name": "project-init",
+  "description": "프로젝트 시작 시 docs/ 구조, CLAUDE.md, verifier 서브에이전트를 자동 생성하는 초기화 스킬",
+  "author": {
+    "name": "HunminKim",
+    "email": ""
+  }
+}

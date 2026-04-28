@@ -1,0 +1,6 @@
+# verifier 임시 결과 파일 (훅이 처리 후 자동 삭제)
+.verifier_result.json
+
+# OS
+.DS_Store
+Thumbs.db

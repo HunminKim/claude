@@ -1,0 +1,41 @@
+# 코드 작성 규칙
+
+## 언어
+- 문서·주석은 한국어 (라이브러리명·API명·고유명사는 영어 유지)
+
+## 작업 프로세스
+- 작업 전 요구사항/제약/입출력을 5~10줄 요약
+- 여러 파일 수정: 계획 → 승인 → 순차 실행
+- 요구사항 외 기능 추가 금지 (필요 시 "추가 제안"으로 분리)
+- 불명확한 부분은 Assumption으로 명시
+- 상수·enum·config·schema 등 정의부를 반드시 먼저 확인 후 인용 (확인 없이 수정 금지)
+
+## 코드 규칙
+- 하드코딩 금지 → config/env 사용, 파일 경로는 pathlib
+- 암묵적 동작 금지 (side effect, implicit conversion)
+- 외부 입력 반드시 검증, 파괴적 작업 기본 비활성화
+- 새 라이브러리 추가 시: 도입 이유·대안·선택 근거 명시
+- 인터페이스 계약 명시: 입력/출력·shape/dtype·단위/범위
+
+## 인덱스 / 매핑
+- 정의부 먼저 확인, 코드 순서 ≠ 실제 값
+- 인덱스 직접 접근 금지 → Enum + Dict 사용 (Single Source of Truth)
+- 외부 인덱스와 내부 인덱스 분리 유지
+- 위험 신호: `NAMES[idx]` 직접 접근, `if idx==0` 하드코딩, 외부 인덱스 그대로 사용
+
+```python
+from enum import IntEnum
+class CnnOutput(IntEnum): BOTTLE=0, PHONE=2
+CNN_TO_ACTION = {CnnOutput.BOTTLE: ActionType.DRINKING, ...}
+```
+
+## ML 도메인
+- 입력/출력 명시 (shape, dtype, 단위)
+- 랜덤 시드 고정
+- 전처리 / 모델 / 후처리 분리
+- 모델 출력 인덱스 문서화, 출력 의미 명시 (logits/probability, threshold)
+- 인덱스 매핑·변환 로직은 단위 테스트 필수 (경계값·예외 포함)
+
+## 토큰 관리
+- 사전 확인 후 진행: 1000줄↑ / 5MB↑ / 이미지·PDF·데이터셋 / `**/*` 전체 검색
+- 예외: 사용자 명시 요청, 일반 코드 검색

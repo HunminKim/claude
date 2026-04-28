@@ -1,0 +1,17 @@
+{
+  "description": "project-init plugin hooks — verifier 결과 감지 후 문서 자동 업데이트",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/update_docs.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
