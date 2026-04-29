@@ -48,7 +48,8 @@ def gc_git_tags(root, cutoff: datetime) -> int:
     """`.claude/gate/*/clean` tag 중 30일 이상된 것 삭제."""
     if not lib.has_git(root):
         return 0
-    r = lib._git(root, "tag", "--list", f"{lib.TAG_PREFIX}*/clean", "--format=%(refname:short)|%(creatordate:iso)")
+    r = lib._git(root, "tag", "--list", f"{lib.TAG_PREFIX}*/clean",
+                 "--format=%(refname:short)|%(creatordate:iso-strict)")
     if r.returncode != 0:
         return 0
     removed = 0
@@ -57,10 +58,9 @@ def gc_git_tags(root, cutoff: datetime) -> int:
             continue
         tag, created = line.split("|", 1)
         try:
-            # iso8601 with offset; fromisoformat은 'YYYY-MM-DD HH:MM:SS +0000' 형식엔 약함
-            # 단순 prefix만 잘라 비교
-            ts = datetime.fromisoformat(created.strip().replace(" +", "+").split("+")[0])
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = datetime.fromisoformat(created.strip())
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
         except Exception:
             continue
         if ts < cutoff:

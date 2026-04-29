@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
@@ -89,6 +90,12 @@ def cmd_done(root, state) -> int:
     if gate["state"] not in ("approved", "verified"):
         _err(f"[plan-gate done] 현재 상태 '{gate['state']}'에서는 완료 불가.")
         return 1
+
+    if lib.post_approval_limit_exceeded(gate):
+        _info(
+            "[plan-gate done] ⚠️  scope creep 상태에서 완료 처리됩니다.\n"
+            "  승인된 계획 범위를 초과한 작업이 포함됩니다. 의도된 경우 계속 진행하세요."
+        )
 
     # 체크포인트 정리: clean tag 삭제 + stash drop
     tag = gate.get("checkpoint_clean_tag")
@@ -190,10 +197,12 @@ def cmd_replan(root, state) -> int:
     gate["todo_md_mtime"] = None
     gate["verifier_status"] = None
     lib.save_state(root, state)
+    wt_dirty = lib.has_git(root) and not lib.working_tree_clean(root)
     _info(
         f"[plan-gate replan] 계획 재작성 모드: {gate['id']}\n"
         "  tasks/todo.md 갱신 후 /approve-plan 입력하라.\n"
         "  체크포인트는 유지된다."
+        + ("\n  ⚠️  working tree에 미커밋 변경이 남아있습니다." if wt_dirty else "")
     )
     return 0
 

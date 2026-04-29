@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
@@ -58,6 +59,20 @@ def main() -> int:
             if tag:
                 gate["checkpoint_clean_tag"] = tag
         lib.set_current_gate(state, gate)
+
+    # ── 세션 재진입 경고: 24시간 이상 된 approved gate 잔류 ──────────────
+    if gate and gate["state"] == "approved":
+        try:
+            created = datetime.fromisoformat(gate.get("created_at", ""))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - created).total_seconds() > 86400:
+                _print_stderr(
+                    f"\n[plan-gate] ⚠️  24시간 이상 된 approved gate 잔류: {gate['id']}\n"
+                    "  이전 세션에서 완료되지 않은 작업입니다. /done 또는 /rollback 으로 정리하세요.\n"
+                )
+        except Exception:
+            pass
 
     # ── D1 lock: verifier ❌ 미해결 상태 ─────────────────────────────────
     if gate["state"] == "verified" and gate.get("verifier_status") == "❌":
