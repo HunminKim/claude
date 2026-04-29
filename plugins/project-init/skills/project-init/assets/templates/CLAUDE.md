@@ -1,7 +1,7 @@
 # CLAUDE.md — {{PROJECT_NAME}}
 
 > 코드로 파악 불가능한 것만 담는다. 코드 규칙 자동 로드: `.claude/rules/code-style.md`
-> 세션 시작 시 `.claude/memory/lessons.md` 와 `.claude/memory/workflow.md` 읽어 복습.
+> 세션 시작 시 @.claude/memory/lessons.md 와 @.claude/memory/workflow.md 읽어 복습.
 > 각 줄 기준: "없으면 Claude가 실수할까?" — 아니라면 삭제.
 
 ## 프로젝트
