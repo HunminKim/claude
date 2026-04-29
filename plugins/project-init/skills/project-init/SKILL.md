@@ -78,11 +78,12 @@ CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
 │   └── workflow.md             ← TDD·Phase gate·위임 규칙 (읽기 전용)
 ├── hooks/
 │   ├── design-precheck.py      ← 설계 키워드 감지 → 체크리스트 출력
-│   └── post-compact.py         ← /compact 후 CLAUDE.md 핵심 섹션 재주입
+│   ├── post-compact.py         ← /compact 후 CLAUDE.md 핵심 섹션 재주입
+│   └── cleanup_suggest.py      ← 세션 종료 시 임시 파일 감지 → 정리 제안
 └── skills/                     ← 재사용 절차 보관 디렉토리
     └── .gitkeep
 .githooks/
-├── pre-commit                  ← CLAUDE.md 린트 명령어 자동 실행 + decisions.md 보호
+├── pre-commit                  ← CLAUDE.md 린트 자동 실행 + decisions.md 보호 + 임시 파일 커밋 차단
 ├── pre-push                    ← scripts/validate_arch.py 실행
 └── post-checkout               ← clone 후 core.hooksPath 자동 설정
 docs/
@@ -174,7 +175,14 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 - `CLAUDE.md` — 프로젝트 특화 규칙 (100줄 이내)
 - `.claude/rules/code-style.md` — 상세 코드 규칙 (코드 파일 편집 시 자동 로드)
 - `.claude/memory/lessons.md` — 교정 패턴 누적 (세션 시작 시 복습)
-- `docs/constraints.yaml` — 의존성·아키텍처 제약 SSOT
+- `docs/constraints.yaml` — 의존성·아키텍처 제약 + 임시 파일 네이밍 규칙 SSOT
+
+**임시 파일 네이밍 규칙** (`docs/constraints.yaml > temp_patterns`):
+- 접두사: `tmp_`, `scratch_`, `debug_`, `exp_` (예: `tmp_analysis.py`, `debug_output.csv`)
+- 접미사: `_tmp`, `_scratch`, `_debug` (예: `result_tmp.csv`, `weights_debug.pt`)
+- 디렉토리: `tmp/`, `scratch/`, `.experiments/`
+- 세션 종료 시 Stop 훅이 자동 감지 → Claude에게 정리 여부 질문
+- pre-commit 에서 임시 파일 커밋 시도 시 차단
 
 그리고 아래 **개발 워크플로우**를 사용자에게 명시적으로 안내한다:
 
@@ -226,6 +234,10 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 ### .claude/hooks/post-compact.py 템플릿
 
 `assets/templates/.claude/hooks/post-compact.py` 파일을 읽어 `.claude/hooks/post-compact.py`로 생성한다.
+
+### .claude/hooks/cleanup_suggest.py 템플릿
+
+`assets/templates/.claude/hooks/cleanup_suggest.py` 파일을 읽어 `.claude/hooks/cleanup_suggest.py`로 생성한다.
 
 ### .githooks/pre-commit 템플릿
 

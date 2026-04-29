@@ -19,6 +19,45 @@ if git diff --cached --name-only | grep -q "^$DECISIONS$"; then
     fi
 fi
 
+# 임시 파일 커밋 방어: docs/constraints.yaml 의 temp_patterns 기준
+if command -v python3 &>/dev/null; then
+    TEMP_STAGED=$(PROJECT_ROOT="$PROJECT_ROOT" python3 << 'PYEOF'
+import subprocess, os
+from pathlib import Path
+
+root = Path(os.environ['PROJECT_ROOT'])
+try:
+    import yaml
+    with open(root / 'docs' / 'constraints.yaml') as f:
+        data = yaml.safe_load(f) or {}
+    p = data.get('temp_patterns', {})
+    prefixes = p.get('prefixes', ['tmp_', 'scratch_', 'debug_', 'exp_'])
+    suffixes = p.get('suffixes', ['_tmp', '_scratch', '_debug'])
+except Exception:
+    prefixes = ['tmp_', 'scratch_', 'debug_', 'exp_']
+    suffixes = ['_tmp', '_scratch', '_debug']
+
+staged = subprocess.run(
+    ['git', 'diff', '--cached', '--name-only'],
+    capture_output=True, text=True
+).stdout.strip().splitlines()
+found = []
+for path in staged:
+    base = path.rsplit('/', 1)[-1]
+    stem = base.rsplit('.', 1)[0] if '.' in base else base
+    if any(base.startswith(px) for px in prefixes) or any(stem.endswith(sx) for sx in suffixes):
+        found.append(path)
+print('\n'.join(found))
+PYEOF
+)
+    if [ -n "$TEMP_STAGED" ]; then
+        echo "[pre-commit] 경고: 임시 파일이 스테이징에 포함되어 있습니다:" >&2
+        echo "$TEMP_STAGED" | sed 's/^/  /' >&2
+        echo "[pre-commit] 의도한 커밋이면 git commit --no-verify 로 우회하세요." >&2
+        exit 1
+    fi
+fi
+
 LINT_CMD=$(grep -E "^\s*(ruff|pylint|flake8|eslint|tsc|mypy|black|isort)\b" "$CLAUDE_MD" 2>/dev/null | head -1 | sed 's/^[[:space:]]*//')
 
 if [ -z "$LINT_CMD" ]; then

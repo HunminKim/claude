@@ -20,3 +20,24 @@ arch_rules: []
 # arch_rules:
 #   - "DB 접근은 repository 계층만 허용"
 #   - "도메인 레이어는 외부 라이브러리 import 금지"
+
+# 임시 파일 네이밍 규칙
+# .claude/hooks/cleanup_suggest.py (Stop 훅) 가 세션 종료 시 이 패턴으로 스캔한다.
+# .githooks/pre-commit 도 이 패턴으로 임시 파일 커밋을 차단한다.
+temp_patterns:
+  # 파일명 접두사 (예: tmp_analysis.py, scratch_test.csv, debug_output.json)
+  prefixes:
+    - "tmp_"
+    - "scratch_"
+    - "debug_"
+    - "exp_"
+  # 파일명 줄기 접미사 — 확장자 제외 (예: result_tmp.csv, weights_debug.pt)
+  suffixes:
+    - "_tmp"
+    - "_scratch"
+    - "_debug"
+  # 임시 디렉토리 — 하위 파일 전체 감지 (예: tmp/output.png)
+  dirs:
+    - "tmp/"
+    - "scratch/"
+    - ".experiments/"
