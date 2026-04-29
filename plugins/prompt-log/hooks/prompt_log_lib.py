@@ -123,16 +123,15 @@ def pl_grant_consent(project_root: Path) -> None:
 # ── [prompt-log] sanitize (PII 마스킹) ───────────────────────────────────
 # V1 최소 패턴. V2: 사용자 정의 yaml 추가.
 PL_SANITIZE_PATTERNS = [
-    # API keys
-    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "[REDACTED:openai_key]"),
+    # API keys — specific 패턴을 general보다 먼저 (sk-ant-가 sk-에 먼저 걸리지 않도록)
     (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "[REDACTED:anthropic_key]"),
+    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "[REDACTED:openai_key]"),
     (re.compile(r"ghp_[A-Za-z0-9]{30,}"), "[REDACTED:github_pat]"),
     (re.compile(r"ghs_[A-Za-z0-9]{30,}"), "[REDACTED:github_secret]"),
     (re.compile(r"xox[baprs]-[A-Za-z0-9-]+"), "[REDACTED:slack_token]"),
     # AWS
     (re.compile(r"AKIA[0-9A-Z]{16}"), "[REDACTED:aws_access_key]"),
-    (re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9])"),
-     "[REDACTED:possible_secret_40]"),
+    # 40자 base64 패턴 제거 — Git SHA·hex hash 등 정상 텍스트 오탐 심각
     # JWT
     (re.compile(r"eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
      "[REDACTED:jwt]"),
@@ -214,7 +213,7 @@ def pl_make_active_record(project_root: Path, prompt_text: str,
         "project": pl_project_meta(project_root),
         "prompt": {
             "text": sanitized,
-            "len": len(prompt_text or ""),
+            "len": len(sanitized),
             "is_token": is_token,
             "token_value": sanitized.strip() if is_token else None,
         },

@@ -29,7 +29,7 @@ APPROVED_BUFFER = 2     # initial_count + buffer
 APPROVED_MIN = 5        # 최소 임계값
 GC_MAX_AGE_DAYS = 30
 
-GATE_STATES = {"created", "approved", "verified", "rejected", "rolled_back", "done"}
+GATE_STATES = {"created", "approved", "verified", "rolled_back", "done"}
 
 TAG_PREFIX = ".claude/gate/"
 STASH_PREFIX = "[plan-gate] "
@@ -139,8 +139,8 @@ def stash_dirty(root: Path, gate_id: str) -> str | None:
     r = _git(root, "stash", "push", "-u", "-m", msg)
     if r.returncode != 0:
         return None
-    # 가장 최근 stash가 방금 만든 것
-    return "stash@{0}"
+    # 실제 ref는 find_stash_for_gate()로만 탐색; gate_id를 sentinel로 저장
+    return gate_id
 
 
 def find_stash_for_gate(root: Path, gate_id: str) -> str | None:

@@ -37,8 +37,8 @@ def main() -> int:
         pl.pl_append_record(record)
     except Exception as e:
         sys.stderr.write(f"[prompt-log] flush 실패: {e}\n")
-        return 0
-    pl.pl_clear_active(root)
+    finally:
+        pl.pl_clear_active(root)
     return 0
 
 
