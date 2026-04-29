@@ -35,9 +35,26 @@ def _need_gate(state, action: str):
 
 
 def cmd_approve(root, state) -> int:
-    gate = _need_gate(state, "approve")
-    if gate is None:
-        return 0  # idempotent
+    gate = lib.current_gate(state)
+
+    # gate 없음 = 아직 편집 시작 전 → 선승인: 즉시 approved gate 생성
+    if gate is None or gate["state"] in ("done", "rolled_back"):
+        gate = lib.make_gate()
+        sha, mtime = lib.hash_todo_md(root)
+        gate["todo_md_sha256"] = sha
+        gate["todo_md_mtime"] = mtime
+        gate["state"] = "approved"
+        gate["approved_at"] = lib.now_iso()
+        gate["initial_edit_count"] = 0
+        gate["initial_unique_files"] = 0
+        lib.set_current_gate(state, gate)
+        lib.save_state(root, state)
+        _info(
+            f"[plan-gate approve] 선승인 완료: {gate['id']}\n"
+            f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
+            f"  limit={lib.post_approval_limit(gate)} edits (scope creep 방지)"
+        )
+        return 0
 
     if gate["state"] == "approved":
         _info(f"[plan-gate approve] 이미 승인됨: {gate['id']}")
