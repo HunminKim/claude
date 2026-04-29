@@ -36,5 +36,11 @@ echo "      harness-check@hunminkim"
 claude plugins install harness-check@hunminkim --yes 2>/dev/null || \
   echo "      (이미 설치됨: harness-check)"
 
+# >>> [prompt-log] integration begin
+echo "      prompt-log@hunminkim"
+claude plugins install prompt-log@hunminkim --yes 2>/dev/null || \
+  echo "      (이미 설치됨: prompt-log)"
+# <<< [prompt-log] integration end
+
 echo ""
 echo "=== 완료! Claude Code를 재시작하거나 /reload-plugins 를 실행하세요. ==="
