@@ -2,7 +2,7 @@
 """UserPromptSubmit hook — 설계 키워드 감지 시 5단계 체크리스트를 Claude context에 주입.
 docs/constraints.yaml 이 없으면 무음 종료 (초기화 전 오작동 방지).
 """
-import json, re, sys
+import json, os, re, sys
 from pathlib import Path
 
 KO_DESIGN = [
@@ -20,8 +20,14 @@ def detect_design(text: str) -> bool:
     en_hits = sum(1 for p in EN_DESIGN if re.search(p, text, re.IGNORECASE))
     return ko_hits >= 1 or en_hits >= 2
 
-def find_project_root(cwd: Path):
-    for p in [cwd] + list(cwd.parents):
+def find_project_root() -> Path | None:
+    env_root = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env_root:
+        p = Path(env_root)
+        if (p / "docs" / "constraints.yaml").exists():
+            return p
+        return None
+    for p in [Path.cwd()] + list(Path.cwd().parents):
         if (p / "docs" / "constraints.yaml").exists():
             return p
     return None
@@ -36,7 +42,7 @@ def main():
         sys.exit(0)
     if not detect_design(prompt):
         sys.exit(0)
-    root = find_project_root(Path.cwd())
+    root = find_project_root()
     if root is None:
         sys.exit(0)
     div = "━" * 57

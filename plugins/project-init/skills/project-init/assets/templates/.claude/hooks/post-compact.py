@@ -2,7 +2,7 @@
 """PostCompact hook — /compact 후 CLAUDE.md 핵심 섹션을 Claude context에 재주입.
 컨텍스트 압축 후 워크플로우 규칙·제약이 소실되지 않도록 한다.
 """
-import json, sys
+import json, os, sys
 from pathlib import Path
 
 CRITICAL_SECTIONS = [
@@ -22,8 +22,12 @@ def extract_sections(claude_md: Path) -> str:
             result.append(line)
     return "\n".join(result).strip()
 
-def find_claude_md(cwd: Path):
-    for p in [cwd] + list(cwd.parents):
+def find_claude_md() -> Path | None:
+    env_root = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env_root:
+        cand = Path(env_root) / "CLAUDE.md"
+        return cand if cand.exists() else None
+    for p in [Path.cwd()] + list(Path.cwd().parents):
         cand = p / "CLAUDE.md"
         if cand.exists():
             return cand
@@ -34,7 +38,7 @@ def main():
         json.load(sys.stdin)
     except Exception:
         pass
-    claude_md = find_claude_md(Path.cwd())
+    claude_md = find_claude_md()
     if claude_md is None:
         sys.exit(0)
     content = extract_sections(claude_md)
