@@ -1,0 +1,8 @@
+{
+  "name": "prompt-log",
+  "description": "사용자 prompt와 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적한다. project-init 통합으로 동의 받음. 단일 디렉토리/단일 prefix 규칙으로 1줄 제거 가능.",
+  "author": {
+    "name": "HunminKim",
+    "email": ""
+  }
+}

@@ -150,6 +150,59 @@ scripts/
 
 ### 4단계: 완료 보고
 
+<!-- >>> [prompt-log] integration begin -->
+**먼저 Prompt Log 수집 동의 요청을 진행한다** (prompt-log 플러그인이 설치된 경우):
+
+다음 안내를 사용자에게 출력한다:
+
+```
+▶ Prompt Log 수집 동의 요청
+
+이 프로젝트의 사용자 prompt를 분석 목적으로 저장하시겠습니까?
+
+목적
+  • 사용자 워크플로우 패턴 분석
+  • plan-gate 휴리스틱 튜닝 (추후)
+
+저장 위치
+  • 글로벌 데이터: ~/.claude/prompt-log/prompts-YYYY-MM.jsonl
+  • 동의 등록   : ~/.claude/prompt-log/projects-allowed.json
+  • 프로젝트 marker: .claude/prompt-log-consent
+
+보호
+  • API key/secret 자동 마스킹 (정규식)
+  • V1: 자동 삭제 없음 (수동 관리), V2 예정
+
+철회
+  • .claude/prompt-log-consent 삭제 + whitelist에서 제거
+
+진행할까요? (y/n)
+```
+
+사용자 응답 처리:
+- **y / yes / 응 / 네 / 좋아**:
+  1. `.claude/prompt-log-consent` 파일 생성 (내용: 현재 시각 ISO8601, 1줄)
+  2. `~/.claude/prompt-log/projects-allowed.json` 에 항목 추가 — 파일이 없으면 새로 생성:
+     ```json
+     [
+       {
+         "abs_path": "<프로젝트 절대경로>",
+         "project_name": "<basename>",
+         "consent_at": "<ISO8601 KST>"
+       }
+     ]
+     ```
+  3. 사용자에게 "동의 등록 완료" 안내
+- **n / no / 아니오 / 안해**:
+  - 아무 파일도 생성하지 않는다 (default deny)
+  - 사용자에게 "수집하지 않습니다. 나중에 활성화하려면 plugins/prompt-log/README.md 의 '수동' 섹션 참고" 안내
+- **prompt-log 플러그인이 설치되지 않은 환경**:
+  - 동의 요청 단계를 건너뛰고 다음으로 진행
+
+이 동의 요청은 prompt-log 플러그인이 추가한 통합 단계이며, 플러그인 제거 시 본
+SKILL.md 의 `<!-- >>> [prompt-log] -->` 마커로 감싸진 부분만 제거하면 된다.
+<!-- <<< [prompt-log] integration end -->
+
 생성된 파일 목록을 보여주고, 사용자에게 다음을 안내한다:
 - `docs/plan.md` 에서 개발 계획(Phase/Sprint 로드맵)을 채워달라고
 - `docs/context_note.md` 에서 프로젝트 배경/맥락을 기록해달라고
@@ -194,6 +247,24 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 >
 > verifier는 독립적인 시각으로 기능을 검증하고 문제를 보고하는 역할이며,
 > 수정은 하지 않는다. 수정은 메인 에이전트(구현자)의 몫이다.
+
+> **plan-gate 자동 강제 (체크포인트 포함)**
+> `Edit/Write/MultiEdit`이 3회 또는 영향 파일 3개 또는 MultiEdit 5항목 이상이면
+> PreToolUse 훅이 자동 차단한다. 차단 시점에 `git tag` + `git stash`로
+> 체크포인트가 자동 생성된다.
+>
+> 흐름:
+> 1. Claude가 `tasks/todo.md` 에 단계별 계획 작성
+> 2. 사용자에게 검토 요청
+> 3. 사용자: `/approve-plan` → 작업 재개 (todo.md SHA-256 검증 포함)
+> 4. 구현 → `@verifier` 호출 → 검증 결과
+> 5. 사용자 결정 (자동화 없음):
+>    - `✅` → `/done` (체크포인트 정리) 또는 `/rollback` (복원)
+>    - `❌` → `/retry` (같은 체크포인트에서 재시도) 또는 `/rollback`
+>    - 계획 재작성 필요: `/replan` → todo.md 갱신 후 다시 `/approve-plan`
+>
+> 승인 후에도 `max(initial_edits + 2, 5)` 초과 시 scope creep 차단된다.
+> 미해결 verifier ❌ 상태에서 새 작업 시도는 D1 lock으로 차단된다.
 
 ---
 
