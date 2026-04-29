@@ -17,6 +17,12 @@
       "description": "개발 중간에 에이전트 제어 인프라(훅, verifier, 문서 자동화) 상태를 독립 서브에이전트가 진단하고, 문제 발견 시 upstream 수정 레포트를 생성하는 하네스 점검 스킬",
       "source": "./plugins/harness-check",
       "category": "development"
+    },
+    {
+      "name": "prompt-log",
+      "description": "[prompt-log] removable plugin — 사용자 prompt + 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적. /project-init 통합 동의, plugins/prompt-log/uninstall.sh 1줄 제거.",
+      "source": "./plugins/prompt-log",
+      "category": "development"
     }
   ]
 }

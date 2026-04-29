@@ -13,7 +13,7 @@ bash install.sh
 `install.sh` 가 하는 일:
 1. `hunminkim` 마켓플레이스 등록
 2. 공식 플러그인 설치 (code-review, code-simplifier, skill-creator, hookify)
-3. 개인 플러그인 설치 (project-init)
+3. 개인 플러그인 설치 (project-init, harness-check, prompt-log)
 
 설치 후 Claude Code 재시작 또는 `/reload-plugins`
 
@@ -105,6 +105,45 @@ update_docs 훅: gate.state = "verified", verifier_status 기록
 **GC**: SessionEnd 훅이 30일 이상된 tag·stash·gate 기록 정리
 
 **가드**: `.claude/agents/verifier.md` 가 없는 (project-init 미적용) 프로젝트에선 plan-gate가 자동 비활성화된다.
+
+<!-- >>> [prompt-log] integration begin -->
+### prompt-log
+
+**제거 가능한** 사용자 prompt + 도구 호출 통계 수집 플러그인. 동의한 프로젝트에서만 작동한다.
+
+**목적**
+- plan-gate 휴리스틱 튜닝 (V2)
+- 사용자 워크플로우 패턴 분석
+- 다른 플러그인이 read-only로 활용
+
+**동의 메커니즘 (default deny)**
+다음 두 조건이 모두 만족해야 수집:
+1. 글로벌 whitelist 등록 — `~/.claude/prompt-log/projects-allowed.json`
+2. 프로젝트별 marker — `<project>/.claude/prompt-log-consent`
+
+`/project-init` 실행 시 4단계에서 동의 요청이 자동 표시되며, `y` 응답 시 둘 다 자동 생성. `n` 또는 미실행이면 수집 안 함.
+
+**저장**
+```
+~/.claude/prompt-log/
+├── prompts-YYYY-MM.jsonl     # 월별 분할 (한 줄 = 한 prompt record)
+└── projects-allowed.json     # 동의 whitelist
+```
+
+record 스키마: prompt(sanitized) + tools 카운트(edit/write/bash/task) + 영향 파일 + plan-gate 메타(read-only) + outcome.
+
+**Sanitize**: API key, JWT, AWS, 이메일 등 정규식 마스킹 (`[REDACTED:type]` 치환).
+
+**1줄 제거**
+```bash
+bash plugins/prompt-log/uninstall.sh
+claude plugins uninstall prompt-log
+```
+
+**식별 마커 컨벤션**: 추가된 모든 코드는 `[prompt-log]` 식별 마커로 검색 가능 (`grep -rn '\[prompt-log\]' ~/.claude-config/`). 외부 통합 부분은 `<!-- >>> [prompt-log] integration begin -->` ~ `<!-- <<< [prompt-log] integration end -->` 마커로 감싸져 있어 안전하게 제거 가능.
+
+자세한 내용: `plugins/prompt-log/README.md`. 미뤄둔 항목: `plugins/prompt-log/V2_TODO.md`.
+<!-- <<< [prompt-log] integration end -->
 
 ---
 
