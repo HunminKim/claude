@@ -249,23 +249,48 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 > verifier는 독립적인 시각으로 기능을 검증하고 문제를 보고하는 역할이며,
 > 수정은 하지 않는다. 수정은 메인 에이전트(구현자)의 몫이다.
 
-> **plan-gate 자동 강제 (체크포인트 포함)**
-> `Edit/Write/MultiEdit`이 3회 또는 영향 파일 3개 또는 MultiEdit 5항목 이상이면
-> PreToolUse 훅이 자동 차단한다. 차단 시점에 `git tag` + `git stash`로
-> 체크포인트가 자동 생성된다.
+> **plan-gate — 슬래시 커맨드 가이드**
 >
-> 흐름:
-> 1. Claude가 `tasks/todo.md` 에 단계별 계획 작성
-> 2. 사용자에게 검토 요청
-> 3. 사용자: `/approve-plan` → 작업 재개 (todo.md SHA-256 검증 포함)
-> 4. 구현 → `@verifier` 호출 → 검증 결과
-> 5. 사용자 결정 (자동화 없음):
->    - `✅` → `/done` (체크포인트 정리) 또는 `/rollback` (복원)
->    - `❌` → `/retry` (같은 체크포인트에서 재시도) 또는 `/rollback`
->    - 계획 재작성 필요: `/replan` → todo.md 갱신 후 다시 `/approve-plan`
+> plan-gate는 큰 변경이 검토 없이 진행되는 것을 막는 자동 게이트다.
+> `Edit/Write/MultiEdit 3회`, `영향 파일 3개`, `MultiEdit 5항목` 중 하나라도 초과하면
+> PreToolUse 훅이 차단하고 git tag + git stash로 체크포인트를 자동 생성한다.
 >
-> 승인 후에도 `max(initial_edits + 2, 5)` 초과 시 scope creep 차단된다.
-> 미해결 verifier ❌ 상태에서 새 작업 시도는 D1 lock으로 차단된다.
+> **[권장] 작업 시작 전 선승인 플로우:**
+> ```
+> tasks/todo.md 계획 작성 → /approve-plan → 작업 시작 (무중단)
+> ```
+>
+> **[자동 차단됐을 때] 플로우:**
+> ```
+> 차단됨 → Claude가 tasks/todo.md 계획 작성 → 사용자 검토
+>   → /approve-plan   계획 승인, 작업 재개
+>   → /replan         계획 수정 후 다시 /approve-plan
+>   → /rollback       체크포인트로 전체 되돌리기
+> ```
+>
+> **[scope creep 차단됐을 때] 플로우 (승인 후 편집 횟수 초과):**
+> ```
+>   → /done     현재까지 완료로 마감
+>   → /replan   계획 갱신 후 /approve-plan으로 계속
+>   → /rollback 전체 되돌리기
+> ```
+>
+> **[verifier 검증 후] 플로우:**
+> ```
+>   ✅ → /done        체크포인트 정리, gate 종료
+>   ❌ → /retry       같은 체크포인트에서 재구현 (카운터 누적)
+>      → /rollback    이번 시도 전체 폐기
+> ```
+>
+> **커맨드 한눈에 보기:**
+>
+> | 커맨드 | 언제 | 효과 |
+> |--------|------|------|
+> | `/approve-plan` | 계획 확정 후 (시작 전 or 차단 후) | gate → approved |
+> | `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
+> | `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |
+> | `/retry` | verifier ❌ 후 재구현 | approved 복귀, 카운터 누적 |
+> | `/rollback` | 전체 되돌릴 때 | git reset → checkpoint |
 
 ---
 

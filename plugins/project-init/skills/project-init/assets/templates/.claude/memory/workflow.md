@@ -44,6 +44,46 @@
 - 기존 항목 수정 금지 (append-only)
 - 결정이 뒤집히면 새 D-번호로 "기각: D-XXX" 표기
 
+## plan-gate 커맨드 가이드
+
+plan-gate는 자동 차단 장치다. 아래 상황별로 어떤 커맨드를 써야 하는지 Claude가 사용자에게 안내한다.
+
+### 작업 시작 전 (계획이 이미 있을 때)
+```
+tasks/todo.md 작성 완료
+    → /approve-plan  ← 선승인. 이후 scope creep 임계값까지 무중단 작업 가능
+```
+
+### plan-gate가 차단했을 때
+```
+계획 작성 후 계속 진행     → /approve-plan
+계획을 새로 짜야 함        → /replan → tasks/todo.md 수정 → /approve-plan
+지금까지 작업 전체 버림    → /rollback
+```
+
+### scope creep 차단됐을 때 (승인 후 편집 횟수 초과)
+```
+현재까지 작업으로 완료     → /done
+계획 갱신 후 계속 진행     → /replan → tasks/todo.md 수정 → /approve-plan
+전체 되돌리기              → /rollback
+```
+
+### @verifier 검증 후
+```
+verifier ✅  →  /done          (체크포인트 정리 + gate 완료)
+verifier ❌  →  /retry         (같은 체크포인트에서 재구현)
+             →  /rollback      (이번 시도 전체 폐기)
+```
+
+### 커맨드 요약표
+| 커맨드 | 사용 시점 | 효과 |
+|--------|-----------|------|
+| `/approve-plan` | 계획 확정 후 (시작 전 or 차단 후) | gate → approved, 작업 재개 |
+| `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
+| `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |
+| `/retry` | verifier ❌ 후 재구현 | approved 상태 복귀, 카운터 누적 유지 |
+| `/rollback` | 전체 되돌리기 | git reset → checkpoint tag, stash 복원 안내 |
+
 ## lessons.md 관리
 
 - `.claude/memory/lessons.md` 는 50줄 이하로 유지
