@@ -1,6 +1,18 @@
 {
-  "description": "project-init plugin hooks — verifier 결과 감지 + 사용자 교정 감지 (.claude/memory/lessons.md 우선, tasks/lessons.md fallback)",
+  "description": "project-init plugin hooks — verifier 결과 처리 + 사용자 교정 감지 + Bash 실패 루프 + plan-gate 강제 (체크포인트 자동 관리)",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan_gate.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write",
@@ -30,6 +42,22 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/detect_user_correction.py",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan_approval.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan_gate_gc.py",
+            "timeout": 15
           }
         ]
       }

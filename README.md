@@ -42,7 +42,7 @@ bash install.sh
 | `docs/debug/*.md` | 버그 발생 시 | Claude |
 | `.claude/agents/verifier.md` | 초기화 시 | /project-init |
 
-#### 개발 워크플로우
+#### 개발 워크플로우 (verifier)
 
 ```
 사용자: 기능 구현 요청
@@ -61,6 +61,50 @@ checklist / completion_report / technical_doc 자동 업데이트
 ```
 
 > 기능 그룹이 완전히 끝나면 `/compact` 실행 (소단위마다 하지 않음)
+
+#### plan-gate (자동 강제 + 체크포인트 자동 관리)
+
+복잡한 코드 수정을 자동 감지해 사용자 계획 승인을 강제하고, 작업 시작 시점에
+체크포인트를 자동으로 만들어 롤백 가능하게 한다. 사용자는 메시지 토큰만으로
+모든 단계를 제어한다 (코드/파일시스템 직접 접근 불필요).
+
+**트리거 조건** (PreToolUse 훅, OR):
+- `Edit`/`Write`/`MultiEdit` 호출 ≥ 3회
+- 영향 파일 ≥ 3개
+- 단일 `MultiEdit` 항목 ≥ 5개
+
+**워크플로우**:
+
+```
+Claude: Edit 시도 (1·2·3차)
+    ↓ 3차에서 차단 (트리거 임계값 도달)
+PreToolUse 훅: git stash + git tag (체크포인트 생성)
+    ↓
+Claude: tasks/todo.md 에 계획 작성 → 사용자에게 검토 요청
+    ↓
+사용자: /approve-plan
+    ↓ todo.md SHA-256 검증
+plan_approval 훅 + 슬래시 커맨드: gate.state = "approved"
+    ↓
+Claude: 구현 진행 (max(initial+2, 5) 초과 시 scope creep 차단)
+    ↓
+@verifier 호출 → docs/.verifier_result.json
+    ↓
+update_docs 훅: gate.state = "verified", verifier_status 기록
+    ↓
+사용자 결정:
+  ✅ → /done       (체크포인트 정리)
+       /rollback   (체크포인트로 복원, dirty stash 보존)
+  ❌ → /retry      (같은 체크포인트에서 재시도)
+       /rollback   (체크포인트로 복원)
+계획 재작성 필요 → /replan (카운터 리셋, 체크포인트 유지)
+```
+
+**상태 파일**: `.claude/state/plan_gate.json`
+**체크포인트**: `git tag .claude/gate/<id>/clean` + `[plan-gate] <id>` stash entry
+**GC**: SessionEnd 훅이 30일 이상된 tag·stash·gate 기록 정리
+
+**가드**: `.claude/agents/verifier.md` 가 없는 (project-init 미적용) 프로젝트에선 plan-gate가 자동 비활성화된다.
 
 ---
 

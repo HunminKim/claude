@@ -195,6 +195,24 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 > verifier는 독립적인 시각으로 기능을 검증하고 문제를 보고하는 역할이며,
 > 수정은 하지 않는다. 수정은 메인 에이전트(구현자)의 몫이다.
 
+> **plan-gate 자동 강제 (체크포인트 포함)**
+> `Edit/Write/MultiEdit`이 3회 또는 영향 파일 3개 또는 MultiEdit 5항목 이상이면
+> PreToolUse 훅이 자동 차단한다. 차단 시점에 `git tag` + `git stash`로
+> 체크포인트가 자동 생성된다.
+>
+> 흐름:
+> 1. Claude가 `tasks/todo.md` 에 단계별 계획 작성
+> 2. 사용자에게 검토 요청
+> 3. 사용자: `/approve-plan` → 작업 재개 (todo.md SHA-256 검증 포함)
+> 4. 구현 → `@verifier` 호출 → 검증 결과
+> 5. 사용자 결정 (자동화 없음):
+>    - `✅` → `/done` (체크포인트 정리) 또는 `/rollback` (복원)
+>    - `❌` → `/retry` (같은 체크포인트에서 재시도) 또는 `/rollback`
+>    - 계획 재작성 필요: `/replan` → todo.md 갱신 후 다시 `/approve-plan`
+>
+> 승인 후에도 `max(initial_edits + 2, 5)` 초과 시 scope creep 차단된다.
+> 미해결 verifier ❌ 상태에서 새 작업 시도는 D1 lock으로 차단된다.
+
 ---
 
 ## 템플릿 섹션

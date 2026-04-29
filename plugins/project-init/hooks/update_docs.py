@@ -189,6 +189,38 @@ if critical_constraints:
 
         print(f"[update_docs] CLAUDE.md 알려진 버그/제약 업데이트: {len(critical_constraints)}건")
 
+# ── plan-gate state 갱신 (D3) ─────────────────────────────────────────────
+# verifier 결과를 plan-gate 상태에 반영. 자동 /done이나 /rollback은 하지 않고,
+# 사용자에게 결정 토큰(/retry, /done, /rollback)을 요청하는 안내만 출력.
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import plan_gate_lib as _pglib  # noqa: E402
+
+    _root = _pglib.find_project_root()
+    if _root and _pglib.is_project_init_managed(_root) and verdict in ("✅", "❌"):
+        _state = _pglib.load_state(_root)
+        _gate = _pglib.current_gate(_state)
+        if _gate and _gate["state"] in ("approved", "verified"):
+            _gate["state"] = "verified"
+            _gate["verifier_status"] = verdict
+            _pglib.save_state(_root, _state)
+            if verdict == "✅":
+                print(
+                    "\n[plan-gate verified ✅] 사용자 결정 대기.\n"
+                    "  /done    — 작업 완료, 체크포인트 정리\n"
+                    "  /rollback — 체크포인트로 복원"
+                )
+            else:
+                _issues_text = ", ".join(issues) if issues else "(상세 없음)"
+                print(
+                    "\n[plan-gate verified ❌] 사용자 결정 대기.\n"
+                    f"  사유: {_issues_text}\n"
+                    "  /retry   — 같은 체크포인트에서 재시도\n"
+                    "  /rollback — 체크포인트로 복원"
+                )
+except Exception as _e:  # plan-gate 통합 실패는 verifier 흐름을 깨뜨리지 않는다
+    print(f"[update_docs] plan-gate 통합 경고: {_e}", file=sys.stderr)
+
 # 4. 결과 파일 삭제 (verifier 전용 임시 파일)
 result_path.unlink()
 print(f"[update_docs] .verifier_result.json 삭제 완료")
