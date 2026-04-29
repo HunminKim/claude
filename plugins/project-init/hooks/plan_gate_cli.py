@@ -143,9 +143,6 @@ def cmd_rollback(root, state) -> int:
             "[plan-gate rollback] 체크포인트 tag가 없다 (git 미사용 또는 tag 생성 실패).\n"
             "  복원 불가 — 수동으로 되돌려야 한다."
         )
-        gate["state"] = "rolled_back"
-        lib.clear_current_gate(state)
-        lib.save_state(root, state)
         return 1
 
     if not lib.reset_to_tag(root, tag):
