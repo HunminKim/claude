@@ -103,13 +103,16 @@ tasks/
 scripts/
 └── validate_arch.py            ← pre-push 아키텍처 제약 검증
 .claude/agents/
-└── verifier.md                 ← 기능 검증 전담 서브에이전트 (plan-gate 활성화 트리거 — 반드시 마지막에 생성)
+└── verifier.md                 ← 기능 검증 전담 서브에이전트
+.claude/
+└── plan_gate_enabled           ← plan-gate 활성화 플래그 (반드시 마지막에 생성)
 ```
 
 각 문서 파일 내용은 아래 **템플릿 섹션**을 참고한다. 프로젝트 이름, 날짜(KST 기준), 기술 스택을 템플릿에 채워 넣는다.
 
-`verifier.md`는 모든 파일 생성이 완료된 **마지막 단계**에 `assets/templates/agents/verifier.md` 템플릿을 읽어 `.claude/agents/verifier.md`로 생성한다.
-이 파일 존재 여부가 plan-gate 활성화 트리거이므로, 반드시 가장 마지막에 생성해야 project-init 실행 중 plan-gate가 조기 발동되지 않는다.
+`verifier.md`는 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/verifier.md` 템플릿을 읽어 `.claude/agents/verifier.md`로 생성한다.
+
+`.claude/plan_gate_enabled` 파일은 **모든 파일 생성이 완료된 가장 마지막 단계**에 생성한다. 이 파일 존재 여부가 plan-gate 활성화 트리거이므로, 반드시 가장 마지막에 생성해야 project-init 실행 중 plan-gate가 조기 발동되지 않는다.
 
 ### 3단계: CLAUDE.md 생성
 
@@ -255,6 +258,13 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 > `Edit/Write/MultiEdit 3회`, `영향 파일 3개`, `MultiEdit 5항목` 중 하나라도 초과하면
 > PreToolUse 훅이 차단하고 git tag + git stash로 체크포인트를 자동 생성한다.
 >
+> **[공식 Plan Mode 사용 시] 자동 승인 플로우:**
+> ```
+> Plan Mode로 계획 → tasks/todo.md 작성 → 사용자 Accept
+>   → 첫 Edit 시 plan-gate가 tasks/todo.md 감지 → 자동 승인 (무중단)
+>   (/approve-plan 불필요)
+> ```
+>
 > **[권장] 작업 시작 전 선승인 플로우:**
 > ```
 > tasks/todo.md 계획 작성 → /approve-plan → 작업 시작 (무중단)
@@ -286,6 +296,8 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 >
 > | 커맨드 | 언제 | 효과 |
 > |--------|------|------|
+> | `/plan-gate-on` | plan-gate 켜기 | `.claude/plan_gate_enabled` 생성 |
+> | `/plan-gate-off` | plan-gate 끄기 | `.claude/plan_gate_enabled` 삭제 |
 > | `/approve-plan` | 계획 확정 후 (시작 전 or 차단 후) | gate → approved |
 > | `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
 > | `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |

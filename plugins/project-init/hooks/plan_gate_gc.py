@@ -112,7 +112,7 @@ def main() -> int:
         pass
 
     root = lib.find_project_root()
-    if root is None or not lib.is_project_init_managed(root):
+    if root is None or not lib.is_plan_gate_enabled(root):
         return 0
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=lib.GC_MAX_AGE_DAYS)

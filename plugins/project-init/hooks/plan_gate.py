@@ -42,8 +42,8 @@ def main() -> int:
         return 0
 
     root = lib.find_project_root()
-    if root is None or not lib.is_project_init_managed(root):
-        return 0  # plan-gate 비활성화 (project-init 미관리 프로젝트)
+    if root is None or not lib.is_plan_gate_enabled(root):
+        return 0  # plan-gate 비활성화
 
     state = lib.load_state(root)
     gate = lib.current_gate(state)
@@ -59,6 +59,25 @@ def main() -> int:
             if tag:
                 gate["checkpoint_clean_tag"] = tag
         lib.set_current_gate(state, gate)
+
+        # ── Plan Mode 자동 승인: tasks/todo.md 존재 시 즉시 approved (D8) ──
+        todo_path = root / "tasks" / "todo.md"
+        try:
+            if todo_path.exists() and todo_path.read_text(encoding="utf-8", errors="ignore").strip():
+                sha, mtime = lib.hash_todo_md(root)
+                gate["state"] = "approved"
+                gate["approved_at"] = lib.now_iso()
+                gate["edit_count_post_approval"] = 0
+                gate["initial_edit_count"] = 0
+                gate["initial_unique_files"] = 0
+                gate["todo_md_sha256"] = sha
+                gate["todo_md_mtime"] = mtime
+                _print_stderr(
+                    f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
+                    f"  limit={lib.post_approval_limit(gate)} edits (scope creep 방지)\n"
+                )
+        except Exception:
+            pass
 
     # ── 세션 재진입 경고: 24시간 이상 된 approved gate 잔류 ──────────────
     if gate and gate["state"] == "approved":

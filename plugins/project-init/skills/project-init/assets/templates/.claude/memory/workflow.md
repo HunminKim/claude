@@ -75,9 +75,24 @@ verifier ❌  →  /retry         (같은 체크포인트에서 재구현)
              →  /rollback      (이번 시도 전체 폐기)
 ```
 
+### 공식 Plan Mode 사용 시
+```
+Plan Mode로 계획 작성 → tasks/todo.md 작성 → 사용자 Accept
+    → 첫 Edit 시 plan-gate가 tasks/todo.md 감지 → 자동 승인
+    (/approve-plan 불필요)
+```
+
+### plan-gate 켜기/끄기
+```
+/plan-gate-on   → .claude/plan_gate_enabled 생성, 활성화
+/plan-gate-off  → .claude/plan_gate_enabled 삭제, 비활성화
+```
+
 ### 커맨드 요약표
 | 커맨드 | 사용 시점 | 효과 |
 |--------|-----------|------|
+| `/plan-gate-on` | plan-gate 활성화 | `.claude/plan_gate_enabled` 생성 |
+| `/plan-gate-off` | plan-gate 비활성화 | `.claude/plan_gate_enabled` 삭제 |
 | `/approve-plan` | 계획 확정 후 (시작 전 or 차단 후) | gate → approved, 작업 재개 |
 | `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
 | `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |

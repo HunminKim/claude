@@ -224,6 +224,18 @@ def cmd_replan(root, state) -> int:
     return 0
 
 
+def cmd_on(root, state) -> int:
+    lib.enable_plan_gate(root)
+    _info("[plan-gate on] plan-gate 활성화됨. (.claude/plan_gate_enabled 생성)")
+    return 0
+
+
+def cmd_off(root, state) -> int:
+    lib.disable_plan_gate(root)
+    _info("[plan-gate off] plan-gate 비활성화됨. (.claude/plan_gate_enabled 삭제)")
+    return 0
+
+
 def cmd_status(root, state) -> int:
     gate = lib.current_gate(state)
     if gate is None:
@@ -251,6 +263,8 @@ COMMANDS = {
     "retry": cmd_retry,
     "replan": cmd_replan,
     "status": cmd_status,
+    "on": cmd_on,
+    "off": cmd_off,
 }
 
 
