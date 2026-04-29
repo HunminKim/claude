@@ -40,7 +40,7 @@ def main() -> int:
         return 0
 
     root = lib.find_project_root()
-    if root is None or not lib.is_project_init_managed(root):
+    if root is None or not lib.is_plan_gate_enabled(root):
         return 0
 
     action = TOKEN_TO_ACTION[prompt]

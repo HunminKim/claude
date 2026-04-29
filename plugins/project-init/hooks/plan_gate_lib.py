@@ -48,11 +48,31 @@ def find_project_root() -> Path | None:
     return None
 
 
+PLAN_GATE_FLAG = ".claude/plan_gate_enabled"
+
+
 def is_project_init_managed(root: Path) -> bool:
-    """project-init 플러그인이 초기화한 프로젝트만 plan-gate 적용한다.
-    무관한 프로젝트에 부작용을 주지 않는 가드.
-    """
+    """project-init 플러그인이 초기화한 프로젝트인지 확인 (verifier.md 기준)."""
     return (root / ".claude" / "agents" / "verifier.md").exists()
+
+
+def is_plan_gate_enabled(root: Path) -> bool:
+    """.claude/plan_gate_enabled 파일 존재 시 plan-gate 활성.
+    verifier.md와 독립적으로 on/off 가능.
+    """
+    return (root / PLAN_GATE_FLAG).exists()
+
+
+def enable_plan_gate(root: Path) -> None:
+    p = root / PLAN_GATE_FLAG
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(now_iso() + "\n")
+
+
+def disable_plan_gate(root: Path) -> None:
+    p = root / PLAN_GATE_FLAG
+    if p.exists():
+        p.unlink()
 
 
 # ── 상태 파일 입출력 ─────────────────────────────────────────────────────
