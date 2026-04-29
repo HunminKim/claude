@@ -1,0 +1,7 @@
+#!/bin/bash
+# post-checkout: git clone 후 자동으로 .githooks 를 활성화한다.
+# git config core.hooksPath .githooks 를 수동 실행하지 않아도 된다.
+
+git config core.hooksPath .githooks
+chmod +x .githooks/* 2>/dev/null
+exit 0

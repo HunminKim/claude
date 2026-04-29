@@ -82,8 +82,9 @@ CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
 └── skills/                     ← 재사용 절차 보관 디렉토리
     └── .gitkeep
 .githooks/
-├── pre-commit                  ← CLAUDE.md 린트 명령어 자동 실행
-└── pre-push                    ← scripts/validate_arch.py 실행
+├── pre-commit                  ← CLAUDE.md 린트 명령어 자동 실행 + decisions.md 보호
+├── pre-push                    ← scripts/validate_arch.py 실행
+└── post-checkout               ← clone 후 core.hooksPath 자동 설정
 docs/
 ├── plan.md                     ← 개발 계획 (Phase/Sprint 로드맵)
 ├── decisions.md                ← 설계 결정 로그 (D-번호 append-only)
@@ -233,6 +234,11 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 ### .githooks/pre-push 템플릿
 
 `assets/templates/.githooks/pre-push` 파일을 읽어 `.githooks/pre-push`로 생성한다.
+
+### .githooks/post-checkout 템플릿
+
+`assets/templates/.githooks/post-checkout` 파일을 읽어 `.githooks/post-checkout`으로 생성한다.
+`chmod +x`를 실행해 실행 권한을 부여한다.
 
 ### docs/plan.md 템플릿
 
