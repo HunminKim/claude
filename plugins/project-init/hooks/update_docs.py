@@ -204,19 +204,53 @@ try:
             _gate["state"] = "verified"
             _gate["verifier_status"] = verdict
             _pglib.save_state(_root, _state)
+            _div = "━" * 60
             if verdict == "✅":
                 print(
-                    "\n[plan-gate verified ✅] 사용자 결정 대기.\n"
-                    "  /done    — 작업 완료, 체크포인트 정리\n"
-                    "  /rollback — 체크포인트로 복원"
+                    f"\n{_div}\n"
+                    f"✅ verifier 검증 통과 — 사용자 결정 대기\n"
+                    f"{_div}\n"
+                    f"\n"
+                    f"▌ 검증 결과 요약\n"
+                    f"  feature: {feature_name}\n"
+                    f"  판정   : {verdict}\n"
+                    f"  근거   : {evidence or '(없음)'}\n"
+                    f"\n"
+                    f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
+                    f"  /done      작업 완료로 마감 (체크포인트 정리)\n"
+                    f"  /rollback  변경을 모두 되돌리고 시작점으로 복원\n"
+                    f"\n"
+                    f"▌ Claude 행동 지시\n"
+                    f"  변경 사항 핵심을 한국어로 한 단락 요약하고 위 두 옵션을\n"
+                    f"  안내한 뒤, 사용자 입력을 기다린다.\n"
+                    f"{_div}"
                 )
             else:
-                _issues_text = ", ".join(issues) if issues else "(상세 없음)"
+                _issues_text = (
+                    "\n".join(f"  • {i}" for i in issues)
+                    if issues else "  (상세 사유 없음)"
+                )
                 print(
-                    "\n[plan-gate verified ❌] 사용자 결정 대기.\n"
-                    f"  사유: {_issues_text}\n"
-                    "  /retry   — 같은 체크포인트에서 재시도\n"
-                    "  /rollback — 체크포인트로 복원"
+                    f"\n{_div}\n"
+                    f"❌ verifier 검증 실패 — 사용자 결정 대기\n"
+                    f"{_div}\n"
+                    f"\n"
+                    f"▌ 검증 결과 요약\n"
+                    f"  feature: {feature_name}\n"
+                    f"  판정   : {verdict}\n"
+                    f"\n"
+                    f"▌ 발견된 문제\n"
+                    f"{_issues_text}\n"
+                    f"\n"
+                    f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
+                    f"  /retry     같은 체크포인트에서 Claude 가 문제를 수정해 재시도\n"
+                    f"  /rollback  변경을 모두 되돌리고 처음부터 다시\n"
+                    f"\n"
+                    f"▌ Claude 행동 지시\n"
+                    f"  발견된 문제와 추정 원인을 한국어로 풀어 설명하고,\n"
+                    f"  /retry 와 /rollback 의 의미를 사용자가 결정할 수 있게 안내한다.\n"
+                    f"  추가 Edit 시도는 D1 lock 으로 차단되므로 사용자 결정 전까지 멈춘다.\n"
+                    f"{_div}"
                 )
 except Exception as _e:  # plan-gate 통합 실패는 verifier 흐름을 깨뜨리지 않는다
     print(f"[update_docs] plan-gate 통합 경고: {_e}", file=sys.stderr)
