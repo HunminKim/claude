@@ -1,0 +1,12 @@
+# 프로젝트 용어 규범 (SSOT)
+# 팀 내 용어 혼용 방지용. docs/decisions.md 와 함께 유지.
+
+terms: []
+# 예시:
+# terms:
+#   - term: "사용자"
+#     definition: "서비스에 가입한 최종 소비자 (B2C)"
+#     aliases: ["유저", "user", "member"]
+#   - term: "운영자"
+#     definition: "관리자 콘솔에 접근하는 내부 직원"
+#     aliases: ["admin", "관리자"]

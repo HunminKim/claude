@@ -1,0 +1,22 @@
+# 프로젝트 의존성·아키텍처 제약 (SSOT)
+# scripts/validate_arch.py 가 pre-push 시 이 파일을 읽어 위반 검사를 실행한다.
+# banned 목록은 validate_arch.py 가 자동으로 grep 검사한다.
+
+# 금지된 의존성 목록
+banned: []
+# 예시:
+# banned:
+#   - name: requests
+#     reason: httpx 로 통일 (async 지원)
+#   - name: pickle
+#     reason: 보안 취약점 — json/msgpack 사용
+
+# 허용된 의존성 화이트리스트 (선택사항)
+allowed: []
+
+# 아키텍처 규칙 (자유 형식 메모)
+arch_rules: []
+# 예시:
+# arch_rules:
+#   - "DB 접근은 repository 계층만 허용"
+#   - "도메인 레이어는 외부 라이브러리 import 금지"

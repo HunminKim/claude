@@ -1,6 +1,7 @@
 # CLAUDE.md — {{PROJECT_NAME}}
 
-> 코드로 파악 불가능한 것만 담는다. 상세 코드 규칙: @docs/code_rules.md
+> 코드로 파악 불가능한 것만 담는다. 코드 규칙 자동 로드: `.claude/rules/code-style.md`
+> 세션 시작 시 `.claude/memory/lessons.md` 와 `.claude/memory/workflow.md` 읽어 복습.
 > 각 줄 기준: "없으면 Claude가 실수할까?" — 아니라면 삭제.
 
 ## 프로젝트
@@ -47,7 +48,9 @@
   - 단계 누락 사고 방지 — 중간 변환·서명·검증 단계가 묵음 생략되기 쉬움
   - wrapper 스크립트가 있으면 그것만 사용 (인라인 명령 금지)
   - 모르는 단계는 추측하지 말고 사용자에게 확인
-- 사용자 교정 발생 시 `tasks/lessons.md` 업데이트 (세션 시작 시 복습)
+- 사용자 교정 발생 시 `.claude/memory/lessons.md` 업데이트 (세션 시작 시 복습)
+- 새 설계 결정·기술 선택 시 `docs/decisions.md`에 D-번호로 기록 (append-only)
+- 용어 변경·신규 도입 시 `docs/glossary.yaml` 업데이트
 - 명령 해석이 2가지 이상 가능하면: 각 해석을 나열하고 선택 요청
   - 적용 기준: 되돌리기 어려운 작업(삭제·스키마 변경·외부 전송)에 한정
   - 저위험 작업은 가장 보수적인 해석으로 바로 실행

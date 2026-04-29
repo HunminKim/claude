@@ -65,24 +65,43 @@ description: 프로젝트 초기화 스킬 — 새 프로젝트를 시작할 때
 아래 파일들을 생성한다. 이미 파일이 존재하면 덮어쓰기 전에 사용자에게 확인한다.
 
 ```
-README.md                  ← 프로젝트 소개         (기능 완료 시 업데이트)
-docs/
-├── development_plan.md    ← 개발 계획서           (개발 전 작성)
-├── context_note.md        ← 맥락 노트             (개발 전 작성)
-├── checklist.md           ← 체크리스트            (verifier가 소단위마다 업데이트)
-├── code_rules.md          ← 상세 코드 규칙         (읽기 전용, CLAUDE.md에서 @참조)
-├── technical_doc.md       ← 기술 문서             (verifier가 소단위마다 누적)
-├── completion_report.md   ← 완료 보고서           (verifier가 소단위마다 누적)
-├── deployment_guide.md    ← 배포 가이드           (개발 중 누적 → 완료 후 정리)
-└── debug/                 ← 디버깅 패치 노트
+README.md                       ← 프로젝트 소개         (기능 완료 시 업데이트)
+CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
+.claude/
+├── settings.json               ← design-precheck + PostCompact hook 등록
+├── agents/
+│   └── verifier.md             ← 기능 검증 전담 서브에이전트
+├── rules/
+│   └── code-style.md           ← 코드 스타일 규칙 (코드 파일 편집 시 자동 로드)
+├── memory/
+│   ├── lessons.md              ← 행동 교정 패턴 누적    (사용자 교정 발생 시 업데이트)
+│   └── workflow.md             ← TDD·Phase gate·위임 규칙 (읽기 전용)
+├── hooks/
+│   ├── design-precheck.py      ← 설계 키워드 감지 → 체크리스트 출력
+│   └── post-compact.py         ← /compact 후 CLAUDE.md 핵심 섹션 재주입
+└── skills/                     ← 재사용 절차 보관 디렉토리
     └── .gitkeep
-
+.githooks/
+├── pre-commit                  ← CLAUDE.md 린트 명령어 자동 실행
+└── pre-push                    ← scripts/validate_arch.py 실행
+docs/
+├── plan.md                     ← 개발 계획 (Phase/Sprint 로드맵)
+├── decisions.md                ← 설계 결정 로그 (D-번호 append-only)
+├── constraints.yaml            ← 의존성·아키텍처 제약 SSOT
+├── glossary.yaml               ← 용어 규범 SSOT
+├── context_note.md             ← 맥락 노트             (개발 전 작성)
+├── checklist.md                ← 체크리스트            (verifier가 소단위마다 업데이트)
+├── technical_doc.md            ← 기술 문서             (verifier가 소단위마다 누적)
+├── completion_report.md        ← 완료 보고서           (verifier가 소단위마다 누적)
+├── deployment_guide.md         ← 배포 가이드           (개발 중 누적 → 완료 후 정리)
+├── specs/                      ← 상세 명세 디렉토리
+│   └── .gitkeep
+└── debug/                      ← 디버깅 패치 노트
+    └── .gitkeep
 tasks/
-├── lessons.md             ← 행동 교정 패턴 누적    (사용자 교정 발생 시 업데이트)
-└── todo.md                ← 세션별 작업 계획       (복잡한 작업 시작 시 작성)
-
-.claude/agents/
-└── verifier.md            ← 기능 검증 전담 서브에이전트
+└── todo.md                     ← 세션별 작업 계획       (복잡한 작업 시작 시 작성)
+scripts/
+└── validate_arch.py            ← pre-push 아키텍처 제약 검증
 ```
 
 각 문서 파일 내용은 아래 **템플릿 섹션**을 참고한다. 프로젝트 이름, 날짜(KST 기준), 기술 스택을 템플릿에 채워 넣는다.
@@ -101,7 +120,7 @@ tasks/
 - 아키텍처 결정 및 비직관적인 주의사항
 
 **제외할 것**:
-- `docs/code_rules.md`에 이미 있는 내용 (매직넘버 금지, 하드코딩 금지, 파일 크기 제한 등) — 중복 금지
+- `.claude/rules/code-style.md`에 이미 있는 내용 (매직넘버 금지, 하드코딩 금지, 파일 크기 제한 등) — 중복 금지
 - 표준 언어 관례 (단일 책임, Early Return, 예외 처리 기본 등)
 - 코드를 읽으면 파악 가능한 구조 설명
 - "깔끔한 코드를 작성하라" 같은 자명한 원칙
@@ -130,15 +149,31 @@ tasks/
 ### 4단계: 완료 보고
 
 생성된 파일 목록을 보여주고, 사용자에게 다음을 안내한다:
-- `docs/development_plan.md` 에서 개발 계획을 채워달라고
+- `docs/plan.md` 에서 개발 계획(Phase/Sprint 로드맵)을 채워달라고
 - `docs/context_note.md` 에서 프로젝트 배경/맥락을 기록해달라고
 - 개발 시작 전에 `docs/checklist.md` 를 함께 작성하자고
+- 새 설계 결정이 생기면 `docs/decisions.md` 에 D-번호로 기록해달라고 (D-001은 초기화 시 자동 생성)
+- 용어가 확정되면 `docs/glossary.yaml` 에 추가해달라고
 
 문서 업데이트 자동화 흐름도 안내한다:
 - `technical_doc.md`, `completion_report.md`, `checklist.md` 는 @verifier가 소단위 완료마다 자동 업데이트
 - `deployment_guide.md` 는 개발 중 환경 관련 내용을 수시로 기록, 완료 후 정리
 - `README.md` 는 기능 완료 시 직접 업데이트 (새 기능·API 변경·사용법 변경 시)
 - `retrospective.md` 는 초기화 시 생성하지 않는다 — 사용자 완료 사인 후 `assets/templates/retrospective.md` 템플릿으로 생성한다
+
+**Git hook 설정 안내** (git 저장소인 경우):
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit .githooks/pre-push
+```
+- `pre-commit`: CLAUDE.md 린트 명령어 자동 실행
+- `pre-push`: `docs/constraints.yaml` 기반 아키텍처 위반 검사
+
+**4계층 규칙 분산 구조 안내**:
+- `CLAUDE.md` — 프로젝트 특화 규칙 (100줄 이내)
+- `.claude/rules/code-style.md` — 상세 코드 규칙 (코드 파일 편집 시 자동 로드)
+- `.claude/memory/lessons.md` — 교정 패턴 누적 (세션 시작 시 복습)
+- `docs/constraints.yaml` — 의존성·아키텍처 제약 SSOT
 
 그리고 아래 **개발 워크플로우**를 사용자에게 명시적으로 안내한다:
 
@@ -155,57 +190,97 @@ tasks/
 
 ## 템플릿 섹션
 
-### development_plan.md 템플릿
+### CLAUDE.md 템플릿
 
-`assets/templates/development_plan.md` 파일을 읽어 사용한다.
-
-### context_note.md 템플릿
-
-`assets/templates/context_note.md` 파일을 읽어 사용한다.
-
-### checklist.md 템플릿
-
-`assets/templates/checklist.md` 파일을 읽어 사용한다.
-
-### verifier.md 템플릿
-
-`assets/templates/agents/verifier.md` 파일을 읽어 사용한다.
-
-### code_rules.md 템플릿
-
-`assets/templates/docs/code_rules.md` 파일을 읽어 사용한다.
-
-### technical_doc.md 템플릿
-
-`assets/templates/docs/technical_doc.md` 파일을 읽어 사용한다.
-
-### completion_report.md 템플릿
-
-`assets/templates/docs/completion_report.md` 파일을 읽어 사용한다.
-
-### deployment_guide.md 템플릿
-
-`assets/templates/docs/deployment_guide.md` 파일을 읽어 사용한다.
-
-### retrospective.md 템플릿
-
-`assets/templates/docs/retrospective.md` 파일을 읽어 사용한다.
-
-### lessons.md 템플릿
-
-`assets/templates/tasks/lessons.md` 파일을 읽어 사용한다.
-
-### todo.md 템플릿
-
-`assets/templates/tasks/todo.md` 파일을 읽어 사용한다.
+`assets/templates/CLAUDE.md` 파일을 읽어 사용한다.
 
 ### README.md 템플릿
 
 `assets/templates/README.md` 파일을 읽어 사용한다.
 
-### CLAUDE.md 템플릿
+### .claude/settings.json 템플릿
 
-`assets/templates/CLAUDE.md` 파일을 읽어 사용한다.
+`assets/templates/.claude/settings.json` 파일을 읽어 `.claude/settings.json`으로 생성한다.
+
+### .claude/agents/verifier.md 템플릿
+
+`assets/templates/agents/verifier.md` 파일을 읽어 사용한다.
+
+### .claude/rules/code-style.md 템플릿
+
+`assets/templates/.claude/rules/code-style.md` 파일을 읽어 `.claude/rules/code-style.md`로 생성한다.
+
+### .claude/memory/lessons.md 템플릿
+
+`assets/templates/.claude/memory/lessons.md` 파일을 읽어 `.claude/memory/lessons.md`로 생성한다.
+
+### .claude/memory/workflow.md 템플릿
+
+`assets/templates/.claude/memory/workflow.md` 파일을 읽어 `.claude/memory/workflow.md`로 생성한다.
+
+### .claude/hooks/design-precheck.py 템플릿
+
+`assets/templates/.claude/hooks/design-precheck.py` 파일을 읽어 `.claude/hooks/design-precheck.py`로 생성한다.
+
+### .claude/hooks/post-compact.py 템플릿
+
+`assets/templates/.claude/hooks/post-compact.py` 파일을 읽어 `.claude/hooks/post-compact.py`로 생성한다.
+
+### .githooks/pre-commit 템플릿
+
+`assets/templates/.githooks/pre-commit` 파일을 읽어 `.githooks/pre-commit`으로 생성한다.
+
+### .githooks/pre-push 템플릿
+
+`assets/templates/.githooks/pre-push` 파일을 읽어 `.githooks/pre-push`로 생성한다.
+
+### docs/plan.md 템플릿
+
+`assets/templates/docs/plan.md` 파일을 읽어 사용한다.
+
+### docs/decisions.md 템플릿
+
+`assets/templates/docs/decisions.md` 파일을 읽어 사용한다.
+
+### docs/constraints.yaml 템플릿
+
+`assets/templates/docs/constraints.yaml` 파일을 읽어 사용한다.
+
+### docs/glossary.yaml 템플릿
+
+`assets/templates/docs/glossary.yaml` 파일을 읽어 사용한다.
+
+### docs/context_note.md 템플릿
+
+`assets/templates/context_note.md` 파일을 읽어 `docs/context_note.md`로 생성한다.
+
+### docs/checklist.md 템플릿
+
+`assets/templates/checklist.md` 파일을 읽어 `docs/checklist.md`로 생성한다.
+
+### docs/technical_doc.md 템플릿
+
+`assets/templates/docs/technical_doc.md` 파일을 읽어 사용한다.
+
+### docs/completion_report.md 템플릿
+
+`assets/templates/docs/completion_report.md` 파일을 읽어 사용한다.
+
+### docs/deployment_guide.md 템플릿
+
+`assets/templates/docs/deployment_guide.md` 파일을 읽어 사용한다.
+
+### docs/retrospective.md 템플릿
+
+`assets/templates/docs/retrospective.md` 파일을 읽어 사용한다.
+
+### scripts/validate_arch.py 템플릿
+
+`assets/templates/scripts/validate_arch.py` 파일을 읽어 `scripts/validate_arch.py`로 생성한다.
+
+### tasks/todo.md 템플릿
+
+`assets/templates/tasks/todo.md` 파일을 읽어 사용한다.
 
 ---
 

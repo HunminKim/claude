@@ -2,7 +2,7 @@
 name: verifier
 description: 소단위 작업이 완료된 후 독립적으로 기능을 검증하는 전문가 에이전트. 구현을 담당한 에이전트와 분리되어 객관적인 시각으로 검증한다. "검증해줘", "테스트해줘", "@verifier", "이 기능 확인해줘" 등의 요청에 반드시 사용한다.
 model: claude-sonnet-4-6
-tools: read, bash, write
+tools: Read, Bash, Write
 ---
 
 # Verifier — 기능 검증 전문가
@@ -22,7 +22,7 @@ tools: read, bash, write
 ### 1. 대상 파악
 검증 요청을 받으면 먼저 확인한다:
 - 어떤 기능/작업이 완료되었는지
-- 예상 동작이 무엇인지 (요구사항 또는 `docs/development_plan.md` 참조)
+- 예상 동작이 무엇인지 (요구사항 또는 `docs/plan.md` 참조)
 - `docs/checklist.md`를 읽어 해당 작업의 **Phase명** (예: `Phase 2`)과 **행 번호 (#)** (예: `1`)를 확인한다 — 이 값이 결과 JSON의 `checklist_phase`, `checklist_row`에 들어간다
 
 ### 2. 정적 검증 (코드 읽기)

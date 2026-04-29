@@ -1,0 +1,13 @@
+#!/bin/bash
+# pre-push: scripts/validate_arch.py 를 실행해 아키텍처 제약을 검증한다.
+# 스크립트가 없으면 스킵한다.
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+VALIDATE_SCRIPT="$PROJECT_ROOT/scripts/validate_arch.py"
+
+if [ ! -f "$VALIDATE_SCRIPT" ]; then
+    exit 0
+fi
+
+echo "[pre-push] 아키텍처 검증 실행..."
+python3 "$VALIDATE_SCRIPT" || { echo "[pre-push] 아키텍처 검증 실패. 위반 항목을 수정 후 다시 푸시하세요." >&2; exit 1; }

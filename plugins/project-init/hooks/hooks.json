@@ -1,5 +1,5 @@
 {
-  "description": "project-init plugin hooks — verifier 결과 감지 + 사용자 교정 감지",
+  "description": "project-init plugin hooks — verifier 결과 감지 + 사용자 교정 감지 (.claude/memory/lessons.md 우선, tasks/lessons.md fallback)",
   "hooks": {
     "PostToolUse": [
       {

@@ -9,7 +9,7 @@
 
 ## 아키텍처 개요
 
-> 전체 구조는 `docs/development_plan.md` 참조.
+> 전체 구조는 `docs/plan.md` 참조.
 
 ---
 

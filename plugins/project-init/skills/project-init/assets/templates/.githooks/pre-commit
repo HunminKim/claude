@@ -1,0 +1,19 @@
+#!/bin/bash
+# pre-commit: CLAUDE.md에 등록된 린트 명령어를 자동 실행한다.
+# 명령어가 없거나 # TBD 이면 스킵한다.
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+CLAUDE_MD="$PROJECT_ROOT/CLAUDE.md"
+
+if [ ! -f "$CLAUDE_MD" ]; then
+    exit 0
+fi
+
+LINT_CMD=$(grep -E "^\s*(ruff|pylint|flake8|eslint|tsc|mypy|black|isort)\b" "$CLAUDE_MD" 2>/dev/null | head -1 | sed 's/^[[:space:]]*//')
+
+if [ -z "$LINT_CMD" ]; then
+    exit 0
+fi
+
+echo "[pre-commit] 린트 실행: $LINT_CMD"
+eval "$LINT_CMD" || { echo "[pre-commit] 린트 실패. 오류를 수정 후 다시 커밋하세요." >&2; exit 1; }

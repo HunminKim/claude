@@ -2,7 +2,7 @@
 """UserPromptSubmit hook — 한국어 교정 신호 감지 시 메인 Claude에 alert.
 직접 lessons.md를 Edit하지 않는다 (4컬럼 패턴 추출은 LLM 판단 필요).
 """
-import json, re, sys
+import json, os, re, sys
 from pathlib import Path
 
 STRONG = [r"아니야", r"아니지", r"틀렸", r"잘못(됐|했|된)", r"그게\s*아니",
@@ -27,10 +27,10 @@ def main():
     if not prompt: sys.exit(0)
     level = detect(prompt)
     if not level: sys.exit(0)
-    cwd = Path.cwd()
+    project_root = Path(os.environ.get("CLAUDE_PROJECT_DIR", "."))
     lessons = None
-    for p in [cwd] + list(cwd.parents):
-        cand = p / "tasks" / "lessons.md"
+    for rel in [".claude/memory/lessons.md", "tasks/lessons.md"]:
+        cand = project_root / rel
         if cand.exists():
             lessons = cand
             break
