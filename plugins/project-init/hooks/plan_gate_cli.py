@@ -222,14 +222,20 @@ def cmd_replan(root, state) -> int:
 
 
 def cmd_on(root, state) -> int:
-    lib.enable_plan_gate(root)
-    _info("[plan-gate on] plan-gate 활성화됨. (.claude/plan_gate_enabled 생성)")
+    if lib.is_plan_gate_enabled(root):
+        _info("[plan-gate on] 이미 활성화됨.")
+    else:
+        lib.enable_plan_gate(root)
+        _info("[plan-gate on] plan-gate 활성화됨. (.claude/plan_gate_enabled 생성)")
     return 0
 
 
 def cmd_off(root, state) -> int:
-    lib.disable_plan_gate(root)
-    _info("[plan-gate off] plan-gate 비활성화됨. (.claude/plan_gate_enabled 삭제)")
+    if not lib.is_plan_gate_enabled(root):
+        _info("[plan-gate off] 이미 비활성화됨.")
+    else:
+        lib.disable_plan_gate(root)
+        _info("[plan-gate off] plan-gate 비활성화됨. (.claude/plan_gate_enabled 삭제)")
     return 0
 
 
@@ -243,6 +249,7 @@ def cmd_status(root, state) -> int:
         f"  id              = {gate['id']}\n"
         f"  state           = {gate['state']}\n"
         f"  edits           = {gate['edit_count']}\n"
+        f"  edits_approved  = {gate['edit_count_post_approval']} / {lib.post_approval_limit(gate)}\n"
         f"  unique_files    = {len(gate['unique_files'])}\n"
         f"  multi_edit_max  = {gate['multi_edit_max']}\n"
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"

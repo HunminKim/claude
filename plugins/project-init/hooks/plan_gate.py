@@ -82,14 +82,16 @@ def main() -> int:
     # ── 세션 재진입 경고: 24시간 이상 된 approved gate 잔류 ──────────────
     if gate and gate["state"] == "approved":
         try:
-            created = datetime.fromisoformat(gate.get("created_at", ""))
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - created).total_seconds() > 86400:
-                _print_stderr(
-                    f"\n[plan-gate] ⚠️  24시간 이상 된 approved gate 잔류: {gate['id']}\n"
-                    "  이전 세션에서 완료되지 않은 작업입니다. /done 또는 /rollback 으로 정리하세요.\n"
-                )
+            created_str = gate.get("created_at")
+            if created_str:
+                created = datetime.fromisoformat(created_str)
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - created).total_seconds() > 86400:
+                    _print_stderr(
+                        f"\n[plan-gate] ⚠️  24시간 이상 된 approved gate 잔류: {gate['id']}\n"
+                        "  이전 세션에서 완료되지 않은 작업입니다. /done 또는 /rollback 으로 정리하세요.\n"
+                    )
         except Exception:
             pass
 
