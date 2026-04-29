@@ -36,8 +36,8 @@ def find_claude_md() -> Path | None:
 def main():
     try:
         json.load(sys.stdin)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[post-compact] stdin 파싱 오류: {e}", file=sys.stderr)
     claude_md = find_claude_md()
     if claude_md is None:
         sys.exit(0)

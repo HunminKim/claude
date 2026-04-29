@@ -9,6 +9,16 @@ if [ ! -f "$CLAUDE_MD" ]; then
     exit 0
 fi
 
+# decisions.md append-only 보호: 줄 삭제 감지
+DECISIONS="docs/decisions.md"
+if git diff --cached --name-only | grep -q "^$DECISIONS$"; then
+    DELETED=$(git diff --cached "$DECISIONS" | grep "^-[^-]" | wc -l)
+    if [ "$DELETED" -gt 0 ]; then
+        echo "[pre-commit] 오류: $DECISIONS 에서 줄이 삭제되었습니다. append-only 파일입니다." >&2
+        exit 1
+    fi
+fi
+
 LINT_CMD=$(grep -E "^\s*(ruff|pylint|flake8|eslint|tsc|mypy|black|isort)\b" "$CLAUDE_MD" 2>/dev/null | head -1 | sed 's/^[[:space:]]*//')
 
 if [ -z "$LINT_CMD" ]; then

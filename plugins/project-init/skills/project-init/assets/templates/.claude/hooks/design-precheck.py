@@ -35,7 +35,8 @@ def find_project_root() -> Path | None:
 def main():
     try:
         data = json.load(sys.stdin)
-    except Exception:
+    except Exception as e:
+        print(f"[design-precheck] stdin 파싱 오류: {e}", file=sys.stderr)
         sys.exit(0)
     prompt = data.get("prompt", "")
     if not prompt:

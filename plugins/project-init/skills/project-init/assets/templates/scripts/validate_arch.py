@@ -37,7 +37,7 @@ def check_banned(banned: list) -> list:
             found = False
             for pattern in patterns:
                 result = subprocess.run(
-                    ["grep", "-r", "--include=*.py", pattern, str(PROJECT_ROOT)],
+                    ["grep", "-r", "--include=*.py", "--exclude-dir=scripts", pattern, str(PROJECT_ROOT)],
                     capture_output=True, text=True
                 )
                 if result.returncode == 0 and result.stdout.strip():

@@ -8,6 +8,14 @@
 # TBD — 실행 방법 미정
 ```
 
+## 개발 환경 설정
+
+```bash
+# Git hook 활성화 (최초 1회)
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit .githooks/pre-push
+```
+
 ## 기능
 
 > 구현 완료된 기능을 기록한다. 기능 완료 시 업데이트.
