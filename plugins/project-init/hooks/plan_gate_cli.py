@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
@@ -101,7 +100,7 @@ def cmd_done(root, state) -> int:
         return 0
 
     if gate["state"] == "done":
-        _info(f"[plan-gate done] 이미 완료됨.")
+        _info("[plan-gate done] 이미 완료됨.")
         return 0
 
     if gate["state"] not in ("approved", "verified"):
@@ -282,7 +281,9 @@ def main(argv: list[str]) -> int:
         _err("[plan-gate cli] 프로젝트 루트를 찾을 수 없다 (CLAUDE_PROJECT_DIR 미설정).")
         return 2
     if not lib.is_project_init_managed(root):
-        _err("[plan-gate cli] project-init으로 초기화된 프로젝트가 아니다 (.claude/agents/verifier.md 없음).")
+        _err(
+            "[plan-gate cli] project-init으로 초기화된 프로젝트가 아니다 (.claude/agents/verifier.md 없음)."
+        )
         return 2
 
     state = lib.load_state(root)

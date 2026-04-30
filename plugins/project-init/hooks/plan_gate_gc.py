@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
@@ -48,8 +48,13 @@ def gc_git_tags(root, cutoff: datetime) -> int:
     """`.claude/gate/*/clean` tag 중 30일 이상된 것 삭제."""
     if not lib.has_git(root):
         return 0
-    r = lib._git(root, "tag", "--list", f"{lib.TAG_PREFIX}*/clean",
-                 "--format=%(refname:short)|%(creatordate:iso-strict)")
+    r = lib._git(
+        root,
+        "tag",
+        "--list",
+        f"{lib.TAG_PREFIX}*/clean",
+        "--format=%(refname:short)|%(creatordate:iso-strict)",
+    )
     if r.returncode != 0:
         return 0
     removed = 0
@@ -76,7 +81,10 @@ def gc_stashes(root, cutoff: datetime) -> int:
     if not lib.has_git(root):
         return 0
     r = lib._git(
-        root, "stash", "list", "--date=iso",
+        root,
+        "stash",
+        "list",
+        "--date=iso",
         "--format=%gd|%ci|%s",
     )
     if r.returncode != 0:

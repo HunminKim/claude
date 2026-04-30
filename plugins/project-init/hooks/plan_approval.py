@@ -19,7 +19,6 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
 
-
 TOKEN_TO_ACTION = {
     "/approve-plan": "approve",
     "/done": "done",
