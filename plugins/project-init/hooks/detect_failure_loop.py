@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Bash 실행 실패를 누적 추적하여 연속 실패 루프를 감지한다.
-2회 연속 달성 시 Claude 컨텍스트에 경고를 출력한다.
+1회 실패: stdout 소프트 힌트 (exit 0).
+2회 연속: stderr 하드 경고 + exit 2 (hook error 블록으로 주입).
 """
 
 import json
@@ -41,6 +42,14 @@ def is_expired(log: dict) -> bool:
         return datetime.utcnow() - last_reset > timedelta(minutes=EXPIRY_MINUTES)
     except Exception:
         return True
+
+
+def format_soft_hint(entry: dict) -> str:
+    cmd = entry.get("command", "")[:60]
+    return (
+        f"\n[failure-loop] Bash 실패 1회 — 같은 접근 재시도 전 원인을 확인하세요.\n"
+        f"  명령: {cmd}\n"
+    )
 
 
 def format_warning(entries: list) -> str:
@@ -130,14 +139,19 @@ def main():
     log["last_reset"] = datetime.utcnow().isoformat()
     save_log(log_path, log)
 
-    # 임계값 초과 시 경고 출력
+    # 1회 실패: 소프트 힌트 (exit 0, 카운터 유지)
+    if log["consecutive_failures"] == 1:
+        print(format_soft_hint(log["entries"][-1]))
+        sys.exit(0)
+
+    # 임계값 도달: 하드 경고 + exit 2 (hook error 블록으로 주입)
     if log["consecutive_failures"] >= THRESHOLD:
-        print(format_warning(log["entries"]))
-        # 경고 후 리셋 (매 실패마다 반복 경고 방지)
+        sys.stderr.write(format_warning(log["entries"]) + "\n")
         log["consecutive_failures"] = 0
         log["entries"] = []
         log["last_reset"] = datetime.utcnow().isoformat()
         save_log(log_path, log)
+        sys.exit(2)
 
 
 if __name__ == "__main__":
