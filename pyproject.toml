@@ -5,6 +5,9 @@
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+# force-exclude: 명시 경로(`ruff format <file>`)로 호출되어도 extend-exclude를 적용.
+# .claude/hooks/ruff_check.py가 단일 파일 경로로 ruff를 호출하므로 필수.
+force-exclude = true
 extend-exclude = [
     ".claude/state",
     "plugins/*/skills/*/assets/templates",
