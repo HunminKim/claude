@@ -70,17 +70,25 @@ def main() -> int:
         )
         return 0
 
-    # ── Layer 2: 활성 세션 중 현황 안내 ─────────────────────────────────
+    # ── Layer 2: 게이트 상태 상시 표시 ──────────────────────────────────
+    # 편집 1회 이상 + 1분 이상 경과 시 항상 compact 상태 표시.
+    # 편집 직후(< 1분)는 억제해 작업 중 노이즈 방지.
     edit_count = gate.get("edit_count", 0)
-    nudge_gap = timedelta(minutes=_NUDGE_MIN_GAP_MINUTES)
-    if edit_count >= 2 and elapsed >= nudge_gap:
+    if edit_count >= 1 and elapsed >= timedelta(minutes=1):
         limit = lib.post_approval_limit(gate)
         post = gate.get("edit_count_post_approval", 0)
-        sys.stderr.write(
-            f"\n[task-boundary] 게이트 활성 중 —"
-            f" 편집 {edit_count}회 / 승인 후 {post}/{limit}\n"
-            f"  이전 작업을 마쳤다면 /done 으로 게이트를 닫으세요.\n\n"
-        )
+        auto_label = "자동" if gate.get("approved_auto") else "명시"
+        remaining = limit - post
+        if remaining <= 1:
+            sys.stderr.write(
+                f"[gate] ⚠️  approved({auto_label}) {post}/{limit}"
+                f" — 다음 편집 시 차단. /done 또는 /replan\n\n"
+            )
+        else:
+            sys.stderr.write(
+                f"[gate] approved({auto_label}) {post}/{limit}"
+                f" — 새 작업이면 /done\n\n"
+            )
 
     return 0
 
