@@ -60,25 +60,29 @@ def main() -> int:
                 gate["checkpoint_clean_tag"] = tag
         lib.set_current_gate(state, gate)
 
-        # ── Plan Mode 자동 승인: tasks/todo.md 존재 시 즉시 approved (D8) ──
+        # ── Plan Mode 자동 승인: tasks/todo.md 존재 + 품질 통과 시 즉시 approved (D8) ──
         todo_path = root / "tasks" / "todo.md"
         try:
             if (
                 todo_path.exists()
                 and todo_path.read_text(encoding="utf-8", errors="ignore").strip()
             ):
-                sha, mtime = lib.hash_todo_md(root)
-                gate["state"] = "approved"
-                gate["approved_at"] = lib.now_iso()
-                gate["edit_count_post_approval"] = 0
-                gate["initial_edit_count"] = 0
-                gate["initial_unique_files"] = 0
-                gate["todo_md_sha256"] = sha
-                gate["todo_md_mtime"] = mtime
-                _print_stderr(
-                    f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                    f"  limit={lib.post_approval_limit(gate)} edits (scope creep 방지)\n"
-                )
+                ok, issues = lib.validate_todo_quality(root)
+                if not ok:
+                    _print_stderr(lib.format_todo_quality_hint(issues))
+                else:
+                    sha, mtime = lib.hash_todo_md(root)
+                    gate["state"] = "approved"
+                    gate["approved_at"] = lib.now_iso()
+                    gate["edit_count_post_approval"] = 0
+                    gate["initial_edit_count"] = 0
+                    gate["initial_unique_files"] = 0
+                    gate["todo_md_sha256"] = sha
+                    gate["todo_md_mtime"] = mtime
+                    _print_stderr(
+                        f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
+                        f"  limit={lib.post_approval_limit(gate)} edits (scope creep 방지)\n"
+                    )
         except Exception:
             pass
 
@@ -107,6 +111,11 @@ def main() -> int:
     # ── 카운터 누적 ──────────────────────────────────────────────────────
     target = lib.extract_target_file(tool_name, tool_input)
     multi_items = lib.count_multi_edit_items(tool_name, tool_input)
+
+    # ── hot-file 경고 (세션 간 패치 누적 감지) ───────────────────────────
+    hot_level, hot_count = lib.hot_file_check(root, target)
+    if hot_level:
+        _print_stderr(lib.format_hot_file_warn(target, hot_level, hot_count))
 
     gate["edit_count"] += 1
     if gate["state"] == "approved":
