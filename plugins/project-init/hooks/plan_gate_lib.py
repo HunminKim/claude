@@ -27,7 +27,8 @@ TRIGGER_EDIT_COUNT = 3
 TRIGGER_UNIQUE_FILES = 3
 TRIGGER_MULTI_EDIT_ITEMS = 5
 APPROVED_BUFFER = 2  # initial_count + buffer
-APPROVED_MIN = 5  # 최소 임계값
+APPROVED_MIN = 5       # 명시 승인 최소 임계값
+APPROVED_AUTO_MIN = 3  # 자동 승인 최소 임계값 (더 보수적)
 GC_MAX_AGE_DAYS = 30
 
 # ── 작업 경계 타임아웃 ───────────────────────────────────────────────────
@@ -242,6 +243,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "initial_edit_count": None,
         "initial_unique_files": None,
         "approved_at": None,
+        "approved_auto": False,
         "last_edit_ts": None,
         "todo_md_sha256": None,
         "todo_md_mtime": None,
@@ -277,9 +279,12 @@ def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
 
 
 def post_approval_limit(gate: dict[str, Any]) -> int:
-    """승인 후 재차단 임계값 (D2): max(initial + buffer, MIN)."""
+    """승인 후 재차단 임계값 (D2): max(initial + buffer, MIN).
+    자동 승인(approved_auto=True)은 더 보수적인 APPROVED_AUTO_MIN 적용.
+    """
     initial = gate.get("initial_edit_count") or 0
-    return max(initial + APPROVED_BUFFER, APPROVED_MIN)
+    min_val = APPROVED_AUTO_MIN if gate.get("approved_auto") else APPROVED_MIN
+    return max(initial + APPROVED_BUFFER, min_val)
 
 
 def post_approval_limit_exceeded(gate: dict[str, Any]) -> bool:
