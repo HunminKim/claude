@@ -74,6 +74,7 @@ def main() -> int:
                     sha, mtime = lib.hash_todo_md(root)
                     gate["state"] = "approved"
                     gate["approved_at"] = lib.now_iso()
+                    gate["approved_auto"] = True
                     gate["edit_count_post_approval"] = 0
                     gate["initial_edit_count"] = 0
                     gate["initial_unique_files"] = 0
@@ -81,7 +82,8 @@ def main() -> int:
                     gate["todo_md_mtime"] = mtime
                     _print_stderr(
                         f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                        f"  limit={lib.post_approval_limit(gate)} edits (scope creep 방지)\n"
+                        f"  limit={lib.post_approval_limit(gate)} edits"
+                        f" (자동 승인 — 보수적 임계값)\n"
                     )
         except Exception:
             pass

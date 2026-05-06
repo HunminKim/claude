@@ -239,6 +239,7 @@ def cmd_status(root, state) -> int:
         f"  unique_files    = {len(gate['unique_files'])}\n"
         f"  multi_edit_max  = {gate['multi_edit_max']}\n"
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"
+        f"  approved_auto   = {'yes (보수적 limit)' if gate.get('approved_auto') else 'no (명시 승인)'}\n"
         f"  verifier_status = {gate.get('verifier_status') or '-'}\n"
         f"  clean_tag       = {gate.get('checkpoint_clean_tag') or '-'}\n"
         f"  dirty_stash     = {gate.get('checkpoint_dirty_stash_ref') or '-'}"
