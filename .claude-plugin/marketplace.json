@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "project-init",
-      "description": "프로젝트 시작 시 docs/ 구조, CLAUDE.md, verifier 서브에이전트를 자동 생성하는 초기화 스킬",
+      "description": "프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md·에이전트(verifier/frontend/backend/deeplearning)·plan-gate 자동 세팅. /harness-update — 기존 프로젝트의 하네스(에이전트·훅·워크플로우)를 최신 버전으로 업데이트 (사용자 데이터 보존).",
       "source": "./plugins/project-init",
       "category": "development"
     },
