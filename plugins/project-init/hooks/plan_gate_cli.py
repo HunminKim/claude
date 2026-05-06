@@ -44,6 +44,7 @@ def cmd_approve(root, state) -> int:
         gate["todo_md_mtime"] = mtime
         gate["state"] = "approved"
         gate["approved_at"] = lib.now_iso()
+        gate["approved_auto"] = False  # 명시 선승인 — 자동 승인 sticky 방지
         gate["initial_edit_count"] = 0
         gate["initial_unique_files"] = 0
         lib.set_current_gate(state, gate)

@@ -32,7 +32,14 @@ tools: Read, Bash, Write, Edit, MultiEdit
 
 ## 구현 절차
 
-### 1. 계획 파악
+### 1. 사전 확인 (구현 전 필수)
+```bash
+python3 .claude/plugins/project-init/hooks/plan_gate_cli.py status
+```
+- `state: approved` 확인 — approved가 아니면 구현 중단, 메인에 보고
+- `approved_auto: no` 확인 권장 — 명시 승인이어야 limit=8 적용
+
+### 2. 계획 파악
 - `tasks/todo.md` 읽기 — 프론트엔드 관련 항목 확인
 - `CLAUDE.md` 읽기 — 기술 스택, 테스트 명령어 확인
 - 연관 파일 읽기 — 기존 컴포넌트 패턴, 스타일 규칙 파악
@@ -83,6 +90,7 @@ tools: Read, Bash, Write, Edit, MultiEdit
 ## 행동 원칙
 
 - `tasks/todo.md` 범위를 넘는 구현은 하지 않는다 — scope creep 방지
-- 막히면 구현을 멈추고 메인 Claude에 보고한다 (추측으로 진행 금지)
+- **막히면 구현 즉시 중단 → 완료 보고 텍스트에 "⚠️ 중단: [이유]" 를 포함** (메인이 텍스트로 수신)
+- plan-gate가 Edit을 차단하면(exit 2) 추가 시도 없이 중단 사유를 보고에 포함한다
 - 기존 코드를 삭제하기 전에 사용처를 확인한다
 - 접근성 문제는 기능 구현과 동시에 처리한다 — 나중에 고치는 a11y는 없다

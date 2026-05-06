@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -65,11 +66,11 @@ def main() -> int:
         #       새 계획이 아닌 잔존 파일 — 자동 승인 스킵 (안티 패턴 C 방지)
         todo_path = root / "tasks" / "todo.md"
         try:
-            if (
-                todo_path.exists()
-                and todo_path.read_text(encoding="utf-8", errors="ignore").strip()
-            ):
-                current_sha, current_mtime = lib.hash_todo_md(root)
+            todo_text = todo_path.read_text(encoding="utf-8", errors="ignore") if todo_path.exists() else ""
+            if todo_text.strip():
+                # 파일을 한 번만 읽어 sha 계산 (TOCTOU 방지)
+                current_sha = hashlib.sha256(todo_text.encode()).hexdigest()
+                current_mtime = str(todo_path.stat().st_mtime)
                 prev_sha = lib.last_archived_todo_sha(root)
                 if prev_sha and current_sha == prev_sha:
                     _print_stderr(

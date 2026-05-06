@@ -555,11 +555,17 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> Non
     gate["state"] = "done"
     gate["closed_at"] = now_iso()
     # 완료 시점의 todo.md 해시를 보관 → 다음 사이클 자동 승인 가드에 활용
-    sha, _ = hash_todo_md(root)
-    gate["archived_todo_sha"] = sha
-    record_gate_closed(root, gate)
+    try:
+        sha, _ = hash_todo_md(root)
+        gate["archived_todo_sha"] = sha
+    except Exception:
+        pass
     clear_current_gate(state)
-    save_state(root, state)
+    save_state(root, state)  # 상태 저장이 patch_history 기록보다 우선
+    try:
+        record_gate_closed(root, gate)
+    except Exception:
+        pass
 
 
 def last_archived_todo_sha(root: Path) -> str | None:

@@ -32,7 +32,14 @@ tools: Read, Bash, Write, Edit, MultiEdit
 
 ## 구현 절차
 
-### 1. 계획 파악
+### 1. 사전 확인 (구현 전 필수)
+```bash
+python3 .claude/plugins/project-init/hooks/plan_gate_cli.py status
+```
+- `state: approved` 확인 — approved가 아니면 구현 중단, 메인에 보고
+- `approved_auto: no` 확인 권장 — 명시 승인이어야 limit=8 적용
+
+### 2. 계획 파악
 - `tasks/todo.md` 읽기 — ML 관련 항목 확인
 - `CLAUDE.md` 읽기 — 기술 스택(PyTorch/TF 등), 테스트 명령어, GPU 환경 확인
 - 연관 파일 읽기 — 기존 모델 구조, 데이터 형식, 평가 기준 파악
@@ -111,7 +118,8 @@ tools: Read, Bash, Write, Edit, MultiEdit
 ## 행동 원칙
 
 - `tasks/todo.md` 범위를 넘는 구현은 하지 않는다 — scope creep 방지
-- **데이터 누수는 즉시 중단 사유** — 발견 즉시 구현 멈추고 메인 Claude에 보고
+- **데이터 누수는 즉시 중단 사유** — 발견 즉시 구현 멈추고 보고
 - "일단 돌아가는" 구현보다 **재현 가능한** 구현을 우선한다
 - 성능 튜닝은 기본 파이프라인이 검증된 후에 한다 — premature optimization 금지
-- 막히면 구현을 멈추고 메인 Claude에 보고한다 (추측으로 진행 금지)
+- **막히면 구현 즉시 중단 → 완료 보고 텍스트에 "⚠️ 중단: [이유]" 를 포함** (메인이 텍스트로 수신)
+- plan-gate가 Edit을 차단하면(exit 2) 추가 시도 없이 중단 사유를 보고에 포함한다
