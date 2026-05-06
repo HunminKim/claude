@@ -553,9 +553,26 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> Non
         if actual:
             stash_drop(root, actual)
     gate["state"] = "done"
+    gate["closed_at"] = now_iso()
+    # 완료 시점의 todo.md 해시를 보관 → 다음 사이클 자동 승인 가드에 활용
+    sha, _ = hash_todo_md(root)
+    gate["archived_todo_sha"] = sha
     record_gate_closed(root, gate)
     clear_current_gate(state)
     save_state(root, state)
+
+
+def last_archived_todo_sha(root: Path) -> str | None:
+    """직전 done 사이클에서 기록한 todo.md 해시를 반환. 없으면 None."""
+    state = load_state(root)
+    done_gates = [
+        g for g in state.get("gates", {}).values()
+        if g.get("state") == "done" and g.get("archived_todo_sha")
+    ]
+    if not done_gates:
+        return None
+    latest = max(done_gates, key=lambda g: g.get("closed_at") or g.get("created_at") or "")
+    return latest.get("archived_todo_sha")
 
 
 # ── 패치 이력 (누더기 코드 방지) ─────────────────────────────────────────

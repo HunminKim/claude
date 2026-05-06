@@ -61,30 +61,39 @@ def main() -> int:
         lib.set_current_gate(state, gate)
 
         # ── Plan Mode 자동 승인: tasks/todo.md 존재 + 품질 통과 시 즉시 approved (D8) ──
+        # 가드: 직전 사이클 done 시 기록한 archived_todo_sha 와 동일하면
+        #       새 계획이 아닌 잔존 파일 — 자동 승인 스킵 (안티 패턴 C 방지)
         todo_path = root / "tasks" / "todo.md"
         try:
             if (
                 todo_path.exists()
                 and todo_path.read_text(encoding="utf-8", errors="ignore").strip()
             ):
-                ok, issues = lib.validate_todo_quality(root)
-                if not ok:
-                    _print_stderr(lib.format_todo_quality_hint(issues))
-                else:
-                    sha, mtime = lib.hash_todo_md(root)
-                    gate["state"] = "approved"
-                    gate["approved_at"] = lib.now_iso()
-                    gate["approved_auto"] = True
-                    gate["edit_count_post_approval"] = 0
-                    gate["initial_edit_count"] = 0
-                    gate["initial_unique_files"] = 0
-                    gate["todo_md_sha256"] = sha
-                    gate["todo_md_mtime"] = mtime
+                current_sha, current_mtime = lib.hash_todo_md(root)
+                prev_sha = lib.last_archived_todo_sha(root)
+                if prev_sha and current_sha == prev_sha:
                     _print_stderr(
-                        f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                        f"  limit={lib.post_approval_limit(gate)} edits"
-                        f" (자동 승인 — 보수적 임계값)\n"
+                        "\n[plan-gate] ℹ️  tasks/todo.md가 이전 사이클과 동일 → 자동 승인 스킵.\n"
+                        "  새 계획을 작성하거나 /approve-plan 으로 명시 승인하세요.\n"
                     )
+                else:
+                    ok, issues = lib.validate_todo_quality(root)
+                    if not ok:
+                        _print_stderr(lib.format_todo_quality_hint(issues))
+                    else:
+                        gate["state"] = "approved"
+                        gate["approved_at"] = lib.now_iso()
+                        gate["approved_auto"] = True
+                        gate["edit_count_post_approval"] = 0
+                        gate["initial_edit_count"] = 0
+                        gate["initial_unique_files"] = 0
+                        gate["todo_md_sha256"] = current_sha
+                        gate["todo_md_mtime"] = current_mtime
+                        _print_stderr(
+                            f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
+                            f"  limit={lib.post_approval_limit(gate)} edits"
+                            f" (자동 승인 — 보수적 임계값)\n"
+                        )
         except Exception:
             pass
 
