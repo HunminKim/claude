@@ -30,14 +30,41 @@
 
 ## 서브에이전트 전략
 
-- 조사·탐색·병렬 분석은 서브에이전트에게 위임 (메인 컨텍스트 보호)
+메인 Claude는 **오케스트레이터**다. 직접 구현은 최소화하고 전문 에이전트에게 위임한다.
+
+### 메인이 직접 처리 (위임 불필요)
+- 단일 파일, 10줄 이하의 간단한 수정
+- 설정 파일 값 변경, import 추가, 상수 정의
+- 임시 디버깅 코드, scaffold/boilerplate 생성
+- 문서 업데이트 (README, 주석)
+
+### 도메인 에이전트에게 위임 (기본 원칙)
+```
+메인: 요청 분석 → tasks/todo.md 작성 → /approve-plan → 에이전트 위임 → 결과 수신 → @verifier
+```
+
+| 작업 유형 | 위임 대상 |
+|---------|---------|
+| UI 컴포넌트, 상태 관리, 스타일링 | `@frontend` |
+| API, DB 스키마, 비즈니스 로직, 보안 | `@backend` |
+| 모델, 학습 파이프라인, 데이터 전처리 | `@deeplearning` |
+| 구현 완료 후 검증 | `@verifier` |
+
+### 위임 시 메인이 전달할 것
+1. 구현할 기능 설명
+2. 담당 파일 범위 (건드리면 안 되는 파일 포함)
+3. 완료 기준
+4. plan-gate가 approved 상태임을 명시
+
+### 제약
 - 서브에이전트 하나당 작업 하나만 할당
-- 복잡한 문제는 서브에이전트로 컴퓨팅 분산
+- `/approve-plan` 없이 구현 위임 금지
+- 위임받은 에이전트가 막히면 메인에 보고 (자체 해결 시도 금지)
 
 ## 개발 워크플로우
 
 - 코드 수정 전 `docs/technical_doc.md` 및 연관 모듈 먼저 확인 (충돌 방지)
-- **plan-gate (자동 강제)**: Edit/Write/MultiEdit이 3회 OR 영향 파일 3개 OR MultiEdit 항목 5개 이상이면 PreToolUse 훅이 자동 차단한다. `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 차단 시점에 `git tag` + `git stash`로 체크포인트 자동 생성. `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on` 으로 활성화, `/plan-gate-off` 로 비활성화).
+- **plan-gate (자동 강제)**: 동일 파일 반복 편집 3회 초과 OR 영향 파일 6개 이상 OR MultiEdit 항목 5개 이상이면 PreToolUse 훅이 자동 차단한다. `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 차단 시점에 `git tag` + `git stash`로 체크포인트 자동 생성. `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on` 으로 활성화, `/plan-gate-off` 로 비활성화).
 - 진행이 막히면 즉시 중단 → 계획 재수립 → 사용자 확인 (밀어붙이지 않음)
 - 코드 수정 후 사용자 실행 전 반드시 `@verifier` 호출 (예외 없음)
 - verifier는 단위 테스트 실행 포함 — 테스트 없이 검증 완료 불가
