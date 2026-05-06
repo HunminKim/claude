@@ -6,10 +6,10 @@ Bash 실행 실패를 누적 추적하여 연속 실패 루프를 감지한다.
 """
 
 import json
-import sys
 import os
-from pathlib import Path
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 THRESHOLD = 2
 MAX_ENTRIES = 10
@@ -27,7 +27,7 @@ def load_log(log_path: Path) -> dict:
         "consecutive_failures": 0,
         "last_reset": datetime.utcnow().isoformat(),
         "working_dir": "",
-        "entries": []
+        "entries": [],
     }
 
 
@@ -47,8 +47,7 @@ def is_expired(log: dict) -> bool:
 def format_soft_hint(entry: dict) -> str:
     cmd = entry.get("command", "")[:60]
     return (
-        f"\n[failure-loop] Bash 실패 1회 — 같은 접근 재시도 전 원인을 확인하세요.\n"
-        f"  명령: {cmd}\n"
+        f"\n[failure-loop] Bash 실패 1회 — 같은 접근 재시도 전 원인을 확인하세요.\n  명령: {cmd}\n"
     )
 
 

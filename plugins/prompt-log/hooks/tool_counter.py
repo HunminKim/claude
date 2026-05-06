@@ -40,10 +40,18 @@ def main() -> int:
         return 0  # prompt 없이 도구만 호출되는 경우 (이론상 드뭄)
 
     bucket = pl.pl_tool_bucket(tool_name)
-    tools = active.setdefault("tools", {
-        "edit": 0, "write": 0, "multi_edit": 0,
-        "bash": 0, "task": 0, "other": 0, "total": 0,
-    })
+    tools = active.setdefault(
+        "tools",
+        {
+            "edit": 0,
+            "write": 0,
+            "multi_edit": 0,
+            "bash": 0,
+            "task": 0,
+            "other": 0,
+            "total": 0,
+        },
+    )
     tools[bucket] = tools.get(bucket, 0) + 1
     tools["total"] = tools.get("total", 0) + 1
 
