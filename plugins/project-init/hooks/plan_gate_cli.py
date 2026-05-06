@@ -125,6 +125,7 @@ def cmd_done(root, state) -> int:
             lib.stash_drop(root, actual)
 
     gate["state"] = "done"
+    lib.record_gate_closed(root, gate)
     lib.clear_current_gate(state)
     lib.save_state(root, state)
     _info(f"[plan-gate done] 작업 완료. 체크포인트 정리됨: {gate['id']}")

@@ -14,10 +14,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,13 @@ TRIGGER_MULTI_EDIT_ITEMS = 5
 APPROVED_BUFFER = 2  # initial_count + buffer
 APPROVED_MIN = 5  # 최소 임계값
 GC_MAX_AGE_DAYS = 30
+
+# ── 패치 이력 임계값 ─────────────────────────────────────────────────────
+PATCH_WARN_DAYS = 14
+PATCH_WARN_THRESHOLD = 3
+PATCH_BLOCK_DAYS = 30
+PATCH_BLOCK_THRESHOLD = 5
+PATCH_MAX_ENTRIES_PER_FILE = 50
 
 GATE_STATES = {"created", "approved", "verified", "rolled_back", "done"}
 
@@ -439,7 +447,11 @@ def format_trigger_message(
         "",
         "▌ Claude 행동 지시",
         "  1. 위 변경 사항·영향 파일을 근거로 tasks/todo.md 에",
-        "     단계별 계획을 작성한다 (의도 한 줄 + 단계 체크리스트 + 예상 잔여 작업).",
+        "     다음을 포함한 계획을 작성한다:",
+        "     - 의도 한 줄 (왜 이 작업이 필요한가)",
+        "     - ## 근본 원인 (증상이 아닌 원인. 임시 수정이면 '임시 수정' 명시)",
+        "     - ## 해결 방법 (왜 이 접근 방식인가)",
+        "     - 단계별 체크리스트 (- [ ] 형식, 최소 2개)",
         "  2. 사용자에게 위 안내를 한국어로 자연스럽게 풀어 안내한다.",
         "  3. 사용자가 토큰을 입력할 때까지 추가 Edit/Write 시도하지 않는다.",
         "",
@@ -494,3 +506,139 @@ def format_scope_creep_message(gate: dict[str, Any]) -> str:
         f"  사용자가 결정할 수 있게 풀어 안내한다.\n"
         f"\n{DIVIDER}\n"
     )
+
+
+# ── 패치 이력 (누더기 코드 방지) ─────────────────────────────────────────
+
+
+def patch_history_path(root: Path) -> Path:
+    return root / ".claude" / "state" / "patch_history.json"
+
+
+def _load_patch_history(root: Path) -> dict[str, Any]:
+    p = patch_history_path(root)
+    if not p.exists():
+        return {"file_edits": {}}
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return {"file_edits": {}}
+
+
+def _save_patch_history(root: Path, history: dict[str, Any]) -> None:
+    p = patch_history_path(root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(history, ensure_ascii=False, indent=2))
+    tmp.replace(p)
+
+
+def record_gate_closed(root: Path, gate: dict[str, Any]) -> None:
+    """gate /done 시 unique_files를 patch_history에 기록."""
+    files = gate.get("unique_files") or []
+    if not files:
+        return
+    history = _load_patch_history(root)
+    ts = now_iso()
+    gate_id = gate["id"]
+    for f in files:
+        entries: list[dict[str, Any]] = history["file_edits"].setdefault(f, [])
+        entries.append({"gate_id": gate_id, "ts": ts})
+        if len(entries) > PATCH_MAX_ENTRIES_PER_FILE:
+            history["file_edits"][f] = entries[-PATCH_MAX_ENTRIES_PER_FILE:]
+    _save_patch_history(root, history)
+
+
+def hot_file_check(root: Path, file_path: str | None) -> tuple[str | None, int]:
+    """파일의 세션 간 수정 빈도 검사. 반환: ("warn"|"block"|None, count)"""
+    if not file_path:
+        return None, 0
+    history = _load_patch_history(root)
+    entries = history.get("file_edits", {}).get(file_path, [])
+    now = datetime.now(timezone.utc)
+
+    def _count(days: int) -> int:
+        cutoff = now - timedelta(days=days)
+        count = 0
+        for e in entries:
+            try:
+                ts = datetime.fromisoformat(e["ts"])
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts >= cutoff:
+                    count += 1
+            except Exception:
+                pass
+        return count
+
+    block_count = _count(PATCH_BLOCK_DAYS)
+    if block_count >= PATCH_BLOCK_THRESHOLD:
+        return "block", block_count
+
+    warn_count = _count(PATCH_WARN_DAYS)
+    if warn_count >= PATCH_WARN_THRESHOLD:
+        return "warn", warn_count
+
+    return None, 0
+
+
+def format_hot_file_warn(file_path: str, level: str, count: int) -> str:
+    short = file_path.split("/")[-1]
+    if level == "warn":
+        return (
+            f"\n[hot-file] ⚠️  {short}: 최근 {PATCH_WARN_DAYS}일 내 {count}개 작업에서 수정됨.\n"
+            f"  패치 누적 가능성 — 수정 전 리팩터링 필요 여부를 검토하세요.\n"
+        )
+    return (
+        f"\n{DIVIDER}\n"
+        f"[hot-file] 🔶 반복 수정 경고: {short}\n"
+        f"{DIVIDER}\n"
+        f"\n"
+        f"  최근 {PATCH_BLOCK_DAYS}일 내 {count}개 작업에서 수정됨.\n"
+        f"  패치가 누적되고 있을 수 있습니다.\n"
+        f"\n"
+        f"  권장 행동:\n"
+        f"  1. tasks/todo.md에 리팩터링 필요 여부 또는 반복 수정 이유를 명시\n"
+        f"  2. 밴드에이드 픽스라면 근본 원인 해결 시점을 기록\n"
+        f"  작업은 계속 진행됩니다.\n"
+        f"\n{DIVIDER}\n"
+    )
+
+
+# ── todo.md 품질 검증 ─────────────────────────────────────────────────────
+
+
+def validate_todo_quality(root: Path) -> tuple[bool, list[str]]:
+    """tasks/todo.md 최소 구조 검증. 반환: (통과 여부, 미달 항목 목록)"""
+    p = todo_md_path(root)
+    if not p.exists():
+        return False, ["tasks/todo.md 없음"]
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return False, ["tasks/todo.md 읽기 실패"]
+
+    issues: list[str] = []
+    stripped = text.strip()
+    if len(stripped) < 30:
+        issues.append(f"내용 부족 (현재 {len(stripped)}자, 최소 30자)")
+
+    checklist_count = len(re.findall(r"- \[ \]", text))
+    if checklist_count < 2:
+        issues.append(
+            f"체크리스트 항목 부족 (현재 {checklist_count}개, 최소 2개 — `- [ ]` 형식)"
+        )
+
+    return len(issues) == 0, issues
+
+
+def format_todo_quality_hint(issues: list[str]) -> str:
+    lines = ["", "[plan-gate] ⚠️  tasks/todo.md 자동 승인 보류 — 계획 보강 필요"]
+    for issue in issues:
+        lines.append(f"  - {issue}")
+    lines += [
+        "  tasks/todo.md를 보강 후 다시 편집하면 자동 승인됩니다.",
+        "  (권장: 의도 한 줄 + `- [ ]` 체크리스트 2개 이상 + 근본 원인/해결 방법)",
+        "",
+    ]
+    return "\n".join(lines)
