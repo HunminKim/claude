@@ -111,7 +111,7 @@ def main() -> int:
         return 2
 
     # ── 카운터 누적 ──────────────────────────────────────────────────────
-    target = lib.extract_target_file(tool_name, tool_input)
+    target = lib.extract_target_file(tool_name, tool_input, project_root=root)
     multi_items = lib.count_multi_edit_items(tool_name, tool_input)
 
     # ── hot-file 경고 (세션 간 패치 누적 감지) ───────────────────────────

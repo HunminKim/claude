@@ -292,12 +292,23 @@ def post_approval_limit_exceeded(gate: dict[str, Any]) -> bool:
 
 
 # ── tool input 분석 ─────────────────────────────────────────────────────
-def extract_target_file(tool_name: str, tool_input: dict[str, Any]) -> str | None:
-    if tool_name in ("Edit", "Write"):
-        return tool_input.get("file_path")
-    if tool_name == "MultiEdit":
-        return tool_input.get("file_path")
-    return None
+def extract_target_file(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    project_root: Path | None = None,
+) -> str | None:
+    if tool_name not in ("Edit", "Write", "MultiEdit"):
+        return None
+    fp = tool_input.get("file_path")
+    if not isinstance(fp, str):
+        return None
+    # 프로젝트 루트 외부 경로(메모리·설정 파일 등)는 카운터에서 제외
+    if project_root is not None:
+        try:
+            Path(fp).resolve().relative_to(project_root.resolve())
+        except (ValueError, OSError):
+            return None
+    return fp
 
 
 def count_multi_edit_items(tool_name: str, tool_input: dict[str, Any]) -> int:
@@ -455,6 +466,7 @@ def format_trigger_message(
         diff_summary,
         "",
         "▌ Claude 행동 지시",
+        "  0. 즉시 사용자에게 보고: 차단 이유·현재 상황을 한국어로 먼저 알린다.",
         "  1. 위 변경 사항·영향 파일을 근거로 tasks/todo.md 에",
         "     다음을 포함한 계획을 작성한다:",
         "     - 의도 한 줄 (왜 이 작업이 필요한가)",
@@ -487,7 +499,8 @@ def format_d1_lock_message(gate: dict[str, Any]) -> str:
         f"  /rollback  체크포인트로 복원 (이번 시도 폐기)\n"
         f"\n"
         f"▌ Claude 행동 지시\n"
-        f"  사용자에게 위 두 옵션을 한국어로 풀어 안내하고, 입력 전까지 멈춘다.\n"
+        f"  0. 즉시 사용자에게 보고: verifier 실패 이유와 두 옵션을 한국어로 먼저 알린다.\n"
+        f"  1. 사용자가 토큰을 입력할 때까지 추가 Edit/Write 시도하지 않는다.\n"
         f"\n{DIVIDER}\n"
     )
 
@@ -511,8 +524,10 @@ def format_scope_creep_message(gate: dict[str, Any]) -> str:
         f"  /rollback  체크포인트로 복원\n"
         f"\n"
         f"▌ Claude 행동 지시\n"
-        f"  현재 진행 상황을 한국어로 요약하고, 위 세 옵션의 의미를\n"
-        f"  사용자가 결정할 수 있게 풀어 안내한다.\n"
+        f"  0. 즉시 사용자에게 보고: scope 초과 상황을 한국어로 먼저 알린다.\n"
+        f"  1. 현재 진행 상황을 요약하고, 위 세 옵션의 의미를\n"
+        f"     사용자가 결정할 수 있게 풀어 안내한다.\n"
+        f"  2. 사용자가 토큰을 입력할 때까지 추가 Edit/Write 시도하지 않는다.\n"
         f"\n{DIVIDER}\n"
     )
 
