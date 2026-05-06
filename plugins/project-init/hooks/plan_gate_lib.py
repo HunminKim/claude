@@ -23,12 +23,13 @@ from pathlib import Path
 from typing import Any
 
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
-TRIGGER_EDIT_COUNT = 3
-TRIGGER_UNIQUE_FILES = 3
+# 누더기 감지: 동일 파일 반복 패치 (edit_count - unique_files)
+TRIGGER_REPEAT_RATIO = 3   # 반복 편집 수 (edit - unique) 임계값
+TRIGGER_UNIQUE_FILES = 6   # 광범위 scope (서로 다른 파일 수) 임계값
 TRIGGER_MULTI_EDIT_ITEMS = 5
 APPROVED_BUFFER = 2  # initial_count + buffer
-APPROVED_MIN = 5       # 명시 승인 최소 임계값
-APPROVED_AUTO_MIN = 3  # 자동 승인 최소 임계값 (더 보수적)
+APPROVED_MIN = 8       # 명시 승인 최소 임계값 (scope 넓은 작업 대응)
+APPROVED_AUTO_MIN = 5  # 자동 승인 최소 임계값
 GC_MAX_AGE_DAYS = 30
 
 # ── 작업 경계 타임아웃 ───────────────────────────────────────────────────
@@ -271,8 +272,9 @@ def clear_current_gate(state: dict[str, Any]) -> None:
 
 # ── 트리거 휴리스틱 (D5) ─────────────────────────────────────────────────
 def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
+    repeat = gate["edit_count"] - len(gate["unique_files"])
     return (
-        gate["edit_count"] >= TRIGGER_EDIT_COUNT
+        repeat >= TRIGGER_REPEAT_RATIO
         or len(gate["unique_files"]) >= TRIGGER_UNIQUE_FILES
         or gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS
     )
@@ -376,10 +378,14 @@ def git_diff_summary(root: Path, max_diff_lines: int = 80) -> str:
 # ── 트리거 사유 자연어화 ────────────────────────────────────────────────
 def trigger_reason_human(gate: dict[str, Any]) -> str:
     reasons = []
-    if gate["edit_count"] >= TRIGGER_EDIT_COUNT:
-        reasons.append(f"파일 편집 {gate['edit_count']}회 (임계 {TRIGGER_EDIT_COUNT})")
+    repeat = gate["edit_count"] - len(gate["unique_files"])
+    if repeat >= TRIGGER_REPEAT_RATIO:
+        reasons.append(
+            f"동일 파일 반복 편집 {repeat}회 (편집 {gate['edit_count']}회 / 파일 {len(gate['unique_files'])}개,"
+            f" 임계 {TRIGGER_REPEAT_RATIO})"
+        )
     if len(gate["unique_files"]) >= TRIGGER_UNIQUE_FILES:
-        reasons.append(f"영향 파일 {len(gate['unique_files'])}개 (임계 {TRIGGER_UNIQUE_FILES})")
+        reasons.append(f"광범위 scope — 영향 파일 {len(gate['unique_files'])}개 (임계 {TRIGGER_UNIQUE_FILES})")
     if gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS:
         reasons.append(
             f"단일 MultiEdit {gate['multi_edit_max']}개 항목 (임계 {TRIGGER_MULTI_EDIT_ITEMS})"
@@ -410,20 +416,20 @@ def _intro_block() -> str:
         "  /rollback 으로 안전하게 되돌릴 수 있습니다.\n"
         "  비활성화: .claude/agents/verifier.md 를 삭제하면 plan-gate 가 꺼집니다.\n"
         "  임계값 조정: plugins/project-init/hooks/plan_gate_lib.py 상수\n"
-        "              (TRIGGER_EDIT_COUNT 등) 를 수정하세요.\n"
+        "              (TRIGGER_REPEAT_RATIO, TRIGGER_UNIQUE_FILES 등) 를 수정하세요.\n"
         "  이 안내는 한 번만 표시됩니다.\n"
     )
 
 
 def format_soft_hint(gate: dict[str, Any]) -> str:
-    """edits=2 시점의 부드러운 경고 (차단 X)."""
+    """트리거 직전 부드러운 경고 (차단 X)."""
+    repeat = gate["edit_count"] - len(gate["unique_files"])
     return (
         f"\n{DIVIDER}\n"
         f"⚠️  plan-gate 임박\n"
         f"{DIVIDER}\n"
-        f"현재까지 {gate['edit_count']}회 편집 / "
-        f"{len(gate['unique_files'])}개 파일.\n"
-        f"다음 편집이 plan-gate(임계 {TRIGGER_EDIT_COUNT}회) 를 발동시킬 수 있습니다.\n"
+        f"현재까지 {gate['edit_count']}회 편집 / {len(gate['unique_files'])}개 파일"
+        f" (반복 편집 {repeat}회).\n"
         f"큰 작업이라면 미리 tasks/todo.md 에 계획을 작성해두는 것이 좋습니다.\n"
         f"{DIVIDER}\n"
     )

@@ -129,13 +129,14 @@ def main() -> int:
         gate["multi_edit_max"] = multi_items
 
     # ── soft hint (트리거 직전) ─────────────────────────────────────────
-    # created 상태에서 임계값 바로 아래(2회 또는 2파일)면 부드러운 경고만 출력.
-    # 차단 X. 사용자가 큰 작업이라면 미리 todo.md 작성하도록 유도.
+    # created 상태에서 트리거 임박 시 부드러운 경고만 출력 (차단 X).
+    # 반복 편집이 임계-1 이거나 파일 scope가 임계-1 이면 경고.
+    _repeat = gate["edit_count"] - len(gate["unique_files"])
     if (
         gate["state"] == "created"
         and not lib.trigger_threshold_exceeded(gate)
         and (
-            gate["edit_count"] == lib.TRIGGER_EDIT_COUNT - 1
+            _repeat == lib.TRIGGER_REPEAT_RATIO - 1
             or len(gate["unique_files"]) == lib.TRIGGER_UNIQUE_FILES - 1
         )
     ):
