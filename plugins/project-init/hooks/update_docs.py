@@ -43,6 +43,7 @@ timestamp = result.get("timestamp", "")
 verdict = result.get("verdict", "❓")
 test_items = result.get("test_items", [])
 issues = result.get("issues", [])
+code_smells = result.get("code_smells", [])
 critical_constraints = result.get("critical_constraints", [])
 evidence = result.get("evidence", "")
 impl = result.get("implementation", {})
@@ -106,6 +107,10 @@ if report_path.exists():
     test_rows = "\n".join(
         f"| {t['item']} | {t['result']} | {t.get('note', '')} |" for t in test_items
     )
+    smells_section = ""
+    if code_smells:
+        smells_lines = "\n".join(f"- {s}" for s in code_smells)
+        smells_section = f"\n**설계 냄새 (CODE_SMELL)**\n{smells_lines}\n"
     section = f"""
 ### {feature_name} — {timestamp}
 **판정**: {verdict}
@@ -116,7 +121,7 @@ if report_path.exists():
 {test_rows}
 
 **발견된 문제**: {issues_text}
-
+{smells_section}
 **검증 근거**: {evidence}
 
 ---"""
@@ -206,6 +211,12 @@ try:
             _pglib.save_state(_root, _state)
             _div = "━" * 60
             if verdict == "✅":
+                _smells_block = ""
+                if code_smells:
+                    _smells_lines = "\n".join(f"  • {s}" for s in code_smells)
+                    _smells_block = (
+                        f"\n▌ 설계 냄새 (판정 영향 없음 — 관찰 기록)\n{_smells_lines}\n"
+                    )
                 print(
                     f"\n{_div}\n"
                     f"✅ verifier 검증 통과 — 사용자 결정 대기\n"
@@ -215,6 +226,7 @@ try:
                     f"  feature: {feature_name}\n"
                     f"  판정   : {verdict}\n"
                     f"  근거   : {evidence or '(없음)'}\n"
+                    f"{_smells_block}"
                     f"\n"
                     f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
                     f"  /done      작업 완료로 마감 (체크포인트 정리)\n"
