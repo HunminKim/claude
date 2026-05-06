@@ -30,6 +30,9 @@ APPROVED_BUFFER = 2  # initial_count + buffer
 APPROVED_MIN = 5  # 최소 임계값
 GC_MAX_AGE_DAYS = 30
 
+# ── 작업 경계 타임아웃 ───────────────────────────────────────────────────
+BOUNDARY_TIMEOUT_MINUTES = 120  # 마지막 편집으로부터 이 시간 이상 경과 시 자동 done
+
 # ── 패치 이력 임계값 ─────────────────────────────────────────────────────
 PATCH_WARN_DAYS = 14
 PATCH_WARN_THRESHOLD = 3
@@ -239,6 +242,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "initial_edit_count": None,
         "initial_unique_files": None,
         "approved_at": None,
+        "last_edit_ts": None,
         "todo_md_sha256": None,
         "todo_md_mtime": None,
         "checkpoint_clean_tag": None,
@@ -506,6 +510,26 @@ def format_scope_creep_message(gate: dict[str, Any]) -> str:
         f"  사용자가 결정할 수 있게 풀어 안내한다.\n"
         f"\n{DIVIDER}\n"
     )
+
+
+# ── gate done 공통 로직 ──────────────────────────────────────────────────
+
+
+def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> None:
+    """gate를 done 상태로 닫고 체크포인트를 정리한다.
+    plan_gate_cli.cmd_done 과 detect_task_boundary 에서 공유.
+    """
+    tag = gate.get("checkpoint_clean_tag")
+    if tag:
+        delete_tag(root, tag)
+    if gate.get("checkpoint_dirty_stash_ref"):
+        actual = find_stash_for_gate(root, gate["id"])
+        if actual:
+            stash_drop(root, actual)
+    gate["state"] = "done"
+    record_gate_closed(root, gate)
+    clear_current_gate(state)
+    save_state(root, state)
 
 
 # ── 패치 이력 (누더기 코드 방지) ─────────────────────────────────────────

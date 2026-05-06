@@ -113,21 +113,7 @@ def cmd_done(root, state) -> int:
             "  승인된 계획 범위를 초과한 작업이 포함됩니다. 의도된 경우 계속 진행하세요."
         )
 
-    # 체크포인트 정리: clean tag 삭제 + stash drop
-    tag = gate.get("checkpoint_clean_tag")
-    if tag:
-        lib.delete_tag(root, tag)
-    stash_ref = gate.get("checkpoint_dirty_stash_ref")
-    if stash_ref:
-        # gate_id가 message에 있으니 정확히 찾아 제거
-        actual = lib.find_stash_for_gate(root, gate["id"])
-        if actual:
-            lib.stash_drop(root, actual)
-
-    gate["state"] = "done"
-    lib.record_gate_closed(root, gate)
-    lib.clear_current_gate(state)
-    lib.save_state(root, state)
+    lib.do_gate_done(root, state, gate)
     _info(f"[plan-gate done] 작업 완료. 체크포인트 정리됨: {gate['id']}")
     return 0
 

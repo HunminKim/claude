@@ -118,6 +118,7 @@ def main() -> int:
         _print_stderr(lib.format_hot_file_warn(target, hot_level, hot_count))
 
     gate["edit_count"] += 1
+    gate["last_edit_ts"] = lib.now_iso()
     if gate["state"] == "approved":
         gate["edit_count_post_approval"] += 1
     if target and target not in gate["unique_files"]:
