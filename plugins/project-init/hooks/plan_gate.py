@@ -63,7 +63,10 @@ def main() -> int:
         # ── Plan Mode 자동 승인: tasks/todo.md 존재 시 즉시 approved (D8) ──
         todo_path = root / "tasks" / "todo.md"
         try:
-            if todo_path.exists() and todo_path.read_text(encoding="utf-8", errors="ignore").strip():
+            if (
+                todo_path.exists()
+                and todo_path.read_text(encoding="utf-8", errors="ignore").strip()
+            ):
                 sha, mtime = lib.hash_todo_md(root)
                 gate["state"] = "approved"
                 gate["approved_at"] = lib.now_iso()

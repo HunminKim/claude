@@ -17,7 +17,7 @@ import os
 import subprocess
 import time
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,8 @@ from typing import Any
 TRIGGER_EDIT_COUNT = 3
 TRIGGER_UNIQUE_FILES = 3
 TRIGGER_MULTI_EDIT_ITEMS = 5
-APPROVED_BUFFER = 2     # initial_count + buffer
-APPROVED_MIN = 5        # 최소 임계값
+APPROVED_BUFFER = 2  # initial_count + buffer
+APPROVED_MIN = 5  # 최소 임계값
 GC_MAX_AGE_DAYS = 30
 
 GATE_STATES = {"created", "approved", "verified", "rolled_back", "done"}
@@ -351,13 +351,10 @@ def trigger_reason_human(gate: dict[str, Any]) -> str:
     if gate["edit_count"] >= TRIGGER_EDIT_COUNT:
         reasons.append(f"파일 편집 {gate['edit_count']}회 (임계 {TRIGGER_EDIT_COUNT})")
     if len(gate["unique_files"]) >= TRIGGER_UNIQUE_FILES:
-        reasons.append(
-            f"영향 파일 {len(gate['unique_files'])}개 (임계 {TRIGGER_UNIQUE_FILES})"
-        )
+        reasons.append(f"영향 파일 {len(gate['unique_files'])}개 (임계 {TRIGGER_UNIQUE_FILES})")
     if gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS:
         reasons.append(
-            f"단일 MultiEdit {gate['multi_edit_max']}개 항목 "
-            f"(임계 {TRIGGER_MULTI_EDIT_ITEMS})"
+            f"단일 MultiEdit {gate['multi_edit_max']}개 항목 (임계 {TRIGGER_MULTI_EDIT_ITEMS})"
         )
     return " / ".join(reasons) or "임계값 도달"
 
@@ -421,7 +418,7 @@ def format_trigger_message(
         "",
         "▌ 지금까지 한 일",
         f"  • 파일 편집 {gate['edit_count']}회 / 영향 파일 {len(gate['unique_files'])}개",
-        f"  • 영향 파일 목록:",
+        "  • 영향 파일 목록:",
         _files_list(gate),
     ]
     if gate["multi_edit_max"] > 0:

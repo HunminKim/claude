@@ -26,12 +26,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 # ── [prompt-log] paths ──────────────────────────────────────────────────
-PL_GLOBAL_DIRNAME = "prompt-log"             # ~/.claude/prompt-log/
-PL_PROJECT_MARKER = "prompt-log-consent"     # <project>/.claude/prompt-log-consent
+PL_GLOBAL_DIRNAME = "prompt-log"  # ~/.claude/prompt-log/
+PL_PROJECT_MARKER = "prompt-log-consent"  # <project>/.claude/prompt-log-consent
 PL_ALLOWED_FILE = "projects-allowed.json"
-PL_ACTIVE_FILE = "prompt-log-active.json"    # <project>/.claude/state/prompt-log-active.json
+PL_ACTIVE_FILE = "prompt-log-active.json"  # <project>/.claude/state/prompt-log-active.json
 
 
 def pl_home() -> Path:
@@ -112,11 +111,13 @@ def pl_grant_consent(project_root: Path) -> None:
     abs_path = str(project_root.resolve())
     allowed = pl_load_allowed()
     if not any(e.get("abs_path") == abs_path for e in allowed):
-        allowed.append({
-            "abs_path": abs_path,
-            "project_name": project_root.name,
-            "consent_at": pl_now_iso(),
-        })
+        allowed.append(
+            {
+                "abs_path": abs_path,
+                "project_name": project_root.name,
+                "consent_at": pl_now_iso(),
+            }
+        )
         pl_save_allowed(allowed)
 
 
@@ -133,13 +134,11 @@ PL_SANITIZE_PATTERNS = [
     (re.compile(r"AKIA[0-9A-Z]{16}"), "[REDACTED:aws_access_key]"),
     # 40자 base64 패턴 제거 — Git SHA·hex hash 등 정상 텍스트 오탐 심각
     # JWT
-    (re.compile(r"eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
-     "[REDACTED:jwt]"),
+    (re.compile(r"eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"), "[REDACTED:jwt]"),
     # URL with credentials
     (re.compile(r"https?://[^\s:]+:[^\s@]+@"), "https://[REDACTED:url_creds]@"),
     # Email
-    (re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
-     "[REDACTED:email]"),
+    (re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"), "[REDACTED:email]"),
 ]
 
 
@@ -179,7 +178,11 @@ def pl_clear_active(project_root: Path) -> None:
 
 # ── [prompt-log] schema / store ──────────────────────────────────────────
 PL_TOKEN_SET = {
-    "/approve-plan", "/done", "/rollback", "/retry", "/replan",
+    "/approve-plan",
+    "/done",
+    "/rollback",
+    "/retry",
+    "/replan",
 }
 
 
@@ -201,8 +204,9 @@ def pl_project_meta(project_root: Path) -> dict[str, Any]:
     }
 
 
-def pl_make_active_record(project_root: Path, prompt_text: str,
-                          session_id: str | None) -> dict[str, Any]:
+def pl_make_active_record(
+    project_root: Path, prompt_text: str, session_id: str | None
+) -> dict[str, Any]:
     sanitized = pl_sanitize(prompt_text or "")
     is_token = sanitized.strip() in PL_TOKEN_SET
     return {
@@ -218,17 +222,21 @@ def pl_make_active_record(project_root: Path, prompt_text: str,
             "token_value": sanitized.strip() if is_token else None,
         },
         "tools": {
-            "edit": 0, "write": 0, "multi_edit": 0,
-            "bash": 0, "task": 0, "other": 0, "total": 0,
+            "edit": 0,
+            "write": 0,
+            "multi_edit": 0,
+            "bash": 0,
+            "task": 0,
+            "other": 0,
+            "total": 0,
         },
         "files": {"unique": []},
-        "plan_gate": None,            # session_finalize에서 채움
+        "plan_gate": None,  # session_finalize에서 채움
         "outcome": {"ended_by": None, "duration_sec": None},
     }
 
 
-def pl_finalize_record(active: dict[str, Any], project_root: Path,
-                       ended_by: str) -> dict[str, Any]:
+def pl_finalize_record(active: dict[str, Any], project_root: Path, ended_by: str) -> dict[str, Any]:
     """active record를 final record로 변환 (flush 직전)."""
     ts_end = pl_now_iso()
     # duration 계산

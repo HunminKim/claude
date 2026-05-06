@@ -1,0 +1,26 @@
+# Claude Code 플러그인 마켓플레이스 — Python 품질 설정.
+# 모든 훅은 표준 라이브러리만 사용 (외부 의존 없음).
+# 첫 도입 시 누더기 PR 방지를 위해 보수적 셀렉션.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+# force-exclude: 명시 경로(`ruff format <file>`)로 호출되어도 extend-exclude를 적용.
+# .claude/hooks/ruff_check.py가 단일 파일 경로로 ruff를 호출하므로 필수.
+force-exclude = true
+extend-exclude = [
+    ".claude/state",
+    "plugins/*/skills/*/assets/templates",
+]
+
+[tool.ruff.lint]
+# E/W = pycodestyle, F = pyflakes, I = isort, B = flake8-bugbear
+select = ["E", "W", "F", "I", "B"]
+ignore = ["E501"]  # 한국어 긴 메시지 잔존
+
+[tool.ruff.lint.per-file-ignores]
+"plugins/*/hooks/*.py" = ["E402"]
+".claude/hooks/*.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["plan_gate_lib", "prompt_log_lib"]

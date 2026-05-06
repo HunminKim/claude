@@ -1,6 +1,9 @@
 # verifier 임시 결과 파일 (훅이 처리 후 자동 삭제)
 .verifier_result.json
 
+# 훅 상태 (사용자별 flag 파일 — ruff_warned, plan_gate_intro_seen 등)
+.claude/state/
+
 # OS
 .DS_Store
 Thumbs.db
