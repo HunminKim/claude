@@ -81,6 +81,7 @@ def cmd_approve(root, state) -> int:
 
     gate["state"] = "approved"
     gate["approved_at"] = lib.now_iso()
+    gate["approved_auto"] = False  # 명시 승인 — 자동 승인 sticky 해제
     gate["edit_count_post_approval"] = 0
     if gate.get("initial_edit_count") is None:
         gate["initial_edit_count"] = gate["edit_count"]
@@ -186,6 +187,7 @@ def cmd_replan(root, state) -> int:
 
     # 체크포인트 유지, 카운터/상태만 리셋 → tasks/todo.md 다시 작성하고 /approve-plan
     gate["state"] = "created"
+    gate["approved_auto"] = False  # 명시 재승인 대기 — 자동 승인 sticky 해제
     gate["edit_count"] = 0
     gate["edit_count_post_approval"] = 0
     gate["unique_files"] = []
