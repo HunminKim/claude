@@ -22,6 +22,8 @@ import plan_gate_lib as lib  # noqa: E402
 TOKEN_TO_ACTION = {
     "/approve-plan": "approve",
     "/done": "done",
+    "/skip": "skip",
+    "/keep": "skip",   # /skip의 별칭 — 동일하게 동작, 자동완성에는 /skip만 노출
     "/rollback": "rollback",
     "/retry": "retry",
     "/replan": "replan",

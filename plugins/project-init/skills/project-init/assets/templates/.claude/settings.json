@@ -1,4 +1,17 @@
 {
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Bash(pytest *)",
+      "Bash(python -m pytest *)",
+      "Bash(npm test *)",
+      "Bash(npm run test *)",
+      "Bash(yarn test *)",
+      "Bash(cargo test *)",
+      "Bash(go test *)",
+      "Bash(make test *)"
+    ]
+  },
   "hooks": {
     "UserPromptSubmit": [
       {

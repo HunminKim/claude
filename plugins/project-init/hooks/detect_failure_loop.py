@@ -5,6 +5,8 @@ Bash 실행 실패를 누적 추적하여 연속 실패 루프를 감지한다.
 2회 연속: stderr 하드 경고 + exit 2 (hook error 블록으로 주입).
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys

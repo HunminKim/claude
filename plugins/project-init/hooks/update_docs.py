@@ -8,6 +8,7 @@ verifier가 docs/.verifier_result.json 을 생성하면
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -76,9 +77,11 @@ if checklist_path.exists():
                     updated = True
                     break
     else:
-        # fallback: feature_name 텍스트 매칭
+        # fallback: feature_name을 독립 셀로 정확히 매칭 (부분 일치 오탐 방지)
+        # "login" 검색이 "admin login" 행에 잘못 걸리지 않도록 셀 경계를 확인한다.
+        _cell_pat = re.compile(r"\|\s*" + re.escape(feature_name) + r"\s*\|")
         for i, line in enumerate(lines):
-            if feature_name in line and "|" in line:
+            if _cell_pat.search(line):
                 parts = line.split("|")
                 if len(parts) >= 5:
                     parts[3] = f" {verdict} "
@@ -126,9 +129,17 @@ if report_path.exists():
 
 ---"""
 
-    content += section
-    report_path.write_text(content)
-    print(f"[update_docs] completion_report.md 업데이트 완료: {feature_name}")
+    # 동일 feature+timestamp 섹션이 이미 있으면 (재검증 반복) 건너뜀
+    _section_key = f"### {feature_name} — {timestamp}"
+    if _section_key in content:
+        print(
+            f"[update_docs] completion_report.md 이미 등록됨: '{feature_name}', 건너뜀",
+            file=sys.stderr,
+        )
+    else:
+        content += section
+        report_path.write_text(content)
+        print(f"[update_docs] completion_report.md 업데이트 완료: {feature_name}")
 
 # ── technical_doc.md 업데이트 ─────────────────────────────────────────────
 tech_path = docs_dir / "technical_doc.md"
@@ -241,6 +252,12 @@ try:
                 _issues_text = (
                     "\n".join(f"  • {i}" for i in issues) if issues else "  (상세 사유 없음)"
                 )
+                _has_ckpt = bool(_gate.get("checkpoint_clean_tag"))
+                _rollback_line = (
+                    "  /rollback  변경을 모두 되돌리고 처음부터 다시\n"
+                    if _has_ckpt
+                    else "  /rollback  ⚠️  체크포인트 없음 — 사용 불가 (/skip 또는 /done 권장)\n"
+                )
                 print(
                     f"\n{_div}\n"
                     f"❌ verifier 검증 실패 — 사용자 결정 대기\n"
@@ -255,11 +272,13 @@ try:
                     f"\n"
                     f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
                     f"  /retry     같은 체크포인트에서 Claude 가 문제를 수정해 재시도\n"
-                    f"  /rollback  변경을 모두 되돌리고 처음부터 다시\n"
+                    f"  /skip      현재 상태 보존하며 gate 마감 (문제 인지 후 유지)\n"
+                    f"  /done      현재 상태 보존하며 gate 마감 (/skip 과 동일)\n"
+                    f"{_rollback_line}"
                     f"\n"
                     f"▌ Claude 행동 지시\n"
                     f"  발견된 문제와 추정 원인을 한국어로 풀어 설명하고,\n"
-                    f"  /retry 와 /rollback 의 의미를 사용자가 결정할 수 있게 안내한다.\n"
+                    f"  네 가지 선택지의 의미를 사용자가 결정할 수 있게 안내한다.\n"
                     f"  추가 Edit 시도는 D1 lock 으로 차단되므로 사용자 결정 전까지 멈춘다.\n"
                     f"{_div}"
                 )

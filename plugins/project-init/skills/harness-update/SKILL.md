@@ -43,20 +43,24 @@ plan-gate가 활성 상태이면:
 
 | 프로젝트 내 경로 | 템플릿 경로 | 처리 방식 |
 |---------------|-----------|---------|
-| `.claude/agents/verifier.md` | `agents/verifier.md` | 항상 업데이트 |
-| `.claude/agents/frontend.md` | `agents/frontend.md` | 항상 업데이트 (없으면 신규 생성) |
-| `.claude/agents/backend.md` | `agents/backend.md` | 항상 업데이트 (없으면 신규 생성) |
-| `.claude/agents/deeplearning.md` | `agents/deeplearning.md` | 항상 업데이트 (없으면 신규 생성) |
-| `.claude/memory/workflow.md` | `.claude/memory/workflow.md` | 항상 업데이트 (읽기 전용 규칙) |
-| `.claude/hooks/design-precheck.py` | `.claude/hooks/design-precheck.py` | 항상 업데이트 |
-| `.claude/hooks/post-compact.py` | `.claude/hooks/post-compact.py` | 항상 업데이트 |
-| `.claude/hooks/cleanup_suggest.py` | `.claude/hooks/cleanup_suggest.py` | 항상 업데이트 |
-| `.githooks/pre-commit` | `.githooks/pre-commit` | 항상 업데이트 |
-| `.githooks/pre-push` | `.githooks/pre-push` | 항상 업데이트 |
-| `.githooks/post-checkout` | `.githooks/post-checkout` | 항상 업데이트 |
-| `scripts/validate_arch.py` | `scripts/validate_arch.py` | 항상 업데이트 |
-| `.claude/settings.json` | `.claude/settings.json` | diff 후 사용자 결정 |
-| `.claude/rules/code-style.md` | `.claude/rules/code-style.md` | diff 후 사용자 결정 |
+| `.claude/agents/verifier.md` | `agents/verifier.md` | diff 확인 후 업데이트 |
+| `.claude/agents/frontend.md` | `agents/frontend.md` | diff 확인 후 업데이트 (없으면 신규 생성) |
+| `.claude/agents/backend.md` | `agents/backend.md` | diff 확인 후 업데이트 (없으면 신규 생성) |
+| `.claude/agents/deeplearning.md` | `agents/deeplearning.md` | diff 확인 후 업데이트 (없으면 신규 생성) |
+| `.claude/memory/workflow.md` | `.claude/memory/workflow.md` | 항상 업데이트 (읽기 전용 규칙 — 사용자 편집 불가) |
+| `.claude/hooks/design-precheck.py` | `.claude/hooks/design-precheck.py` | diff 확인 후 업데이트 |
+| `.claude/hooks/post-compact.py` | `.claude/hooks/post-compact.py` | diff 확인 후 업데이트 |
+| `.claude/hooks/cleanup_suggest.py` | `.claude/hooks/cleanup_suggest.py` | diff 확인 후 업데이트 |
+| `.githooks/pre-commit` | `.githooks/pre-commit` | diff 확인 후 업데이트 |
+| `.githooks/pre-push` | `.githooks/pre-push` | diff 확인 후 업데이트 |
+| `.githooks/post-checkout` | `.githooks/post-checkout` | diff 확인 후 업데이트 |
+| `scripts/validate_arch.py` | `scripts/validate_arch.py` | diff 확인 후 업데이트 |
+| `.claude/settings.json` | `.claude/settings.json` | diff 확인 후 업데이트 |
+| `.claude/rules/code-style.md` | `.claude/rules/code-style.md` | diff 확인 후 업데이트 |
+
+> **처리 방식 설명**
+> - **diff 확인 후 업데이트**: 현재 파일과 새 템플릿을 비교한다. 내용이 같으면 "(변경 없음)" 으로 스킵한다. 다르면 3단계 보고에서 "사용자 결정 필요" 로 분류한다.
+> - **항상 업데이트**: 사용자 커스텀이 불가능한 읽기 전용 파일만 해당한다. 현재는 `workflow.md` 하나뿐이다.
 
 #### 절대 건드리지 않는 파일
 
@@ -113,18 +117,24 @@ tasks/                       ← 현재 작업 계획
 
 ### 5단계: 업데이트 실행
 
-#### 5-1. "항상 업데이트" 파일
-템플릿 내용을 그대로 덮어쓴다. 단, `{{PROJECT_NAME}}` 등 자리표시자가
-있는 파일은 덮어쓰지 않는다 (agents/*, hooks/*, scripts/* 는 자리표시자 없음).
+#### 5-1. "diff 확인 후 업데이트" 파일
 
-#### 5-2. "사용자 결정 필요" 파일 (settings.json, code-style.md)
-파일별로 현재 내용과 템플릿의 diff를 보여주고:
-```
-이 파일을 업데이트할까요?
-  y — 템플릿으로 덮어쓰기
-  n — 건너뛰기
-  d — 상세 diff 보기
-```
+파일별로 현재 내용과 새 템플릿을 비교한다.
+
+- **현재 파일 == 새 템플릿**: 변경 없음, 조용히 스킵 (사용자 확인 불필요)
+- **현재 파일 ≠ 새 템플릿**: diff를 보여주고 사용자에게 결정을 요청:
+  ```
+  이 파일을 업데이트할까요? (.claude/agents/verifier.md)
+    y — 템플릿으로 덮어쓰기  (커스텀 내용은 사라짐)
+    n — 건너뛰기
+    d — 상세 diff 보기
+  ```
+  사용자가 `n` 을 선택하면 해당 파일은 보존한다.
+
+`workflow.md`는 예외로 사용자 확인 없이 항상 덮어쓴다 (읽기 전용 규칙 파일).
+
+#### 5-2. 신규 파일 (없던 에이전트·훅)
+존재하지 않으면 비교 없이 바로 생성한다 (기존 내용이 없으므로 확인 불필요).
 
 #### 5-3. `.githooks/` 업데이트 후
 실행 권한이 있는 파일은 `chmod +x`를 실행한다:
@@ -132,8 +142,11 @@ tasks/                       ← 현재 작업 계획
 chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ```
 
-#### 5-4. 신규 에이전트 파일
-없던 에이전트 파일은 확인 없이 생성한다 (새 파일이므로 기존 내용 없음).
+#### 5-4. chmod 처리
+`.githooks/` 업데이트 후 실행 권한 부여:
+```bash
+chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
+```
 
 ### 6단계: 완료 보고
 
@@ -171,9 +184,10 @@ plan-gate를 다시 활성화하려면: /plan-gate-on
 
 ## 주의사항
 
-- `workflow.md`는 읽기 전용 규칙 파일이므로 템플릿으로 항상 덮어쓴다.
+- `workflow.md`는 읽기 전용 규칙 파일이므로 사용자 확인 없이 항상 덮어쓴다.
   사용자 커스텀 규칙은 `CLAUDE.md` 또는 `.claude/rules/` 에 넣는 것이 올바른 위치다.
-- 에이전트 파일 업데이트 시 기존 에이전트 파일의 커스텀 내용은 사라진다.
-  에이전트를 커스터마이징했다면 업데이트 전에 백업하거나 병합을 수동으로 진행한다.
+- 에이전트·훅·스크립트 파일은 모두 diff 확인 후 업데이트한다. 현재 파일과 새 템플릿이
+  다를 경우 사용자에게 덮어쓰기 여부를 확인한 뒤 진행한다.
+  커스텀 내용이 있으면 `n` 을 선택해 보존하고 수동으로 병합한다.
 - 이 스킬은 project-init이 설치한 하네스 파일만 업데이트한다.
   프로젝트가 직접 추가한 훅·에이전트는 건드리지 않는다.
