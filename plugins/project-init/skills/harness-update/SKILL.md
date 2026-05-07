@@ -48,6 +48,7 @@ plan-gate가 활성 상태이면:
 | `.claude/agents/backend.md` | `agents/backend.md` | diff 확인 후 업데이트 (없으면 신규 생성) |
 | `.claude/agents/deeplearning.md` | `agents/deeplearning.md` | diff 확인 후 업데이트 (없으면 신규 생성) |
 | `.claude/memory/workflow.md` | `.claude/memory/workflow.md` | 항상 업데이트 (읽기 전용 규칙 — 사용자 편집 불가) |
+| `.claude/hooks/time_context.py` | `.claude/hooks/time_context.py` | diff 확인 후 업데이트 |
 | `.claude/hooks/design-precheck.py` | `.claude/hooks/design-precheck.py` | diff 확인 후 업데이트 |
 | `.claude/hooks/post-compact.py` | `.claude/hooks/post-compact.py` | diff 확인 후 업데이트 |
 | `.claude/hooks/cleanup_suggest.py` | `.claude/hooks/cleanup_suggest.py` | diff 확인 후 업데이트 |
