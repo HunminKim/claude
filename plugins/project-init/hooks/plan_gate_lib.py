@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any
 
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
-# 누더기 감지: 동일 파일 반복 패치 (edit_count - unique_files)
-TRIGGER_REPEAT_RATIO = 5   # 반복 편집 수 (edit - unique) 임계값: 같은 파일 5회 이상 반복
+# 누더기 감지: 동일 파일 반복 패치 (파일별 편집 횟수 기준)
+TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
 TRIGGER_UNIQUE_FILES = 8   # 광범위 scope (서로 다른 파일 수) 임계값
 TRIGGER_MULTI_EDIT_ITEMS = 5
 APPROVED_BUFFER = 2  # initial_count + buffer
@@ -240,6 +240,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "edit_count": 0,
         "edit_count_post_approval": 0,
         "unique_files": [],
+        "file_edit_counts": {},   # {파일경로: 편집횟수} — 파일별 반복 편집 감지용
         "multi_edit_max": 0,
         "initial_edit_count": None,
         "initial_unique_files": None,
@@ -271,10 +272,15 @@ def clear_current_gate(state: dict[str, Any]) -> None:
 
 
 # ── 트리거 휴리스틱 (D5) ─────────────────────────────────────────────────
+def _max_code_repeat(gate: dict[str, Any]) -> int:
+    """코드 파일 중 가장 많이 편집된 횟수. doc 파일은 제외."""
+    counts = gate.get("file_edit_counts", {})
+    return max((c for fp, c in counts.items() if not is_doc_path(fp)), default=0)
+
+
 def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
-    repeat = gate["edit_count"] - len(gate["unique_files"])
     return (
-        repeat >= TRIGGER_REPEAT_RATIO
+        _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
         or len(gate["unique_files"]) >= TRIGGER_UNIQUE_FILES
         or gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS
     )
@@ -291,6 +297,25 @@ def post_approval_limit(gate: dict[str, Any]) -> int:
 
 def post_approval_limit_exceeded(gate: dict[str, Any]) -> bool:
     return gate["edit_count_post_approval"] >= post_approval_limit(gate)
+
+
+# ── doc 경로 판별 ───────────────────────────────────────────────────────
+_DOC_PREFIXES = ("docs/", "tasks/", ".claude/memory/")
+_DOC_SUFFIXES = (".md", ".rst", ".txt")
+_DOC_NAMES = {"README.md", "CHANGELOG.md", "CLAUDE.md"}
+
+
+def is_doc_path(fp: str) -> bool:
+    """문서/정형 갱신 파일 여부. True이면 반복 편집 트리거 카운트에서 제외."""
+    norm = fp.replace("\\", "/").lstrip("./")
+    base = norm.rsplit("/", 1)[-1]
+    if base in _DOC_NAMES:
+        return True
+    if any(norm.startswith(p) for p in _DOC_PREFIXES):
+        return True
+    if any(norm.endswith(s) for s in _DOC_SUFFIXES):
+        return True
+    return False
 
 
 # ── tool input 분석 ─────────────────────────────────────────────────────
@@ -379,11 +404,12 @@ def git_diff_summary(root: Path, max_diff_lines: int = 80) -> str:
 # ── 트리거 사유 자연어화 ────────────────────────────────────────────────
 def trigger_reason_human(gate: dict[str, Any]) -> str:
     reasons = []
-    repeat = gate["edit_count"] - len(gate["unique_files"])
-    if repeat >= TRIGGER_REPEAT_RATIO:
+    max_repeat = _max_code_repeat(gate)
+    if max_repeat >= TRIGGER_REPEAT_RATIO:
+        counts = gate.get("file_edit_counts", {})
+        hot_file = max((fp for fp in counts if not is_doc_path(fp)), key=lambda f: counts[f], default="?")
         reasons.append(
-            f"동일 파일 반복 편집 {repeat}회 (편집 {gate['edit_count']}회 / 파일 {len(gate['unique_files'])}개,"
-            f" 임계 {TRIGGER_REPEAT_RATIO})"
+            f"동일 파일 반복 편집 — {hot_file} {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
         )
     if len(gate["unique_files"]) >= TRIGGER_UNIQUE_FILES:
         reasons.append(f"광범위 scope — 영향 파일 {len(gate['unique_files'])}개 (임계 {TRIGGER_UNIQUE_FILES})")
@@ -424,13 +450,15 @@ def _intro_block() -> str:
 
 def format_soft_hint(gate: dict[str, Any]) -> str:
     """트리거 직전 부드러운 경고 (차단 X)."""
-    repeat = gate["edit_count"] - len(gate["unique_files"])
+    max_repeat = _max_code_repeat(gate)
+    counts = gate.get("file_edit_counts", {})
+    hot_file = max((fp for fp in counts if not is_doc_path(fp)), key=lambda f: counts[f], default=None)
+    hot_info = f" ({hot_file} {max_repeat}회)" if hot_file else ""
     return (
         f"\n{DIVIDER}\n"
         f"⚠️  plan-gate 임박\n"
         f"{DIVIDER}\n"
-        f"현재까지 {gate['edit_count']}회 편집 / {len(gate['unique_files'])}개 파일"
-        f" (반복 편집 {repeat}회).\n"
+        f"현재까지 {gate['edit_count']}회 편집 / {len(gate['unique_files'])}개 파일{hot_info}.\n"
         f"큰 작업이라면 미리 tasks/todo.md 에 계획을 작성해두는 것이 좋습니다.\n"
         f"{DIVIDER}\n"
     )
