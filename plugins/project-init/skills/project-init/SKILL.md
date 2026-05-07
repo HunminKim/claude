@@ -75,6 +75,7 @@ CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
 │   ├── lessons.md              ← 행동 교정 패턴 누적    (사용자 교정 발생 시 업데이트)
 │   └── workflow.md             ← TDD·Phase gate·위임 규칙 (읽기 전용)
 ├── hooks/
+│   ├── time_context.py         ← 시간 키워드 감지 → 현재 KST 시각 자동 주입
 │   ├── design-precheck.py      ← 설계 키워드 감지 → 체크리스트 출력
 │   ├── post-compact.py         ← /compact 후 CLAUDE.md 핵심 섹션 재주입
 │   └── cleanup_suggest.py      ← 세션 종료 시 임시 파일 감지 → 정리 제안
@@ -122,7 +123,7 @@ scripts/
 2. `.claude/settings.json` — 훅 등록 파일. 훅 스크립트보다 먼저 생성하지 않으면 Claude가 훅 없이 실행될 수 있음
 3. `.claude/rules/code-style.md` — 코드 스타일 규칙
 4. `.claude/memory/lessons.md`, `.claude/memory/workflow.md` — 메모리 파일
-5. `.claude/hooks/design-precheck.py`, `post-compact.py`, `cleanup_suggest.py` — 훅 스크립트 (settings.json 등록 대상)
+5. `.claude/hooks/time_context.py`, `design-precheck.py`, `post-compact.py`, `cleanup_suggest.py` — 훅 스크립트 (settings.json 등록 대상)
 6. `.claude/agents/verifier.md` — 모든 hook 스크립트 생성 후 마지막으로 생성
 7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md` — 문서·스크립트 계층 (순서 무관)
 8. `.claude/plan_gate_enabled` — **반드시 마지막**. 이 파일이 생성된 순간부터 plan-gate가 활성화된다
@@ -348,6 +349,10 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 ### .claude/memory/workflow.md 템플릿
 
 `assets/templates/.claude/memory/workflow.md` 파일을 읽어 `.claude/memory/workflow.md`로 생성한다.
+
+### .claude/hooks/time_context.py 템플릿
+
+`assets/templates/.claude/hooks/time_context.py` 파일을 읽어 `.claude/hooks/time_context.py`로 생성한다.
 
 ### .claude/hooks/design-precheck.py 템플릿
 
