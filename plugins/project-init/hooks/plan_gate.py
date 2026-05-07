@@ -133,20 +133,22 @@ def main() -> int:
     gate["last_edit_ts"] = lib.now_iso()
     if gate["state"] == "approved":
         gate["edit_count_post_approval"] += 1
-    if target and target not in gate["unique_files"]:
-        gate["unique_files"].append(target)
+    if target:
+        if target not in gate["unique_files"]:
+            gate["unique_files"].append(target)
+        counts = gate.setdefault("file_edit_counts", {})
+        counts[target] = counts.get(target, 0) + 1
     if multi_items > gate["multi_edit_max"]:
         gate["multi_edit_max"] = multi_items
 
     # ── soft hint (트리거 직전) ─────────────────────────────────────────
     # created 상태에서 트리거 임박 시 부드러운 경고만 출력 (차단 X).
-    # 반복 편집이 임계-1 이거나 파일 scope가 임계-1 이면 경고.
-    _repeat = gate["edit_count"] - len(gate["unique_files"])
+    _max_repeat = lib._max_code_repeat(gate)
     if (
         gate["state"] == "created"
         and not lib.trigger_threshold_exceeded(gate)
         and (
-            _repeat == lib.TRIGGER_REPEAT_RATIO - 1
+            _max_repeat == lib.TRIGGER_REPEAT_RATIO - 1
             or len(gate["unique_files"]) == lib.TRIGGER_UNIQUE_FILES - 1
         )
     ):
