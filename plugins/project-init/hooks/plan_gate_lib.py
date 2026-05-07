@@ -25,7 +25,7 @@ from typing import Any
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
 # 누더기 감지: 동일 파일 반복 패치 (파일별 편집 횟수 기준)
 TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
-TRIGGER_UNIQUE_FILES = 8   # 광범위 scope (서로 다른 파일 수) 임계값
+TRIGGER_UNIQUE_FILES = 10  # 광범위 scope: doc 제외 코드 파일 수 임계값
 TRIGGER_MULTI_EDIT_ITEMS = 5
 APPROVED_BUFFER = 2  # initial_count + buffer
 APPROVED_MIN = 10      # 명시 승인 최소 임계값 (scope 넓은 작업 대응)
@@ -278,10 +278,15 @@ def _max_code_repeat(gate: dict[str, Any]) -> int:
     return max((c for fp, c in counts.items() if not is_doc_path(fp)), default=0)
 
 
+def _unique_code_files(gate: dict[str, Any]) -> int:
+    """doc 제외 코드 파일 수 (unique_files 트리거용)."""
+    return sum(1 for fp in gate["unique_files"] if not is_doc_path(fp))
+
+
 def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
     return (
         _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
-        or len(gate["unique_files"]) >= TRIGGER_UNIQUE_FILES
+        or _unique_code_files(gate) >= TRIGGER_UNIQUE_FILES
         or gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS
     )
 
@@ -411,8 +416,9 @@ def trigger_reason_human(gate: dict[str, Any]) -> str:
         reasons.append(
             f"동일 파일 반복 편집 — {hot_file} {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
         )
-    if len(gate["unique_files"]) >= TRIGGER_UNIQUE_FILES:
-        reasons.append(f"광범위 scope — 영향 파일 {len(gate['unique_files'])}개 (임계 {TRIGGER_UNIQUE_FILES})")
+    uc = _unique_code_files(gate)
+    if uc >= TRIGGER_UNIQUE_FILES:
+        reasons.append(f"광범위 scope — 코드 파일 {uc}개 (임계 {TRIGGER_UNIQUE_FILES}, doc 제외)")
     if gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS:
         reasons.append(
             f"단일 MultiEdit {gate['multi_edit_max']}개 항목 (임계 {TRIGGER_MULTI_EDIT_ITEMS})"
@@ -458,7 +464,7 @@ def format_soft_hint(gate: dict[str, Any]) -> str:
         f"\n{DIVIDER}\n"
         f"⚠️  plan-gate 임박\n"
         f"{DIVIDER}\n"
-        f"현재까지 {gate['edit_count']}회 편집 / {len(gate['unique_files'])}개 파일{hot_info}.\n"
+        f"현재까지 {gate['edit_count']}회 편집 / 코드 파일 {_unique_code_files(gate)}개{hot_info}.\n"
         f"큰 작업이라면 미리 tasks/todo.md 에 계획을 작성해두는 것이 좋습니다.\n"
         f"{DIVIDER}\n"
     )
