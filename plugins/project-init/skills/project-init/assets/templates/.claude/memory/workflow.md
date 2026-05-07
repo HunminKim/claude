@@ -52,6 +52,18 @@
 - 서브에이전트가 plan-gate limit 초과 시: 멈추고 메인에 보고 (자체 해결 불가)
 - verifier는 발견만 한다 — 수정은 메인 에이전트의 몫
 
+### verifier fallback (@verifier "agent not found" 시)
+
+`.claude/agents/verifier.md` 는 세션 시작 시에만 로드된다. project-init 직후 동일 세션에서 `@verifier` 호출이 실패하면 아래 절차로 대체한다:
+
+1. `Task` tool로 `subagent_type="general-purpose"` 호출
+2. 첫 메시지에 `.claude/agents/verifier.md` 전문을 컨텍스트로 첨부
+3. `docs/.verifier_result.json` 을 표준 스키마로 직접 작성하도록 요청
+   - 필수 필드: `feature_name`, `verdict`(✅/❌), `test_items`, `issues`, `evidence`, `implementation`
+4. JSON 파일이 생성되면 `update_docs.py` 훅이 자동 처리 (PostToolUse Write 매칭)
+
+근본 해결: Claude Code 재시작 → `claude --continue` 로 대화 유지하며 재시작하면 verifier 인식됨.
+
 ## /compact 타이밍
 
 - 연관 기능 묶음 완료 후 실행

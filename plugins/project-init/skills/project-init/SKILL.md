@@ -221,6 +221,14 @@ scripts/
 SKILL.md 의 `<!-- >>> [prompt-log] -->` 마커로 감싸진 부분만 제거하면 된다.
 <!-- <<< [prompt-log] integration end -->
 
+> **⚠️ verifier 인식 — 세션 재시작 필요**
+>
+> `.claude/agents/verifier.md` 는 Claude Code 세션 시작 시 한 번만 스캔된다.
+> project-init으로 막 생성된 verifier는 **현재 세션에서 @verifier로 호출되지 않는다.**
+> 다음 중 하나로 적용한다:
+> 1. (권장) Claude Code 재시작 — `claude --continue` 로 대화를 유지하며 재시작
+> 2. 재시작이 어려우면 `.claude/memory/workflow.md` 의 'verifier fallback' 절차 사용
+
 생성된 파일 목록을 보여주고, 사용자에게 다음을 안내한다:
 - `docs/plan.md` 에서 개발 계획(Phase/Sprint 로드맵)을 채워달라고
 - `docs/context_note.md` 에서 프로젝트 배경/맥락을 기록해달라고
