@@ -149,7 +149,7 @@ def main() -> int:
         and not lib.trigger_threshold_exceeded(gate)
         and (
             _max_repeat == lib.TRIGGER_REPEAT_RATIO - 1
-            or len(gate["unique_files"]) == lib.TRIGGER_UNIQUE_FILES - 1
+            or lib._unique_code_files(gate) == lib.TRIGGER_UNIQUE_FILES - 1
         )
     ):
         _print_stderr(lib.format_soft_hint(gate))
