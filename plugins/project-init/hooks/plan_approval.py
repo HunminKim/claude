@@ -30,22 +30,7 @@ TOKEN_TO_ACTION = {
 }
 
 
-def main() -> int:
-    try:
-        data = json.load(sys.stdin)
-    except Exception:
-        return 0
-
-    prompt = (data.get("prompt") or "").strip()
-    if prompt not in TOKEN_TO_ACTION:
-        return 0
-
-    root = lib.find_project_root()
-    if root is None or not lib.is_plan_gate_enabled(root):
-        return 0
-
-    action = TOKEN_TO_ACTION[prompt]
-    cli = Path(__file__).parent / "plan_gate_cli.py"
+def _run_cli(cli: Path, action: str, root: Path) -> None:
     try:
         r = subprocess.run(
             [sys.executable, str(cli), action],
@@ -54,15 +39,42 @@ def main() -> int:
             cwd=str(root),
             env={**os.environ, "CLAUDE_PROJECT_DIR": str(root)},
         )
+        if r.stdout:
+            sys.stdout.write(r.stdout)
+        if r.stderr:
+            sys.stderr.write(r.stderr)
     except Exception as e:
         sys.stderr.write(f"[plan-gate approval] CLI 실행 실패: {e}\n")
+
+
+def main() -> int:
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
         return 0
 
-    # CLI stdout/stderr를 그대로 Claude 컨텍스트에 노출
-    if r.stdout:
-        sys.stdout.write(r.stdout)
-    if r.stderr:
-        sys.stderr.write(r.stderr)
+    prompt = (data.get("prompt") or "").strip()
+
+    root = lib.find_project_root()
+    if root is None or not lib.is_plan_gate_enabled(root):
+        return 0
+
+    cli = Path(__file__).parent / "plan_gate_cli.py"
+
+    if prompt in TOKEN_TO_ACTION:
+        # 사용자가 명시적 토큰(/done, /approve-plan 등) 입력
+        _run_cli(cli, TOKEN_TO_ACTION[prompt], root)
+    elif prompt:
+        # 새 작업 프롬프트 — verified ✅ 상태면 자동 done 처리
+        # verified ❌ 는 사용자가 /retry|/skip|/rollback 중 선택해야 하므로 건드리지 않는다
+        state = lib.load_state(root)
+        gate = lib.current_gate(state)
+        if gate and gate["state"] == "verified" and gate.get("verifier_status") == "✅":
+            _run_cli(cli, "done", root)
+            sys.stderr.write(
+                "[plan-gate] 이전 gate auto-done (verified ✅) — 새 작업을 시작합니다.\n"
+            )
+
     return 0
 
 
