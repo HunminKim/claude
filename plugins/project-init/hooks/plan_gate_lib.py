@@ -24,16 +24,16 @@ from typing import Any
 
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
 # 누더기 감지: 동일 파일 반복 패치 (edit_count - unique_files)
-TRIGGER_REPEAT_RATIO = 3   # 반복 편집 수 (edit - unique) 임계값
-TRIGGER_UNIQUE_FILES = 6   # 광범위 scope (서로 다른 파일 수) 임계값
+TRIGGER_REPEAT_RATIO = 5   # 반복 편집 수 (edit - unique) 임계값: 같은 파일 5회 이상 반복
+TRIGGER_UNIQUE_FILES = 8   # 광범위 scope (서로 다른 파일 수) 임계값
 TRIGGER_MULTI_EDIT_ITEMS = 5
 APPROVED_BUFFER = 2  # initial_count + buffer
-APPROVED_MIN = 8       # 명시 승인 최소 임계값 (scope 넓은 작업 대응)
-APPROVED_AUTO_MIN = 5  # 자동 승인 최소 임계값
+APPROVED_MIN = 10      # 명시 승인 최소 임계값 (scope 넓은 작업 대응)
+APPROVED_AUTO_MIN = 6  # 자동 승인 최소 임계값 (todo.md 감지 시 보수적 적용)
 GC_MAX_AGE_DAYS = 30
 
 # ── 작업 경계 타임아웃 ───────────────────────────────────────────────────
-BOUNDARY_TIMEOUT_MINUTES = 120  # 마지막 편집으로부터 이 시간 이상 경과 시 자동 done
+BOUNDARY_TIMEOUT_MINUTES = 60  # 마지막 편집으로부터 이 시간 이상 경과 시 자동 done
 
 # ── 패치 이력 임계값 ─────────────────────────────────────────────────────
 PATCH_WARN_DAYS = 14
@@ -325,8 +325,9 @@ DONE_TOKENS = {"/done"}
 ROLLBACK_TOKENS = {"/rollback"}
 RETRY_TOKENS = {"/retry"}
 REPLAN_TOKENS = {"/replan"}
+SKIP_TOKENS = {"/skip", "/keep"}  # /keep은 /skip의 별칭 — 둘 다 동일하게 동작
 
-ALL_TOKENS = APPROVE_TOKENS | DONE_TOKENS | ROLLBACK_TOKENS | RETRY_TOKENS | REPLAN_TOKENS
+ALL_TOKENS = APPROVE_TOKENS | DONE_TOKENS | ROLLBACK_TOKENS | RETRY_TOKENS | REPLAN_TOKENS | SKIP_TOKENS
 
 
 def detect_token(prompt: str) -> str | None:
@@ -491,6 +492,12 @@ def format_trigger_message(
 
 def format_d1_lock_message(gate: dict[str, Any]) -> str:
     """verifier ❌ 미해결 상태에서 새 Edit 시도 시."""
+    has_ckpt = bool(gate.get("checkpoint_clean_tag"))
+    rollback_line = (
+        "  /rollback  체크포인트로 복원 (이번 시도 폐기)\n"
+        if has_ckpt
+        else "  /rollback  ⚠️  체크포인트 없음 — 사용 불가 (/skip 또는 /done 권장)\n"
+    )
     return (
         f"\n{DIVIDER}\n"
         f"🛑 PLAN-GATE LOCK — 이전 작업 결정 대기 중\n"
@@ -502,10 +509,12 @@ def format_d1_lock_message(gate: dict[str, Any]) -> str:
         f"\n"
         f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
         f"  /retry     같은 체크포인트에서 재시도 (Claude 가 문제를 수정)\n"
-        f"  /rollback  체크포인트로 복원 (이번 시도 폐기)\n"
+        f"  /skip      현재 상태 그대로 gate 마감 (문제 인지 후 유지)\n"
+        f"  /done      현재 상태 그대로 gate 마감 (/skip 과 동일)\n"
+        f"{rollback_line}"
         f"\n"
         f"▌ Claude 행동 지시\n"
-        f"  0. 즉시 사용자에게 보고: verifier 실패 이유와 두 옵션을 한국어로 먼저 알린다.\n"
+        f"  0. 즉시 사용자에게 보고: verifier 실패 이유와 선택지를 한국어로 먼저 알린다.\n"
         f"  1. 사용자가 토큰을 입력할 때까지 추가 Edit/Write 시도하지 않는다.\n"
         f"\n{DIVIDER}\n"
     )
@@ -702,6 +711,21 @@ def validate_todo_quality(root: Path) -> tuple[bool, list[str]]:
             f"체크리스트 항목 부족 (현재 {checklist_count}개, 최소 2개 — `- [ ]` 형식)"
         )
 
+    # 섹션 헤더(## 이상) 또는 의도 문장(왜/목적/이유/because/goal/fix 등) 필요.
+    # checkbox 나열만으로는 "왜 하는지"를 알 수 없어 승인 의미가 없다.
+    has_section = bool(re.search(r"^#{1,3} .+", text, re.MULTILINE))
+    has_intent = bool(
+        re.search(
+            r"(목적|이유|배경|왜|goal|because|fix|improve|add|remove|refactor|문제|원인)",
+            text,
+            re.IGNORECASE,
+        )
+    )
+    if not has_section and not has_intent:
+        issues.append(
+            "의도·목적 없음 — '## 섹션' 헤더 또는 목적/이유를 설명하는 문장이 필요합니다"
+        )
+
     return len(issues) == 0, issues
 
 
@@ -711,7 +735,7 @@ def format_todo_quality_hint(issues: list[str]) -> str:
         lines.append(f"  - {issue}")
     lines += [
         "  tasks/todo.md를 보강 후 다시 편집하면 자동 승인됩니다.",
-        "  (권장: 의도 한 줄 + `- [ ]` 체크리스트 2개 이상 + 근본 원인/해결 방법)",
+        "  (권장: ## 목표 섹션 + 이유 한 줄 + `- [ ]` 체크리스트 2개 이상)",
         "",
     ]
     return "\n".join(lines)

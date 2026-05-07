@@ -114,6 +114,19 @@ scripts/
 
 `.claude/plan_gate_enabled` 파일은 **모든 파일 생성이 완료된 가장 마지막 단계**에 생성한다. 이 파일 존재 여부가 plan-gate 활성화 트리거이므로, 반드시 가장 마지막에 생성해야 project-init 실행 중 plan-gate가 조기 발동되지 않는다.
 
+### 생성 순서
+
+파일 생성은 아래 순서를 지킨다. 순서를 어기면 중간에 plan-gate가 발동되거나 훅이 settings.json 없이 등록될 수 있다.
+
+1. `.claude/` 디렉토리 구조 생성 (mkdir)
+2. `.claude/settings.json` — 훅 등록 파일. 훅 스크립트보다 먼저 생성하지 않으면 Claude가 훅 없이 실행될 수 있음
+3. `.claude/rules/code-style.md` — 코드 스타일 규칙
+4. `.claude/memory/lessons.md`, `.claude/memory/workflow.md` — 메모리 파일
+5. `.claude/hooks/design-precheck.py`, `post-compact.py`, `cleanup_suggest.py` — 훅 스크립트 (settings.json 등록 대상)
+6. `.claude/agents/verifier.md` — 모든 hook 스크립트 생성 후 마지막으로 생성
+7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md` — 문서·스크립트 계층 (순서 무관)
+8. `.claude/plan_gate_enabled` — **반드시 마지막**. 이 파일이 생성된 순간부터 plan-gate가 활성화된다
+
 ### 3단계: CLAUDE.md 생성
 
 `CLAUDE.md`는 **100줄 이내**로 유지한다. Anthropic 공식 권장 원칙을 따른다:

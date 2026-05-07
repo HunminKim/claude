@@ -72,7 +72,9 @@ def cmd_approve(root, state) -> int:
             "[plan-gate approve] tasks/todo.md가 gate 발동 후 변경됨.\n"
             f"  expected_sha256={expected[:12]}…\n"
             f"  current_sha256 ={current_sha[:12] if current_sha else 'None'}…\n"
-            "  /replan 으로 새 계획 + 재승인하거나, 의도된 변경이면 다시 /approve-plan."
+            "\n"
+            "  👉 계획을 의도적으로 수정했다면: 다시 /approve-plan 을 입력하면 통과됩니다.\n"
+            "  👉 계획을 처음부터 다시 짜려면: /replan 입력 후 todo.md 작성 → /approve-plan."
         )
         # 새 해시로 갱신해 두 번째 /approve-plan에서는 통과시킨다 (사용자 의도 추정)
         gate["todo_md_sha256"] = current_sha
@@ -115,8 +117,43 @@ def cmd_done(root, state) -> int:
             "  승인된 계획 범위를 초과한 작업이 포함됩니다. 의도된 경우 계속 진행하세요."
         )
 
+    # F-2: verified+❌ 상태에서 /done 시 보존 의도 명시
+    if gate["state"] == "verified" and gate.get("verifier_status") == "❌":
+        _info(
+            "[plan-gate done] ⚠️  verifier 검증 실패 상태에서 완료 처리됩니다.\n"
+            "  발견된 문제를 인지한 채로 현재 변경사항을 보존합니다.\n"
+            "  체크포인트는 정리됩니다. 이후 별도 수정이 필요합니다."
+        )
+
     lib.do_gate_done(root, state, gate)
     _info(f"[plan-gate done] 작업 완료. 체크포인트 정리됨: {gate['id']}")
+    return 0
+
+
+def cmd_skip(root, state) -> int:
+    """verified+❌ 상태에서 현재 변경사항을 보존하며 gate를 마감한다."""
+    gate = _need_gate(state, "skip")
+    if gate is None:
+        return 0
+
+    if gate["state"] == "done":
+        _info("[plan-gate skip] 이미 완료됨.")
+        return 0
+
+    if gate["state"] != "verified" or gate.get("verifier_status") != "❌":
+        _err(
+            f"[plan-gate skip] 현재 상태 '{gate['state']}' verifier='{gate.get('verifier_status')}'\n"
+            "  /skip 은 verifier ❌ 후에만 사용한다. 정상 완료는 /done 을 쓰세요."
+        )
+        return 1
+
+    _info(
+        "[plan-gate skip] verifier 검증 실패 상태를 인지하고 현재 변경사항을 보존합니다.\n"
+        "  발견된 문제는 다음 gate 주기에서 별도 처리하세요.\n"
+        "  체크포인트는 정리됩니다."
+    )
+    lib.do_gate_done(root, state, gate)
+    _info(f"[plan-gate skip] gate 마감 완료: {gate['id']}")
     return 0
 
 
@@ -129,7 +166,13 @@ def cmd_rollback(root, state) -> int:
     if not tag:
         _err(
             "[plan-gate rollback] 체크포인트 tag가 없다 (git 미사용 또는 tag 생성 실패).\n"
-            "  복원 불가 — 수동으로 되돌려야 한다."
+            "  git reset --hard 으로 복원할 수 없습니다.\n"
+            "\n"
+            "  대안:\n"
+            "    /skip  — 현재 변경사항 보존하며 gate 마감 (문제 인지 후 유지)\n"
+            "    /done  — 동일 효과 (/skip 과 같음)\n"
+            "\n"
+            "  수동 복원이 필요하면: git reflog 로 직전 커밋을 찾아 체크아웃하세요."
         )
         return 1
 
@@ -171,12 +214,14 @@ def cmd_retry(root, state) -> int:
     # 체크포인트 유지, 같은 gate를 다시 approved 상태로 돌려 재구현 허용
     gate["state"] = "approved"
     gate["verifier_status"] = None
-    # post_approval 카운터는 누적 유지 — 무한 retry 방지
+    # post_approval 카운터 리셋 — verifier 실패는 이전 시도의 실패이므로
+    # 수정 기회를 박탈하지 않도록 초기화한다. initial_edit_count는 유지해
+    # limit 계산 기준점(scope creep 방지)은 보존한다.
+    gate["edit_count_post_approval"] = 0
     lib.save_state(root, state)
     _info(
         f"[plan-gate retry] 같은 체크포인트에서 재시도 시작: {gate['id']}\n"
-        f"  post_approval limit={lib.post_approval_limit(gate)} "
-        f"(현재 {gate['edit_count_post_approval']})"
+        f"  post_approval 카운터 리셋 → limit={lib.post_approval_limit(gate)}"
     )
     return 0
 
@@ -228,24 +273,43 @@ def cmd_off(root, state) -> int:
     return 0
 
 
+_NEXT_ACTION = {
+    "created": "→ 다음 액션: tasks/todo.md 작성 → /approve-plan",
+    "approved": "→ 다음 액션: 작업 진행 → @verifier 호출 → /done | /rollback",
+    "verified_ok": "→ 다음 액션: /done (완료) 또는 /rollback (되돌리기)",
+    "verified_fail": "→ 다음 액션: /retry (재구현) | /skip (현 상태 보존) | /rollback",
+    "done": "→ gate 완료 상태입니다.",
+    "rolled_back": "→ rollback 완료 상태입니다.",
+}
+
+
 def cmd_status(root, state) -> int:
     gate = lib.current_gate(state)
     if gate is None:
         _info("[plan-gate status] 활성 gate 없음.")
         return 0
+    g_state = gate["state"]
+    verifier = gate.get("verifier_status")
+    if g_state == "verified":
+        action_key = "verified_ok" if verifier == "✅" else "verified_fail"
+    else:
+        action_key = g_state
+    next_action = _NEXT_ACTION.get(action_key, "")
     _info(
         f"[plan-gate status]\n"
         f"  id              = {gate['id']}\n"
-        f"  state           = {gate['state']}\n"
+        f"  state           = {g_state}\n"
         f"  edits           = {gate['edit_count']}\n"
         f"  edits_approved  = {gate['edit_count_post_approval']} / {lib.post_approval_limit(gate)}\n"
         f"  unique_files    = {len(gate['unique_files'])}\n"
         f"  multi_edit_max  = {gate['multi_edit_max']}\n"
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"
         f"  approved_auto   = {'yes (보수적 limit)' if gate.get('approved_auto') else 'no (명시 승인)'}\n"
-        f"  verifier_status = {gate.get('verifier_status') or '-'}\n"
+        f"  verifier_status = {verifier or '-'}\n"
         f"  clean_tag       = {gate.get('checkpoint_clean_tag') or '-'}\n"
-        f"  dirty_stash     = {gate.get('checkpoint_dirty_stash_ref') or '-'}"
+        f"  dirty_stash     = {gate.get('checkpoint_dirty_stash_ref') or '-'}\n"
+        f"\n"
+        f"  {next_action}"
     )
     return 0
 
@@ -253,6 +317,7 @@ def cmd_status(root, state) -> int:
 COMMANDS = {
     "approve": cmd_approve,
     "done": cmd_done,
+    "skip": cmd_skip,
     "rollback": cmd_rollback,
     "retry": cmd_retry,
     "replan": cmd_replan,

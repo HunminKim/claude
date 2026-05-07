@@ -16,6 +16,7 @@ V1 범위 (V2_TODO.md 참고):
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -84,9 +85,15 @@ def pl_load_allowed() -> list[dict[str, Any]]:
 def pl_save_allowed(allowed: list[dict[str, Any]]) -> None:
     p = pl_allowed_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(allowed, ensure_ascii=False, indent=2))
-    tmp.replace(p)
+    lock_file = p.parent / ".allowed.lock"
+    with open(lock_file, "w") as lock_f:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        try:
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(allowed, ensure_ascii=False, indent=2))
+            tmp.replace(p)
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
 def pl_is_consented(project_root: Path) -> bool:
@@ -139,14 +146,61 @@ PL_SANITIZE_PATTERNS = [
     (re.compile(r"https?://[^\s:]+:[^\s@]+@"), "https://[REDACTED:url_creds]@"),
     # Email
     (re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"), "[REDACTED:email]"),
+    # Korean PII
+    # 주민등록번호: 6자리-7자리 (앞자리 뒤 '-' 선택, 오탐 방지를 위해 앞뒤 단어경계 확인)
+    (
+        re.compile(r"\b([0-9]{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01]))-?([1-4][0-9]{6})\b"),
+        "[REDACTED:kr_rrn]",
+    ),
+    # 사업자등록번호: 3-2-5 자리 (예: 123-45-67890)
+    (re.compile(r"\b[0-9]{3}-[0-9]{2}-[0-9]{5}\b"), "[REDACTED:kr_brn]"),
+    # 한국 전화번호: 010/011/016/017/018/019-XXXX-XXXX, 지역번호 02/0X-XXXX-XXXX
+    (
+        re.compile(r"\b(01[016789]|0(?:2|3[1-3]|4[1-4]|5[1-5]|6[1-4]|7[1-7]|8[1-8]))-?([0-9]{3,4})-?([0-9]{4})\b"),
+        "[REDACTED:kr_phone]",
+    ),
 ]
 
 
+def _pl_load_custom_patterns() -> list[tuple[re.Pattern[str], str]]:
+    """~/.claude/prompt-log/sanitize_rules.yaml 에서 사용자 정의 패턴 로드.
+
+    yaml 형식:
+      - pattern: "regex"
+        replacement: "[REDACTED:label]"
+    yaml 미설치 또는 파일 없으면 빈 리스트 반환 (graceful skip).
+    """
+    rules_path = pl_home() / "sanitize_rules.yaml"
+    if not rules_path.exists():
+        return []
+    try:
+        import importlib.util
+
+        if importlib.util.find_spec("yaml") is None:
+            return []
+        import yaml  # type: ignore[import]
+
+        data = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or []
+        result: list[tuple[re.Pattern[str], str]] = []
+        for entry in data:
+            if isinstance(entry, dict) and "pattern" in entry and "replacement" in entry:
+                result.append((re.compile(entry["pattern"]), str(entry["replacement"])))
+        return result
+    except Exception:
+        return []
+
+
+_PL_CUSTOM_PATTERNS: list[tuple[re.Pattern[str], str]] | None = None
+
+
 def pl_sanitize(text: str) -> str:
+    global _PL_CUSTOM_PATTERNS
     if not text:
         return text
+    if _PL_CUSTOM_PATTERNS is None:
+        _PL_CUSTOM_PATTERNS = _pl_load_custom_patterns()
     out = text
-    for pattern, replacement in PL_SANITIZE_PATTERNS:
+    for pattern, replacement in PL_SANITIZE_PATTERNS + _PL_CUSTOM_PATTERNS:
         out = pattern.sub(replacement, out)
     return out
 
@@ -165,9 +219,16 @@ def pl_load_active(project_root: Path) -> dict[str, Any] | None:
 def pl_save_active(project_root: Path, active: dict[str, Any]) -> None:
     p = pl_active_state_path(project_root)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(active, ensure_ascii=False, indent=2))
-    tmp.replace(p)
+    lock_file = p.parent / ".active.lock"
+    with open(lock_file, "w") as lock_f:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        try:
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(active, ensure_ascii=False, indent=2))
+            tmp.replace(p)
+            p.chmod(0o600)
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
 def pl_clear_active(project_root: Path) -> None:
@@ -287,12 +348,19 @@ def pl_read_plan_gate_meta(project_root: Path) -> dict[str, Any] | None:
 
 
 def pl_append_record(record: dict[str, Any]) -> None:
-    """월별 jsonl에 1줄 append."""
+    """월별 jsonl에 1줄 append. flock으로 동시 쓰기 방지, 0600 권한 보장."""
     p = pl_log_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False) + "\n"
-    with open(p, "a", encoding="utf-8") as f:
-        f.write(line)
+    lock_file = p.parent / ".records.lock"
+    with open(lock_file, "w") as lock_f:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        try:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(line)
+            p.chmod(0o600)
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
 # ── [prompt-log] tool counting helpers ──────────────────────────────────

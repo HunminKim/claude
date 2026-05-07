@@ -39,12 +39,24 @@
 수집 직전 prompt 본문에 다음 정규식을 적용해 `[REDACTED:...]` 로 치환:
 
 - API keys: `sk-...`, `sk-ant-...`, `ghp_...`, `ghs_...`, `xoxb-...`
-- AWS: `AKIA...`, 40자 base64 패턴
+- AWS: `AKIA...`
 - JWT: `eyJ...eyJ...`
 - URL credentials: `https://user:pass@...`
 - Email
+- 한국 PII: 주민등록번호(`YYMMDD-NNNNNNN`), 사업자등록번호(`NNN-NN-NNNNN`), 전화번호(`010-XXXX-XXXX`)
 
-추가 패턴은 V2 (사용자 정의 yaml).
+### 사용자 정의 패턴 추가
+
+`~/.claude/prompt-log/sanitize_rules.yaml` 파일을 생성해 커스텀 마스킹 패턴을 추가할 수 있다:
+
+```yaml
+- pattern: "내부-[A-Z]+-\d+"   # 내부 티켓 ID
+  replacement: "[REDACTED:ticket_id]"
+- pattern: "Bearer [A-Za-z0-9._-]+"
+  replacement: "[REDACTED:bearer_token]"
+```
+
+파일이 없거나 `pyyaml` 미설치 시 graceful skip (빌트인 패턴만 사용).
 
 ## Record 스키마 (V1)
 
@@ -77,6 +89,12 @@
   "outcome": {"ended_by": "next_prompt|session_end", "duration_sec": 245}
 }
 ```
+
+## 슬래시 커맨드
+
+| 커맨드 | 설명 |
+|---|---|
+| `/prompt-log-status` | 현재 프로젝트 동의 여부 + 글로벌 수집 통계(레코드 수, 파일 크기) 출력 |
 
 ## 훅 구성
 
@@ -177,9 +195,6 @@ grep -rn '\[prompt-log\]' ~/.claude-config/
 ## V2 예정 (V2_TODO.md)
 
 - 90일 grace period + 자동 압축/삭제
-- `/prompt-log-status` 슬래시 커맨드
-- `/prompt-log-cleanup` / `/prompt-log-delete-now`
-- 시뮬레이션 replay 분석 도구
-- 사용자 정의 sanitize yaml
+- `/prompt-log-cleanup` / `/prompt-log-delete-now` / `/prompt-log-export`
+- 시뮬레이션 replay 분석 도구 (휴리스틱 임계값 정량 검증)
 - detect_user_correction.py / detect_failure_loop.py 신호 통합
-- file lock (concurrent session 안전성)

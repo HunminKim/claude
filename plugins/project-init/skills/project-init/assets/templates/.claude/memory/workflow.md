@@ -93,7 +93,8 @@ tasks/todo.md 작성 완료
 ```
 verifier ✅  →  /done          (체크포인트 정리 + gate 완료)
 verifier ❌  →  /retry         (같은 체크포인트에서 재구현)
-             →  /rollback      (이번 시도 전체 폐기)
+             →  /skip          (현재 변경 보존, 문제 인지 후 다음 주기에서 처리)
+             →  /rollback      (이번 시도 전체 폐기 — 체크포인트 있을 때만 가능)
 ```
 
 ### 공식 Plan Mode 사용 시
@@ -117,8 +118,9 @@ Plan Mode로 계획 작성 → tasks/todo.md 작성 → 사용자 Accept
 | `/approve-plan` | 계획 확정 후 (시작 전 or 차단 후) | gate → approved, 작업 재개 |
 | `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
 | `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |
+| `/skip` | verifier ❌ 후 현재 변경 보존 | 문제 인지 채로 gate 마감 (`/keep` 도 동일) |
 | `/retry` | verifier ❌ 후 재구현 | approved 상태 복귀, 카운터 누적 유지 |
-| `/rollback` | 전체 되돌리기 | git reset → checkpoint tag, stash 복원 안내 |
+| `/rollback` | 전체 되돌리기 (체크포인트 필수) | git reset → checkpoint tag, stash 복원 안내 |
 
 ## lessons.md 관리
 

@@ -3,6 +3,8 @@
 직접 lessons.md를 Edit하지 않는다 (4컬럼 패턴 추출은 LLM 판단 필요).
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re

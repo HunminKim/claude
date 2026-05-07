@@ -48,11 +48,23 @@ def _read_event() -> dict[str, Any] | None:
         return None
 
 
-def _extract_file_path(tool_name: str, tool_input: dict[str, Any]) -> str | None:
+def _extract_file_paths(tool_name: str, tool_input: dict[str, Any]) -> list[str]:
+    """Edit/Write → 단일 파일, MultiEdit → edits[] 배열에서 모든 파일 추출."""
     if tool_name not in ("Edit", "Write", "MultiEdit"):
-        return None
-    fp = tool_input.get("file_path")
-    return fp if isinstance(fp, str) else None
+        return []
+    if tool_name in ("Edit", "Write"):
+        fp = tool_input.get("file_path")
+        return [fp] if isinstance(fp, str) else []
+    # MultiEdit: edits 배열에서 file_path 수집 (중복 제거, 순서 유지)
+    seen: set[str] = set()
+    paths: list[str] = []
+    for edit in tool_input.get("edits", []) or []:
+        if isinstance(edit, dict):
+            fp = edit.get("file_path")
+            if isinstance(fp, str) and fp not in seen:
+                seen.add(fp)
+                paths.append(fp)
+    return paths
 
 
 def _project_root() -> Path:
@@ -123,12 +135,8 @@ def main() -> int:
 
     tool_name = event.get("tool_name", "")
     tool_input = event.get("tool_input", {}) or {}
-    file_path = _extract_file_path(tool_name, tool_input)
-    if not file_path:
-        return 0
-
-    target = Path(file_path)
-    if target.suffix != ".py" or not target.exists():
+    file_paths = _extract_file_paths(tool_name, tool_input)
+    if not file_paths:
         return 0
 
     if shutil.which("ruff") is None:
@@ -140,33 +148,40 @@ def main() -> int:
         )
         return 0
 
-    _run_ruff(["format", str(target)])
-    _run_ruff(["check", "--fix", str(target)])
+    exit_code = 0
+    for file_path in file_paths:
+        target = Path(file_path)
+        if target.suffix != ".py" or not target.exists():
+            continue
 
-    final = _run_ruff(["check", str(target)])
-    if final.returncode != 0:
-        sys.stderr.write(f"\n[ruff_check] {target}: 자동 수정 후 잔존 lint 위반\n")
-        if final.stdout:
-            sys.stderr.write(final.stdout)
-        if final.stderr:
-            sys.stderr.write(final.stderr)
-        sys.stderr.write(
-            "→ Claude: 위 오류를 수정하세요. 반복되면 "
-            "pyproject.toml [tool.ruff] ignore/per-file-ignores 검토.\n"
-        )
-        return 2
+        _run_ruff(["format", str(target)])
+        _run_ruff(["check", "--fix", str(target)])
 
-    # ── ast 복잡도 경고 (관찰 모드 — exit 0) ────────────────────────────
-    complexity_warns = _check_ast_complexity(target)
-    if complexity_warns:
-        sys.stderr.write(f"\n[ast_check] {target.name}: 복잡도 경고 (작업 계속됩니다)\n")
-        sys.stderr.write("\n".join(complexity_warns) + "\n")
-        sys.stderr.write(
-            "→ 리팩터링을 고려하세요."
-            " ⚠️  표시 항목은 향후 차단 예정입니다.\n\n"
-        )
+        final = _run_ruff(["check", str(target)])
+        if final.returncode != 0:
+            sys.stderr.write(f"\n[ruff_check] {target}: 자동 수정 후 잔존 lint 위반\n")
+            if final.stdout:
+                sys.stderr.write(final.stdout)
+            if final.stderr:
+                sys.stderr.write(final.stderr)
+            sys.stderr.write(
+                "→ Claude: 위 오류를 수정하세요. 반복되면 "
+                "pyproject.toml [tool.ruff] ignore/per-file-ignores 검토.\n"
+            )
+            exit_code = 2
+            continue
 
-    return 0
+        # ── ast 복잡도 경고 (관찰 모드 — exit 0) ────────────────────────────
+        complexity_warns = _check_ast_complexity(target)
+        if complexity_warns:
+            sys.stderr.write(f"\n[ast_check] {target.name}: 복잡도 경고 (작업 계속됩니다)\n")
+            sys.stderr.write("\n".join(complexity_warns) + "\n")
+            sys.stderr.write(
+                "→ 리팩터링을 고려하세요."
+                " ⚠️  표시 항목은 향후 차단 예정입니다.\n\n"
+            )
+
+    return exit_code
 
 
 if __name__ == "__main__":
