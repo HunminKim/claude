@@ -5,7 +5,7 @@
   1. stdin JSON에서 tool_name / tool_input.file_path 추출
   2. .py 파일이 아니거나 파일이 없으면 exit 0 (no-op)
   3. ruff 미설치면 세션당 1회 stderr 안내 후 exit 0 (graceful skip)
-  4. ruff format <file> → ruff check --fix <file>
+  4. ruff check --fix <file> (format은 Surgical Changes 원칙에 따라 비활성화)
   5. 잔존 ruff 오류 있으면 stderr + exit 2 (Claude 컨텍스트 주입)
   6. ast 복잡도 분석: 함수 길이·CC 초과 시 stderr 경고 (exit 0, 관찰 모드)
 """
@@ -154,7 +154,6 @@ def main() -> int:
         if target.suffix != ".py" or not target.exists():
             continue
 
-        _run_ruff(["format", str(target)])
         _run_ruff(["check", "--fix", str(target)])
 
         final = _run_ruff(["check", str(target)])
