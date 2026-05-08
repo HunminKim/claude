@@ -17,6 +17,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
 
 
+def _get_feature_hint(root) -> str:
+    """tasks/todo.md 첫 의미 있는 줄에서 작업 이름 추출."""
+    from pathlib import Path as _Path
+    todo = _Path(root) / "tasks" / "todo.md"
+    if todo.exists():
+        for line in todo.read_text(errors="ignore").splitlines():
+            text = line.strip().lstrip("#").strip()
+            if text:
+                return text[:50]
+    return "현재 작업"
+
+
 def _info(msg: str) -> None:
     sys.stdout.write(msg + "\n")
 
@@ -125,8 +137,18 @@ def cmd_done(root, state) -> int:
             "  체크포인트는 정리됩니다. 이후 별도 수정이 필요합니다."
         )
 
+    edit_count = gate.get("edit_count", 0)
     lib.do_gate_done(root, state, gate)
     _info(f"[plan-gate done] 작업 완료. 체크포인트 정리됨: {gate['id']}")
+
+    # compact 권고: 편집이 5회 이상이면 컨텍스트 관리 안내
+    if edit_count >= 5:
+        feature_hint = _get_feature_hint(root)
+        _info(
+            "\n💡 컨텍스트 관리: /compact 실행을 권장합니다.\n"
+            "  compact 후 새 작업 시작 시 입력하세요:\n"
+            f"  「{feature_hint} 완료됨. 다음 작업 지시해줘.」"
+        )
     return 0
 
 

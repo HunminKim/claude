@@ -21,6 +21,17 @@ arch_rules: []
 #   - "DB 접근은 repository 계층만 허용"
 #   - "도메인 레이어는 외부 라이브러리 import 금지"
 
+# 파이프라인 단계 순서 (verifier가 순서 준수 여부를 검증한다)
+# 단계 누락 시 verifier가 ❌ 처리. 프로젝트에 맞게 수정하거나 비워두면 검사 생략.
+pipeline_steps: []
+# 예시 (ML 파이프라인):
+# pipeline_steps:
+#   - train
+#   - export_onnx
+#   - onnx2novaonnx
+#   - compile
+#   - validate
+
 # 임시 파일 네이밍 규칙
 # .claude/hooks/cleanup_suggest.py (Stop 훅) 가 세션 종료 시 이 패턴으로 스캔한다.
 # .githooks/pre-commit 도 이 패턴으로 임시 파일 커밋을 차단한다.

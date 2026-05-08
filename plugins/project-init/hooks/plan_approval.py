@@ -19,14 +19,15 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
 
-TOKEN_TO_ACTION = {
-    "/approve-plan": "approve",
-    "/done": "done",
-    "/skip": "skip",
-    "/keep": "skip",   # /skip의 별칭 — 동일하게 동작, 자동완성에는 /skip만 노출
-    "/rollback": "rollback",
-    "/retry": "retry",
-    "/replan": "replan",
+# 슬래시 유무 모두 처리: /approve-plan, approve-plan 둘 다 동작
+_ACTION_TOKENS = {
+    "approve-plan": "approve",
+    "done": "done",
+    "skip": "skip",
+    "keep": "skip",
+    "rollback": "rollback",
+    "retry": "retry",
+    "replan": "replan",
 }
 
 
@@ -61,9 +62,10 @@ def main() -> int:
 
     cli = Path(__file__).parent / "plan_gate_cli.py"
 
-    if prompt in TOKEN_TO_ACTION:
-        # 사용자가 명시적 토큰(/done, /approve-plan 등) 입력
-        _run_cli(cli, TOKEN_TO_ACTION[prompt], root)
+    normalized = prompt.lstrip("/")
+    if normalized in _ACTION_TOKENS:
+        # 슬래시 유무 무관하게 처리 (/approve-plan, approve-plan 모두 동작)
+        _run_cli(cli, _ACTION_TOKENS[normalized], root)
     elif prompt:
         # 새 작업 프롬프트 — verified ✅ 상태면 자동 done 처리
         # verified ❌ 는 사용자가 /retry|/skip|/rollback 중 선택해야 하므로 건드리지 않는다
