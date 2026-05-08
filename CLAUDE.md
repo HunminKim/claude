@@ -56,7 +56,10 @@ ruff 미설치 시 graceful skip(세션당 1회 안내). 설정은 `pyproject.to
 - `plugins/project-init/` 변경 → `plugins/project-init/.claude-plugin/plugin.json` 버전 번프
 - `plugins/harness-check/` 변경 → `plugins/harness-check/.claude-plugin/plugin.json` 버전 번프
 - `plugins/prompt-log/` 변경 → `plugins/prompt-log/.claude-plugin/plugin.json` 버전 번프
-- 버전 형식: semver (`1.2.0` → `1.3.0`). 기능 추가·버그픽스 모두 minor 이상 번프.
+- 버전 형식: semver — 변경 규모로 판단:
+  - `patch` (x.y.Z): 버그픽스, 오탈자, 메시지 수정 등 작은 수정
+  - `minor` (x.Y.0): 기능 추가, 훅 개선, 새 파일 추가 등 하위 호환 변경
+  - `major` (X.0.0): 하네스 구조 변경, 기존 동작 파괴적 변경
 
 ## 커밋 / PR
 
