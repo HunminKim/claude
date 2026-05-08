@@ -48,6 +48,16 @@ ruff 미설치 시 graceful skip(세션당 1회 안내). 설정은 `pyproject.to
 - ruff 잔존 오류는 같은 PR 안에서 fix — 다음 PR로 미루지 않는다
 - prompt-log 관련 코드는 `[prompt-log]` 마커로 `grep -rn` 검색 가능해야 함
 
+## 플러그인 버전 관리 (필수)
+
+플러그인 파일을 변경할 때마다 해당 플러그인의 `plugin.json` 버전을 반드시 올린다.
+버전이 같으면 사용자 캐시가 갱신되지 않아 변경사항이 적용되지 않는다.
+
+- `plugins/project-init/` 변경 → `plugins/project-init/.claude-plugin/plugin.json` 버전 번프
+- `plugins/harness-check/` 변경 → `plugins/harness-check/.claude-plugin/plugin.json` 버전 번프
+- `plugins/prompt-log/` 변경 → `plugins/prompt-log/.claude-plugin/plugin.json` 버전 번프
+- 버전 형식: semver (`1.2.0` → `1.3.0`). 기능 추가·버그픽스 모두 minor 이상 번프.
+
 ## 커밋 / PR
 
 ```
