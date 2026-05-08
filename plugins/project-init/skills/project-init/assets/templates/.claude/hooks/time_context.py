@@ -14,8 +14,13 @@ import subprocess
 import sys
 
 _TIME_PAT = re.compile(
-    r"(시간|시각|날짜|오늘|지금|현재|내일|어제|언제|몇\s*시|요일|이번\s*주|지난\s*주|다음\s*주"
-    r"|time|date|today|now|current\s+time|yesterday|tomorrow|when)",
+    # 명확한 시간 단어 (단독으로도 시간 질문)
+    r"(시각|날짜|오늘|내일|어제|언제|몇\s*시|요일|이번\s*주|지난\s*주|다음\s*주"
+    # '지금/현재'는 시간 단어와 결합한 경우만 (단독은 false positive 많음)
+    r"|지금\s*(몇|시간|시각|날짜)"
+    r"|현재\s*(시각|시간|날짜)"
+    # 영어
+    r"|today|yesterday|tomorrow|what\s+time|current\s+time)",
     re.IGNORECASE,
 )
 
