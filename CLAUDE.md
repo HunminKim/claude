@@ -77,6 +77,20 @@ type(scope?): English title
 ```
 
 type: `feat` `fix` `refactor` `docs` `chore`
+
+## 릴리스 (태그 필수)
+
+플러그인 변경을 푸시할 때는 반드시 SemVer 태그를 함께 달아야 한다.
+**태그 없이 푸시하면 마켓플레이스가 정식 릴리스로 인식하지 못한다.**
+
+```bash
+git tag -a vX.Y.Z -m "한 줄 요약"
+git push origin main --tags
+```
+
+- `git push origin main` 만 하면 태그가 올라가지 않는다 → 반드시 `--tags` 포함
+- 태그 버전은 변경된 플러그인의 `plugin.json` 버전과 일치시킨다
+- Annotated 태그(`-a`)를 사용한다 (태거·날짜·메시지 보존)
 scope: `plan-gate`, `prompt-log`, `project-init` 등. 루트 영향 시 생략 가능.
 
 ## 주의
