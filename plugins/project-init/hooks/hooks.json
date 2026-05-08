@@ -40,6 +40,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/detect_bug_report.py",
+            "timeout": 5
+          },
+          {
+            "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/detect_user_correction.py",
             "timeout": 5
           },

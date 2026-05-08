@@ -71,6 +71,14 @@
 
 근본 해결: Claude Code 재시작 → `claude --continue` 로 대화 유지하며 재시작하면 verifier 인식됨.
 
+## verifier code_smells 처리 흐름
+
+verifier 검증 보고서에서 `code_smells` 항목이 기록됐을 때:
+
+- **판정 ✅ + code_smells 있음** → `/simplify` 호출 → 개선안 검토 후 `/done`
+- **판정 ❌ + code_smells 있음** → 실패 원인 먼저 수정 → 재검증 ✅ 후 위 흐름 적용
+- `/simplify` 결과가 불필요하거나 범위 초과라고 판단되면 거부 가능 — `lessons.md`에 이유 기록
+
 ## /compact 타이밍
 
 - 연관 기능 묶음 완료 후 실행
