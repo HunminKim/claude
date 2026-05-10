@@ -48,7 +48,7 @@ def main() -> int:
         f"[time-context] 현재 시각: {kst}\n"
         "시간 관련 질문에는 반드시 위 KST 기준 시각을 사용하세요. 학습 데이터 기준 시간 추정 금지.\n"
     )
-    return 2
+    return 0
 
 
 if __name__ == "__main__":
