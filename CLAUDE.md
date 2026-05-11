@@ -61,9 +61,9 @@ ruff 미설치 시 graceful skip(세션당 1회 안내). 설정은 `pyproject.to
 플러그인 파일을 변경할 때마다 해당 플러그인의 `plugin.json` 버전을 반드시 올린다.
 버전이 같으면 사용자 캐시가 갱신되지 않아 변경사항이 적용되지 않는다.
 
-- `plugins/project-init/` 변경 → `plugins/project-init/.claude-plugin/plugin.json` 버전 번프
-- `plugins/harness-check/` 변경 → `plugins/harness-check/.claude-plugin/plugin.json` 버전 번프
-- `plugins/prompt-log/` 변경 → `plugins/prompt-log/.claude-plugin/plugin.json` 버전 번프
+- `plugins/project-init/` 변경 → `plugins/project-init/.claude-plugin/plugin.json` 버전 번프 + `.claude-plugin/marketplace.json` description 버전 동기화
+- `plugins/harness-check/` 변경 → `plugins/harness-check/.claude-plugin/plugin.json` 버전 번프 + `.claude-plugin/marketplace.json` description 버전 동기화
+- `plugins/prompt-log/` 변경 → `plugins/prompt-log/.claude-plugin/plugin.json` 버전 번프 + `.claude-plugin/marketplace.json` description 버전 동기화
 - 버전 형식: semver — 변경 규모로 판단:
   - `patch` (x.y.Z): 버그픽스, 오탈자, 메시지 수정 등 작은 수정
   - `minor` (x.Y.0): 기능 추가, 훅 개선, 새 파일 추가 등 하위 호환 변경
