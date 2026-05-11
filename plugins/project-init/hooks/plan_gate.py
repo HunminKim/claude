@@ -161,6 +161,10 @@ def main() -> int:
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])
 
+        lib.log_audit(root, "trigger", gate_id=gate["id"],
+                      edit_count=gate["edit_count"],
+                      unique_files=len(gate["unique_files"]))
+
         # dirty 보존: stash (D4)
         if lib.has_git(root) and not lib.working_tree_clean(root):
             ref = lib.stash_dirty(root, gate["id"])
