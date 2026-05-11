@@ -11,10 +11,12 @@ update_docs.py)에서 공유한다.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import uuid
@@ -43,6 +45,20 @@ PATCH_BLOCK_THRESHOLD = 5
 PATCH_MAX_ENTRIES_PER_FILE = 50
 
 GATE_STATES = {"created", "approved", "verified", "rolled_back", "done"}
+
+# ── stash 보호 파일 패턴 ──────────────────────────────────────────────────
+# git stash push -u 시 untracked 파일이 working tree에서 제거된다.
+# 아래 패턴에 해당하는 운영 핵심 파일은 stash 대상에서 제외한다.
+PROTECTED_UNTRACKED_PATTERNS = [
+    "docker-compose*.yml",
+    "docker-compose*.yaml",
+    "Dockerfile*",
+    ".env",
+    ".env.*",
+    "requirements.txt",
+    "pyproject.toml",
+    "Makefile",
+]
 
 TAG_PREFIX = ".claude/gate/"
 STASH_PREFIX = "[plan-gate] "
@@ -163,16 +179,59 @@ def delete_tag(root: Path, tag: str) -> bool:
     return r.returncode == 0
 
 
+def _find_protected_untracked(root: Path) -> list[Path]:
+    """untracked 파일 중 PROTECTED_UNTRACKED_PATTERNS 매칭 항목을 반환."""
+    r = _git(root, "ls-files", "--others", "--exclude-standard")
+    if r.returncode != 0:
+        return []
+    protected: list[Path] = []
+    for rel in r.stdout.splitlines():
+        name = Path(rel).name
+        if any(fnmatch.fnmatch(name, pat) for pat in PROTECTED_UNTRACKED_PATTERNS):
+            protected.append(root / rel)
+    return protected
+
+
 def stash_dirty(root: Path, gate_id: str) -> str | None:
     """working tree dirty면 stash 생성. message에 gate_id 포함.
-    반환: stash ref 또는 None."""
+
+    PROTECTED_UNTRACKED_PATTERNS 매칭 untracked 파일은 stash 대상에서 제외한다.
+    git stash push -u 는 untracked 파일을 working tree에서 제거하므로, 해당 파일을
+    .git/plan_gate_protected/ 에 임시 백업한 뒤 stash 후 복원한다.
+
+    반환: gate_id sentinel 또는 None.
+    """
     if working_tree_clean(root):
         return None
+
+    protected = _find_protected_untracked(root)
+    backup_dir = root / ".git" / "plan_gate_protected"
+    backed_up: list[tuple[Path, Path]] = []
+    if protected:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        for src in protected:
+            dst = backup_dir / src.relative_to(root)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            backed_up.append((src, dst))
+
     msg = f"{STASH_PREFIX}{gate_id}"
     r = _git(root, "stash", "push", "-u", "-m", msg)
+
+    for src, dst in backed_up:
+        src.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(dst, src)
+        dst.unlink()
+    try:
+        backup_dir.rmdir()
+    except OSError:
+        pass
+
     if r.returncode != 0:
         return None
-    # 실제 ref는 find_stash_for_gate()로만 탐색; gate_id를 sentinel로 저장
+
+    log_audit(root, "stash_created", gate_id=gate_id,
+              protected_files=[str(p.relative_to(root)) for p in protected])
     return gate_id
 
 
@@ -230,6 +289,18 @@ def new_gate_id() -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def log_audit(root: Path, action: str, **kwargs: Any) -> None:
+    """plan-gate 액션을 .claude/state/plan_gate_audit.log에 JSON Lines로 기록."""
+    audit_path = root / ".claude" / "state" / "plan_gate_audit.log"
+    entry: dict[str, Any] = {"ts": now_iso(), "action": action, **kwargs}
+    try:
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        with audit_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def make_gate(gate_id: str | None = None) -> dict[str, Any]:
@@ -497,6 +568,14 @@ def format_trigger_message(
         "▌ 자동으로 생성된 체크포인트",
         f"  • clean tag : {gate.get('checkpoint_clean_tag') or '(없음 — git 미사용)'}",
         f"  • dirty stash: {gate.get('checkpoint_dirty_stash_ref') or '(working tree clean)'}",
+        *([
+            "",
+            "⚠️  untracked 파일이 stash로 이동됐습니다 (working tree에서 사라진 것처럼 보임)",
+            "   파일은 삭제된 게 아니라 stash 안에 보존됩니다.",
+            "   복원: git stash pop",
+            "   목록 확인: git stash show stash@{0} --include-untracked --name-only",
+            f"   (docker-compose.yml, .env, Dockerfile 등 핵심 파일은 stash 제외 — 그대로 있음)",
+        ] if gate.get("checkpoint_dirty_stash_ref") else []),
         "",
         "▌ 사용자에게 다음 토큰 중 하나 입력 요청",
         "  /approve-plan  계획을 승인하고 작업 재개",

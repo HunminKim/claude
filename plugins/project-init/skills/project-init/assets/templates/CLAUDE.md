@@ -28,6 +28,8 @@
 
 <!-- 코드로 알 수 없는 핵심 함정만 기록. 예: 특정 라이브러리 버그, 환경 제약, API 제한 -->
 
+- **plan-gate 자동 stash 부작용**: plan-gate 차단 시 `git stash push -u`로 untracked 파일이 working tree에서 사라진 것처럼 보인다 (실제로는 stash 안에 보존됨). `docker-compose.yml`, `.env`, `Dockerfile`, `requirements.txt`, `pyproject.toml`, `Makefile`은 자동 보호 대상이라 stash 제외됨. 그 외 파일 복원: `git stash pop`
+
 ## 서브에이전트 전략
 
 메인 Claude는 **오케스트레이터**다. 직접 구현은 최소화하고 전문 에이전트에게 위임한다.
