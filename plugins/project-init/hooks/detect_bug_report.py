@@ -84,7 +84,7 @@ def main() -> int:
         "",
     ])
     sys.stderr.write(msg)
-    return 2
+    return 0
 
 
 if __name__ == "__main__":
