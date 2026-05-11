@@ -20,10 +20,6 @@ BUG_PATTERNS = [
     r"안\s*돼",
     r"안\s*됨",
     r"실패",
-    r"고쳐",
-    r"수정해",
-    r"픽스",
-    r"\bfix\b",
     r"\bbug\b",
     r"\berror\b",
     r"\bbroken\b",
@@ -62,6 +58,7 @@ def main() -> int:
     if not prompt:
         return 0
 
+    # 버그 증상 기술 없이 수정 명령만 있으면 통과 (기능 요청·질문)
     if not _matches(prompt, BUG_PATTERNS):
         return 0
 
