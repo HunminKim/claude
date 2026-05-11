@@ -101,6 +101,19 @@ def cmd_approve(root, state) -> int:
     if gate.get("initial_edit_count") is None:
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])
+
+    # dirty stash 자동 복원: rollback 포인트는 clean_tag가 담당하므로
+    # approve 후 stash는 불필요 → pop 하여 작업 파일 즉시 복원
+    if gate.get("checkpoint_dirty_stash_ref"):
+        actual = lib.find_stash_for_gate(root, gate["id"])
+        if actual:
+            ok = lib.stash_pop(root, actual)
+            if ok:
+                _info("[plan-gate approve] dirty stash 자동 복원 완료 — 파일이 working tree에 돌아왔습니다.")
+                lib.log_audit(root, "stash_popped_on_approve", gate_id=gate["id"])
+            else:
+                _err("[plan-gate approve] stash pop 실패 — 수동 복원 필요: git stash pop")
+
     lib.save_state(root, state)
     _info(
         f"[plan-gate approve] 승인 완료: {gate['id']}\n"

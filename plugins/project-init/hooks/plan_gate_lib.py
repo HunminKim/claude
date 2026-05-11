@@ -570,10 +570,9 @@ def format_trigger_message(
         f"  • dirty stash: {gate.get('checkpoint_dirty_stash_ref') or '(working tree clean)'}",
         *([
             "",
-            "⚠️  untracked 파일이 stash로 이동됐습니다 (working tree에서 사라진 것처럼 보임)",
-            "   파일은 삭제된 게 아니라 stash 안에 보존됩니다.",
-            "   복원: git stash pop",
-            "   목록 확인: git stash show stash@{0} --include-untracked --name-only",
+            "⚠️  untracked 파일이 stash에 보존됐습니다 (working tree에서 임시 분리)",
+            "   → /approve-plan 입력 시 자동 복원됩니다. 수동 복원: git stash pop",
+            "   목록 확인: git stash list",
             f"   (docker-compose.yml, .env, Dockerfile 등 핵심 파일은 stash 제외 — 그대로 있음)",
         ] if gate.get("checkpoint_dirty_stash_ref") else []),
         "",
@@ -677,7 +676,12 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> Non
     if gate.get("checkpoint_dirty_stash_ref"):
         actual = find_stash_for_gate(root, gate["id"])
         if actual:
-            stash_drop(root, actual)
+            # pop 우선: approve 없이 done/skip 경로에서도 파일 유실 방지
+            ok = stash_pop(root, actual)
+            log_audit(root, "stash_popped_on_done" if ok else "stash_dropped_on_done",
+                      gate_id=gate["id"])
+            if not ok:
+                stash_drop(root, actual)
     gate["state"] = "done"
     gate["closed_at"] = now_iso()
     # 완료 시점의 todo.md 해시를 보관 → 다음 사이클 자동 승인 가드에 활용
