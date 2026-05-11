@@ -98,6 +98,15 @@ def main() -> int:
         except Exception:
             pass
 
+    # ── stale created gate 경고: 편집이 쌓인 채 방치된 gate ────────────────
+    # approved 이전 "created" 상태에서도 편집이 많이 쌓이면 /done 을 강하게 유도.
+    if gate and gate["state"] == "created" and gate.get("edit_count", 0) >= 3:
+        _print_stderr(
+            f"\n[plan-gate] ⚠️  이전 작업 gate가 닫히지 않았습니다 (편집 {gate['edit_count']}회 누적).\n"
+            "  이전 작업이 끝났다면 지금 /done 을 입력하세요.\n"
+            "  /done 없이 계속하면 카운트가 누적되어 현재 작업이 차단됩니다.\n"
+        )
+
     # ── 세션 재진입 경고: 24시간 이상 된 approved gate 잔류 ──────────────
     if gate and gate["state"] == "approved":
         try:

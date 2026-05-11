@@ -80,7 +80,9 @@ Claude: Edit 시도 (1·2·3차)
     ↓ 3차에서 차단 (트리거 임계값 도달)
 PreToolUse 훅: git stash + git tag (체크포인트 생성)
     ↓
-Claude: tasks/todo.md 에 계획 작성 → 사용자에게 검토 요청
+Claude: tasks/todo.md 작성
+    ↓ PostToolUse 훅(plan_summary_request): 계획 내용 Claude 컨텍스트 주입
+Claude: 계획 요약 → 사용자에게 /approve-plan 요청
     ↓
 사용자: /approve-plan
     ↓ todo.md SHA-256 검증

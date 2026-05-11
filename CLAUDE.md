@@ -93,6 +93,16 @@ git push origin main --tags
 - Annotated 태그(`-a`)를 사용한다 (태거·날짜·메시지 보존)
 scope: `plan-gate`, `prompt-log`, `project-init` 등. 루트 영향 시 생략 가능.
 
+## 요청 유형 구분 (필독)
+
+| 사용자 표현 | 의미 | 수정 대상 |
+|-----------|------|---------|
+| "하네스 고쳐줘" | 플러그인·스킬 코드 수정 | `plugins/*/hooks/*.py`, `hooks.json` → 버전 번프 → 커밋·태그·푸시 |
+| "로컬 파일 수정해" | 현재 컨텍스트의 로컬 파일 수정 | `CLAUDE.md`, `~/.claude/settings.json` 등 저장소 외부 파일 |
+
+**"하네스 고쳐줘"** 를 받으면 `~/.claude/settings.json` 등 로컬 설정에 절대 손대지 않는다.
+반드시 플러그인 파일 → `plugin.json` 버전 번프 → `git push origin main --tags` 순서로 처리한다.
+
 ## 주의
 
 - `.verifier_result.json`은 verifier 임시 파일 — 커밋 금지(.gitignore). 훅이 처리 후 자동 삭제
