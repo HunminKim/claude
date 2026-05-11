@@ -28,7 +28,7 @@
 
 <!-- 코드로 알 수 없는 핵심 함정만 기록. 예: 특정 라이브러리 버그, 환경 제약, API 제한 -->
 
-- **plan-gate 자동 stash 부작용**: plan-gate 차단 시 `git stash push -u`로 untracked 파일이 working tree에서 사라진 것처럼 보인다 (실제로는 stash 안에 보존됨). `docker-compose.yml`, `.env`, `Dockerfile`, `requirements.txt`, `pyproject.toml`, `Makefile`은 자동 보호 대상이라 stash 제외됨. 그 외 파일 복원: `git stash pop`
+- **plan-gate stash 동작**: plan-gate 차단 시 untracked 파일이 stash에 임시 보존된다. `/approve-plan` 입력 시 자동 복원됨. `/done`/`/skip` 경로에서도 자동 pop 시도. `docker-compose.yml`, `.env`, `Dockerfile`, `requirements.txt`, `pyproject.toml`, `Makefile`은 stash 대상에서 제외(working tree에 그대로 유지). 수동 복원이 필요하면: `git stash pop`
 
 ## 서브에이전트 전략
 
