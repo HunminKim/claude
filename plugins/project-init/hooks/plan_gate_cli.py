@@ -59,12 +59,15 @@ def cmd_approve(root, state) -> int:
         gate["approved_auto"] = False  # 명시 선승인 — 자동 승인 sticky 방지
         gate["initial_edit_count"] = 0
         gate["initial_unique_files"] = 0
+        gate["edit_count_post_approval"] = 0
+        gate["file_edit_counts_post_approval"] = {}
+        gate["unique_files_post_approval"] = []
         lib.set_current_gate(state, gate)
         lib.save_state(root, state)
         _info(
             f"[plan-gate approve] 선승인 완료: {gate['id']}\n"
             f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
-            f"  limit={lib.post_approval_limit(gate)} edits (scope creep 방지)"
+            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or 파일 {lib.TRIGGER_UNIQUE_FILES}개"
         )
         return 0
 
@@ -98,6 +101,8 @@ def cmd_approve(root, state) -> int:
     gate["approved_at"] = lib.now_iso()
     gate["approved_auto"] = False  # 명시 승인 — 자동 승인 sticky 해제
     gate["edit_count_post_approval"] = 0
+    gate["file_edit_counts_post_approval"] = {}
+    gate["unique_files_post_approval"] = []
     if gate.get("initial_edit_count") is None:
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])
@@ -117,8 +122,7 @@ def cmd_approve(root, state) -> int:
     lib.save_state(root, state)
     _info(
         f"[plan-gate approve] 승인 완료: {gate['id']}\n"
-        f"  initial_edits={gate['initial_edit_count']} "
-        f"limit={lib.post_approval_limit(gate)} (scope creep 방지)"
+        f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or 파일 {lib.TRIGGER_UNIQUE_FILES}개 (scope creep 방지)"
     )
     return 0
 
@@ -253,10 +257,12 @@ def cmd_retry(root, state) -> int:
     # 수정 기회를 박탈하지 않도록 초기화한다. initial_edit_count는 유지해
     # limit 계산 기준점(scope creep 방지)은 보존한다.
     gate["edit_count_post_approval"] = 0
+    gate["file_edit_counts_post_approval"] = {}
+    gate["unique_files_post_approval"] = []
     lib.save_state(root, state)
     _info(
         f"[plan-gate retry] 같은 체크포인트에서 재시도 시작: {gate['id']}\n"
-        f"  post_approval 카운터 리셋 → limit={lib.post_approval_limit(gate)}"
+        f"  post_approval 카운터 리셋"
     )
     return 0
 
@@ -271,6 +277,8 @@ def cmd_replan(root, state) -> int:
     gate["approved_auto"] = False  # 명시 재승인 대기 — 자동 승인 sticky 해제
     gate["edit_count"] = 0
     gate["edit_count_post_approval"] = 0
+    gate["file_edit_counts_post_approval"] = {}
+    gate["unique_files_post_approval"] = []
     gate["unique_files"] = []
     gate["multi_edit_max"] = 0
     gate["initial_edit_count"] = None
@@ -335,7 +343,7 @@ def cmd_status(root, state) -> int:
         f"  id              = {gate['id']}\n"
         f"  state           = {g_state}\n"
         f"  edits           = {gate['edit_count']}\n"
-        f"  edits_approved  = {gate['edit_count_post_approval']} / {lib.post_approval_limit(gate)}\n"
+        f"  edits_approved  = {gate['edit_count_post_approval']} (파일별 한도: 반복 {lib.TRIGGER_REPEAT_RATIO}회 / 파일 {lib.TRIGGER_UNIQUE_FILES}개)\n"
         f"  unique_files    = {len(gate['unique_files'])}\n"
         f"  multi_edit_max  = {gate['multi_edit_max']}\n"
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"

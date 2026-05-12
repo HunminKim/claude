@@ -37,8 +37,7 @@ def main() -> int:
     if g_state not in ("created", "approved", "verified"):
         return 0
 
-    limit = lib.post_approval_limit(gate)
-    post = gate.get("edit_count_post_approval", 0)
+    max_repeat, post_unique = lib.post_approval_stats(gate)
     auto_label = "자동" if gate.get("approved_auto") else "명시"
     approved_at = gate.get("approved_at") or "-"
     clean_tag = gate.get("checkpoint_clean_tag") or "(없음)"
@@ -65,7 +64,7 @@ def main() -> int:
         "─" * 60,
         f"  id      : {gate['id']}",
         f"  state   : {g_state}",
-        f"  edits   : {gate['edit_count']}회 (승인 후 {post}/{limit})",
+        f"  edits   : {gate['edit_count']}회 (승인 후 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}회 · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}개)",
         f"  승인    : {auto_label} ({approved_at})",
         f"  마지막  : {elapsed_str}",
         f"  tag     : {clean_tag}",
@@ -78,17 +77,18 @@ def main() -> int:
             "  /retry 또는 /rollback 을 입력해 해결하세요.",
         ]
     elif g_state == "approved":
-        remaining = limit - post
-        if remaining <= 1:
+        near_repeat = max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
+        near_unique = post_unique >= lib.TRIGGER_UNIQUE_FILES - 1
+        if near_repeat or near_unique:
             lines += [
                 "",
-                f"⚠️  편집 한도 임박 ({post}/{limit}) — 다음 편집 시 scope creep 차단.",
+                f"⚠️  scope creep 임박 (파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES})",
                 "  작업을 마치려면 /done, 계획 조정은 /replan.",
             ]
         else:
             lines += [
                 "",
-                f"  편집 잔여 : {remaining}회",
+                f"  승인 후 : 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}",
                 "  새 작업이면 /done 후 시작하세요.",
             ]
     elif g_state == "created":

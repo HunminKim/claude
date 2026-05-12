@@ -27,9 +27,6 @@ from typing import Any
 TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
 TRIGGER_UNIQUE_FILES = 10  # 광범위 scope: doc 제외 코드 파일 수 임계값
 TRIGGER_MULTI_EDIT_ITEMS = 5
-APPROVED_BUFFER = 2  # initial_count + buffer
-APPROVED_MIN = 10      # 명시 승인 최소 임계값 (scope 넓은 작업 대응)
-APPROVED_AUTO_MIN = 6  # 자동 승인 최소 임계값 (todo.md 감지 시 보수적 적용)
 GC_MAX_AGE_DAYS = 30
 
 # ── 작업 경계 타임아웃 ───────────────────────────────────────────────────
@@ -259,7 +256,9 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "edit_count": 0,
         "edit_count_post_approval": 0,
         "unique_files": [],
-        "file_edit_counts": {},   # {파일경로: 편집횟수} — 파일별 반복 편집 감지용
+        "file_edit_counts": {},              # {파일경로: 편집횟수} — 파일별 반복 편집 감지용
+        "file_edit_counts_post_approval": {},  # 승인 후 파일별 편집 횟수 (재차단 기준)
+        "unique_files_post_approval": [],      # 승인 후 편집된 파일 목록
         "multi_edit_max": 0,
         "initial_edit_count": None,
         "initial_unique_files": None,
@@ -310,17 +309,18 @@ def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
     )
 
 
-def post_approval_limit(gate: dict[str, Any]) -> int:
-    """승인 후 재차단 임계값 (D2): max(initial + buffer, MIN).
-    자동 승인(approved_auto=True)은 더 보수적인 APPROVED_AUTO_MIN 적용.
-    """
-    initial = gate.get("initial_edit_count") or 0
-    min_val = APPROVED_AUTO_MIN if gate.get("approved_auto") else APPROVED_MIN
-    return max(initial + APPROVED_BUFFER, min_val)
+def post_approval_stats(gate: dict[str, Any]) -> tuple[int, int]:
+    """승인 후 파일별 편집 통계: (단일 파일 최대 횟수, 코드 파일 수)."""
+    counts = gate.get("file_edit_counts_post_approval", {})
+    max_repeat = max((c for fp, c in counts.items() if not is_doc_path(fp)), default=0)
+    unique = sum(1 for fp in gate.get("unique_files_post_approval", []) if not is_doc_path(fp))
+    return max_repeat, unique
 
 
 def post_approval_limit_exceeded(gate: dict[str, Any]) -> bool:
-    return gate["edit_count_post_approval"] >= post_approval_limit(gate)
+    """초기 트리거와 동일한 파일별 기준으로 승인 후 재차단."""
+    max_repeat, unique = post_approval_stats(gate)
+    return max_repeat >= TRIGGER_REPEAT_RATIO or unique >= TRIGGER_UNIQUE_FILES
 
 
 # ── doc 경로 판별 ───────────────────────────────────────────────────────
@@ -584,16 +584,20 @@ def format_d1_lock_message(gate: dict[str, Any]) -> str:
 
 def format_scope_creep_message(gate: dict[str, Any]) -> str:
     """승인 후 scope 초과 시."""
-    limit = post_approval_limit(gate)
+    max_repeat, unique = post_approval_stats(gate)
+    reason = (
+        f"단일 파일 반복 편집 {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
+        if max_repeat >= TRIGGER_REPEAT_RATIO
+        else f"영향 코드 파일 {unique}개 (임계 {TRIGGER_UNIQUE_FILES}개)"
+    )
     return (
         f"\n{DIVIDER}\n"
         f"🛑 PLAN-GATE — 승인된 계획의 범위 초과\n"
         f"{DIVIDER}\n"
         f"\n"
         f"▌ 무슨 일이?\n"
-        f"  /approve-plan 승인 후 추가 편집이 {gate['edit_count_post_approval']}회 누적되어\n"
-        f"  scope creep 임계값 {limit}회를 초과했습니다.\n"
-        f"  (초기 승인 시 편집 {gate.get('initial_edit_count')}회 기준)\n"
+        f"  /approve-plan 승인 후 scope creep 임계값을 초과했습니다.\n"
+        f"  사유: {reason}\n"
         f"\n"
         f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
         f"  /done      현재까지를 완료로 마감\n"

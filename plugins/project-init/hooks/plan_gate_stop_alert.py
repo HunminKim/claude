@@ -23,21 +23,6 @@ import plan_gate_lib as lib  # noqa: E402
 
 # 이번 응답 내에서 편집이 있었다고 간주할 최대 경과 시간
 _RECENT_EDIT_WINDOW_SECONDS = 300  # 5분 이내 편집 = 이번 응답의 작업
-_COMPACT_THRESHOLD_RATIO = 0.7     # 한도의 70% 소진 시 /compact 권고
-_COMPACT_MIN_LIMIT = 5             # 소규모 gate는 compact 권고 생략
-
-
-def _get_feature_hint(root) -> str:
-    """tasks/todo.md 첫 의미 있는 줄에서 작업 이름 추출."""
-    from pathlib import Path as _Path
-    todo = _Path(root) / "tasks" / "todo.md"
-    if todo.exists():
-        for line in todo.read_text(errors="ignore").splitlines():
-            text = line.strip().lstrip("#").strip()
-            if text:
-                return text[:50]
-    return "현재 작업"
-
 
 def main() -> int:
     try:
@@ -70,34 +55,28 @@ def main() -> int:
     except Exception:
         return 0
 
-    limit = lib.post_approval_limit(gate)
-    post = gate.get("edit_count_post_approval", 0)
-    remaining = limit - post
+    max_repeat, post_unique = lib.post_approval_stats(gate)
     auto_label = "자동" if gate.get("approved_auto") else "명시"
 
-    if remaining <= 0:
-        # 이미 차단 직전 or 초과 — scope creep 메시지가 이미 나왔을 것
+    if lib.post_approval_limit_exceeded(gate):
+        # 이미 차단 — scope creep 메시지가 이미 나왔을 것
         return 0
 
-    # ── compact 권고 (한도 70% 소진 시) ────────────────────────────────
-    if limit >= _COMPACT_MIN_LIMIT and post >= int(limit * _COMPACT_THRESHOLD_RATIO):
-        feature_hint = _get_feature_hint(root)
+    near_limit = (
+        max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
+        or post_unique >= lib.TRIGGER_UNIQUE_FILES - 1
+    )
+    if near_limit:
         sys.stderr.write(
-            f"\n[plan-gate] 💡 편집 한도 {post}/{limit} 소진 중 — /compact 권고\n"
-            f"  compact 후 이어받기 프롬프트:\n"
-            f"  「{feature_hint} 작업 이어서 진행해줘."
-            f" 현재까지 완료된 사항 확인하고 다음 단계 진행.」\n"
-        )
-
-    if remaining == 1:
-        sys.stderr.write(
-            f"\n[plan-gate] ⚠️  approved({auto_label}) {post}/{limit}"
+            f"\n[plan-gate] ⚠️  approved({auto_label})"
+            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}"
             f" — 다음 편집 시 차단됩니다. 작업 완료면 /done\n\n"
         )
     else:
         sys.stderr.write(
-            f"\n[plan-gate] approved({auto_label}) {post}/{limit}"
-            f" — 잔여 {remaining}회. 새 작업이면 /done\n\n"
+            f"\n[plan-gate] approved({auto_label})"
+            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}"
+            f" — 새 작업이면 /done\n\n"
         )
 
     return 0
