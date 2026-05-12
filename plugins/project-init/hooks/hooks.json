@@ -108,6 +108,17 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/project_init_permission.py",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
