@@ -86,14 +86,16 @@ def main() -> int:
                         gate["approved_at"] = lib.now_iso()
                         gate["approved_auto"] = True
                         gate["edit_count_post_approval"] = 0
+                        gate["file_edit_counts_post_approval"] = {}
+                        gate["unique_files_post_approval"] = []
                         gate["initial_edit_count"] = 0
                         gate["initial_unique_files"] = 0
                         gate["todo_md_sha256"] = current_sha
                         gate["todo_md_mtime"] = current_mtime
                         _print_stderr(
                             f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                            f"  limit={lib.post_approval_limit(gate)} edits"
-                            f" (자동 승인 — 보수적 임계값)\n"
+                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or"
+                            f" 파일 {lib.TRIGGER_UNIQUE_FILES}개\n"
                         )
         except Exception:
             pass
@@ -142,6 +144,12 @@ def main() -> int:
     gate["last_edit_ts"] = lib.now_iso()
     if gate["state"] == "approved":
         gate["edit_count_post_approval"] += 1
+        if target:
+            post_counts = gate.setdefault("file_edit_counts_post_approval", {})
+            post_counts[target] = post_counts.get(target, 0) + 1
+            post_unique = gate.setdefault("unique_files_post_approval", [])
+            if target not in post_unique:
+                post_unique.append(target)
     if target:
         if target not in gate["unique_files"]:
             gate["unique_files"].append(target)

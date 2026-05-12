@@ -76,18 +76,22 @@ def main() -> int:
         return 0
 
     if gate["state"] == "approved":
-        limit = lib.post_approval_limit(gate)
-        post = gate.get("edit_count_post_approval", 0)
+        max_repeat, post_unique = lib.post_approval_stats(gate)
         auto_label = "자동" if gate.get("approved_auto") else "명시"
-        remaining = limit - post
-        if remaining <= 1:
+        if lib.post_approval_limit_exceeded(gate):
+            return 0
+        near_limit = (
+            max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
+            or post_unique >= lib.TRIGGER_UNIQUE_FILES - 1
+        )
+        if near_limit:
             sys.stderr.write(
-                f"[gate] ⚠️  approved({auto_label}) {post}/{limit} — 다음 편집 시 차단.\n"
+                f"[gate] ⚠️  approved({auto_label}) 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES} — 다음 편집 시 차단.\n"
                 f"  작업이 끝났으면 지금 바로 /done 을 입력하세요.\n\n"
             )
         else:
             sys.stderr.write(
-                f"[gate] approved({auto_label}) {post}/{limit}\n"
+                f"[gate] approved({auto_label}) 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}\n"
                 f"  ★ 이전 작업이 완료됐으면 반드시 /done 을 입력하세요. 입력하지 않으면\n"
                 f"    카운트가 계속 누적되어 새 작업이 차단될 수 있습니다.\n\n"
             )
