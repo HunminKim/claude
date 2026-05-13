@@ -58,6 +58,7 @@
 - `/approve-plan` 없이 서브에이전트에게 구현 위임 금지
 - 서브에이전트가 plan-gate limit 초과 시: 멈추고 메인에 보고 (자체 해결 불가)
 - verifier는 발견만 한다 — 수정은 메인 에이전트의 몫
+- verifier 는 production 경로(`runs/`, `outputs/`, `data/`, DB)에 부작용을 만들지 않는다. 부작용 흔적이 보이면 메인이 즉시 verifier 보고를 신뢰성 ⚠️ 로 격하하고 정리 후 재검증한다
 
 ### verifier fallback (@verifier "agent not found" 시)
 
