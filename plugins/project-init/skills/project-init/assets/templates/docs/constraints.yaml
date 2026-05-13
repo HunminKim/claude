@@ -32,6 +32,13 @@ pipeline_steps: []
 #   - compile
 #   - validate
 
+# verifier-sandbox hook 이 쓰기 시도를 감지할 production 경로
+# 기본값: runs/, outputs/, data/ — 프로젝트에 맞게 수정
+# production_paths:
+#   - runs/
+#   - outputs/
+#   - data/
+
 # 임시 파일 네이밍 규칙
 # .claude/hooks/cleanup_suggest.py (Stop 훅) 가 세션 종료 시 이 패턴으로 스캔한다.
 # .githooks/pre-commit 도 이 패턴으로 임시 파일 커밋을 차단한다.
