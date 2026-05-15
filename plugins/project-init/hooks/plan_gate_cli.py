@@ -20,6 +20,7 @@ import plan_gate_lib as lib  # noqa: E402
 def _get_feature_hint(root) -> str:
     """tasks/todo.md 첫 의미 있는 줄에서 작업 이름 추출."""
     from pathlib import Path as _Path
+
     todo = _Path(root) / "tasks" / "todo.md"
     if todo.exists():
         for line in todo.read_text(errors="ignore").splitlines():
@@ -114,7 +115,9 @@ def cmd_approve(root, state) -> int:
         if actual:
             ok = lib.stash_pop(root, actual)
             if ok:
-                _info("[plan-gate approve] dirty stash 자동 복원 완료 — 파일이 working tree에 돌아왔습니다.")
+                _info(
+                    "[plan-gate approve] dirty stash 자동 복원 완료 — 파일이 working tree에 돌아왔습니다."
+                )
                 lib.log_audit(root, "stash_popped_on_approve", gate_id=gate["id"])
             else:
                 _err("[plan-gate approve] stash pop 실패 — 수동 복원 필요: git stash pop")
@@ -138,6 +141,14 @@ def cmd_done(root, state) -> int:
 
     if gate["state"] not in ("approved", "verified"):
         _err(f"[plan-gate done] 현재 상태 '{gate['state']}'에서는 완료 불가.")
+        return 1
+
+    if gate.get("verifier_status") is None:
+        _err(
+            "[plan-gate done] verifier 미검증 — 완료 불가.\n"
+            "  @verifier 호출 → docs/.verifier_result.json 생성 후 다시 /done.\n"
+            "  의도적으로 건너뛰려면 /skip-verify 를 명시적으로 입력."
+        )
         return 1
 
     if lib.post_approval_limit_exceeded(gate):
@@ -193,6 +204,30 @@ def cmd_skip(root, state) -> int:
     )
     lib.do_gate_done(root, state, gate)
     _info(f"[plan-gate skip] gate 마감 완료: {gate['id']}")
+    return 0
+
+
+def cmd_skip_verify(root, state) -> int:
+    """verifier 검증을 의도적으로 건너뛰고 완료 처리."""
+    gate = _need_gate(state, "skip-verify")
+    if gate is None:
+        return 0
+
+    if gate["state"] == "done":
+        _info("[plan-gate skip-verify] 이미 완료됨.")
+        return 0
+
+    if gate["state"] not in ("approved", "verified"):
+        _err(f"[plan-gate skip-verify] 현재 상태 '{gate['state']}'에서는 사용 불가.")
+        return 1
+
+    _info(
+        "[plan-gate skip-verify] ⚠️  verifier 검증 없이 완료 처리합니다.\n"
+        "  건너뛴 사실이 gate 기록에 남습니다. 체크포인트는 정리됩니다."
+    )
+    gate["verifier_status"] = "⏭️"
+    lib.do_gate_done(root, state, gate)
+    _info(f"[plan-gate skip-verify] gate 마감 완료: {gate['id']}")
     return 0
 
 
@@ -361,6 +396,7 @@ COMMANDS = {
     "approve": cmd_approve,
     "done": cmd_done,
     "skip": cmd_skip,
+    "skip-verify": cmd_skip_verify,
     "rollback": cmd_rollback,
     "retry": cmd_retry,
     "replan": cmd_replan,
