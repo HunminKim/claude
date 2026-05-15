@@ -97,6 +97,11 @@ python3 .claude/plugins/project-init/hooks/plan_gate_cli.py status
 - leakage 없음: ✅ / ❌
 - 시드 고정: ✅ / ❌
 
+### todo.md 단계별 완료 입증 (전 단계 필수 — 누락 시 ⚠️ 미완료 보고)
+| 단계 | 상태 | 입증 (실행 명령 + 출력 근거) |
+|------|------|------------------------------|
+| 1. … | 완료/미완료 | … |
+
 ### 자체 검증 결과
 - Smoke test (단순 실행): ✅ / ❌
 - Loss NaN 없음: ✅ / ❌
@@ -122,4 +127,5 @@ python3 .claude/plugins/project-init/hooks/plan_gate_cli.py status
 - "일단 돌아가는" 구현보다 **재현 가능한** 구현을 우선한다
 - 성능 튜닝은 기본 파이프라인이 검증된 후에 한다 — premature optimization 금지
 - **막히면 구현 즉시 중단 → 완료 보고 텍스트에 "⚠️ 중단: [이유]" 를 포함** (메인이 텍스트로 수신)
+- **할당된 todo 단계 중 하나라도 실제 실행·입증 못 하면 "⚠️ 미완료: 단계 N" 으로 보고. 다른 메커니즘(monitor 등)이 대신 할 것이라 추정 금지.**
 - plan-gate가 Edit을 차단하면(exit 2) 추가 시도 없이 중단 사유를 보고에 포함한다

@@ -24,6 +24,7 @@ import plan_gate_lib as lib  # noqa: E402
 # 이번 응답 내에서 편집이 있었다고 간주할 최대 경과 시간
 _RECENT_EDIT_WINDOW_SECONDS = 300  # 5분 이내 편집 = 이번 응답의 작업
 
+
 def main() -> int:
     try:
         json.load(sys.stdin)
@@ -39,6 +40,14 @@ def main() -> int:
 
     if gate is None or gate["state"] != "approved":
         return 0
+
+    # verifier 미호출 경고 — 편집이 있는데 verifier 를 한 번도 안 불렀으면 리마인드
+    if gate.get("edit_count", 0) > 0 and gate.get("verifier_status") is None:
+        sys.stderr.write(
+            "\n[plan-gate] ⚠️  @verifier 미호출\n"
+            "  편집이 있었지만 검증이 없습니다. /done 전 @verifier 호출 필수.\n"
+            "  건너뛰려면 /skip-verify 를 명시적으로 입력.\n\n"
+        )
 
     # 이번 응답 중 편집이 있었는지 확인 (last_edit_ts 기준)
     last_edit_str = gate.get("last_edit_ts")
@@ -63,8 +72,7 @@ def main() -> int:
         return 0
 
     near_limit = (
-        max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
-        or post_unique >= lib.TRIGGER_UNIQUE_FILES - 1
+        max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1 or post_unique >= lib.TRIGGER_UNIQUE_FILES - 1
     )
     if near_limit:
         sys.stderr.write(
