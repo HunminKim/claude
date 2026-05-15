@@ -1,6 +1,6 @@
 {
   "name": "project-init",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md·에이전트(verifier/frontend/backend/deeplearning)·plan-gate 자동 세팅. /harness-update — 하네스 최신화. /monitor [시간] — 학습·배치 작업 자동 간격 모니터링.",
   "author": {
     "name": "HunminKim",
