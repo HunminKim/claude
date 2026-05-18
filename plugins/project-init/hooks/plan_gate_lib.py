@@ -25,7 +25,6 @@ from typing import Any
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
 # 누더기 감지: 동일 파일 반복 패치 (파일별 편집 횟수 기준)
 TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
-TRIGGER_UNIQUE_FILES = 10  # 광범위 scope: doc 제외 코드 파일 수 임계값
 TRIGGER_MULTI_EDIT_ITEMS = 5
 GC_MAX_AGE_DAYS = 30
 
@@ -304,7 +303,6 @@ def _unique_code_files(gate: dict[str, Any]) -> int:
 def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
     return (
         _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
-        or _unique_code_files(gate) >= TRIGGER_UNIQUE_FILES
         or gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS
     )
 
@@ -319,8 +317,8 @@ def post_approval_stats(gate: dict[str, Any]) -> tuple[int, int]:
 
 def post_approval_limit_exceeded(gate: dict[str, Any]) -> bool:
     """초기 트리거와 동일한 파일별 기준으로 승인 후 재차단."""
-    max_repeat, unique = post_approval_stats(gate)
-    return max_repeat >= TRIGGER_REPEAT_RATIO or unique >= TRIGGER_UNIQUE_FILES
+    max_repeat, _ = post_approval_stats(gate)
+    return max_repeat >= TRIGGER_REPEAT_RATIO
 
 
 # ── doc 경로 판별 ───────────────────────────────────────────────────────
@@ -435,9 +433,6 @@ def trigger_reason_human(gate: dict[str, Any]) -> str:
         reasons.append(
             f"동일 파일 반복 편집 — {hot_file} {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
         )
-    uc = _unique_code_files(gate)
-    if uc >= TRIGGER_UNIQUE_FILES:
-        reasons.append(f"광범위 scope — 코드 파일 {uc}개 (임계 {TRIGGER_UNIQUE_FILES}, doc 제외)")
     if gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS:
         reasons.append(
             f"단일 MultiEdit {gate['multi_edit_max']}개 항목 (임계 {TRIGGER_MULTI_EDIT_ITEMS})"
@@ -468,7 +463,7 @@ def _intro_block() -> str:
         "  /rollback 으로 안전하게 되돌릴 수 있습니다.\n"
         "  비활성화: .claude/agents/verifier.md 를 삭제하면 plan-gate 가 꺼집니다.\n"
         "  임계값 조정: plugins/project-init/hooks/plan_gate_lib.py 상수\n"
-        "              (TRIGGER_REPEAT_RATIO, TRIGGER_UNIQUE_FILES 등) 를 수정하세요.\n"
+        "              (TRIGGER_REPEAT_RATIO, TRIGGER_MULTI_EDIT_ITEMS 등) 를 수정하세요.\n"
         "  이 안내는 한 번만 표시됩니다.\n"
     )
 
@@ -584,12 +579,8 @@ def format_d1_lock_message(gate: dict[str, Any]) -> str:
 
 def format_scope_creep_message(gate: dict[str, Any]) -> str:
     """승인 후 scope 초과 시."""
-    max_repeat, unique = post_approval_stats(gate)
-    reason = (
-        f"단일 파일 반복 편집 {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
-        if max_repeat >= TRIGGER_REPEAT_RATIO
-        else f"영향 코드 파일 {unique}개 (임계 {TRIGGER_UNIQUE_FILES}개)"
-    )
+    max_repeat, _ = post_approval_stats(gate)
+    reason = f"단일 파일 반복 편집 {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
     return (
         f"\n{DIVIDER}\n"
         f"🛑 PLAN-GATE — 승인된 계획의 범위 초과\n"

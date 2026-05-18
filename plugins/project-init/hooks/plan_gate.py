@@ -94,8 +94,7 @@ def main() -> int:
                         gate["todo_md_mtime"] = current_mtime
                         _print_stderr(
                             f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or"
-                            f" 파일 {lib.TRIGGER_UNIQUE_FILES}개\n"
+                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복\n"
                         )
         except Exception:
             pass
@@ -164,10 +163,7 @@ def main() -> int:
     if (
         gate["state"] == "created"
         and not lib.trigger_threshold_exceeded(gate)
-        and (
-            _max_repeat == lib.TRIGGER_REPEAT_RATIO - 1
-            or lib._unique_code_files(gate) == lib.TRIGGER_UNIQUE_FILES - 1
-        )
+        and _max_repeat == lib.TRIGGER_REPEAT_RATIO - 1
     ):
         _print_stderr(lib.format_soft_hint(gate))
         lib.save_state(root, state)
