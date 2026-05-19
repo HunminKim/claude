@@ -547,6 +547,16 @@ def format_trigger_message(
     return "\n".join(parts)
 
 
+def format_multi_edit_hint(file_path: str) -> str:
+    """동일 파일 재편집 감지 — MultiEdit 유도 힌트 (additionalContext 용)."""
+    short = file_path.split("/")[-1]
+    return (
+        f"[plan-gate] {short} 은 이번 작업에서 이미 수정됐습니다. "
+        f"같은 파일의 여러 위치를 수정할 때는 Edit 여러 번 대신 MultiEdit 한 번으로 묶어서 호출하세요. "
+        f"(이전 Edit 은 이미 적용됐으므로 edits 배열에 포함하지 않아도 됩니다.)"
+    )
+
+
 def format_d1_lock_message(gate: dict[str, Any]) -> str:
     """verifier ❌ 미해결 상태에서 새 Edit 시도 시."""
     has_ckpt = bool(gate.get("checkpoint_clean_tag"))
