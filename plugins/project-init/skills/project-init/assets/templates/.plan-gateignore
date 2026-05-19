@@ -1,0 +1,18 @@
+# plan-gate 편집 횟수 제외 목록
+# 패턴: 파일명(*.md) 또는 프로젝트 루트 기준 상대 경로(docs/spec.md)
+# 이 목록에 해당하는 파일은 plan-gate 편집 카운터에서 제외됩니다
+# (단, verifier 실패 D1 lock은 여전히 적용)
+
+# 문서
+*.md
+*.rst
+
+# 설정·메타파일
+.gitignore
+.gitattributes
+.editorconfig
+pyproject.toml
+
+# 기타
+LICENSE*
+CHANGELOG*
