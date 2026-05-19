@@ -11,6 +11,7 @@ update_docs.py)에서 공유한다.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -364,6 +365,32 @@ def count_multi_edit_items(tool_name: str, tool_input: dict[str, Any]) -> int:
     if tool_name == "MultiEdit":
         return len(tool_input.get("edits", []) or [])
     return 0
+
+
+def load_gate_ignore(root: Path) -> list[str]:
+    """프로젝트 루트의 .plan-gateignore 파일에서 패턴 목록을 읽는다."""
+    ignore_file = root / ".plan-gateignore"
+    if not ignore_file.exists():
+        return []
+    patterns: list[str] = []
+    for line in ignore_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            patterns.append(line)
+    return patterns
+
+
+def is_gate_ignored(file_path: str, root: Path, patterns: list[str]) -> bool:
+    """파일이 .plan-gateignore 패턴에 해당하면 True."""
+    if not patterns:
+        return False
+    p = Path(file_path)
+    name = p.name
+    try:
+        rel = str(p.resolve().relative_to(root.resolve()))
+    except (ValueError, OSError):
+        rel = file_path
+    return any(fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(rel, pat) for pat in patterns)
 
 
 # ── 토큰 정의 (D6) ──────────────────────────────────────────────────────
