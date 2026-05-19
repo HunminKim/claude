@@ -139,6 +139,26 @@ def main() -> int:
     if hot_level:
         _print_stderr(lib.format_hot_file_warn(target, hot_level, hot_count))
 
+    # ── 동일 파일 재편집 힌트: Edit → MultiEdit 유도 ─────────────────────
+    # 같은 gate 내에서 이미 수정한 파일을 Edit으로 다시 호출하면
+    # 차단하지 않고 additionalContext로 비차단 힌트를 전달한다.
+    if tool_name == "Edit" and target and target in gate["unique_files"]:
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "additionalContext": lib.format_multi_edit_hint(target),
+                    }
+                },
+                ensure_ascii=False,
+            )
+        )
+        sys.stdout.flush()
+        lib.save_state(root, state)
+        return 0
+
     gate["edit_count"] += 1
     gate["last_edit_ts"] = lib.now_iso()
     if gate["state"] == "approved":
