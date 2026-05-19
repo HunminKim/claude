@@ -42,7 +42,12 @@ def main() -> int:
         return 0
 
     # verifier 미호출 경고 — 편집이 있는데 verifier 를 한 번도 안 불렀으면 리마인드
-    if gate.get("edit_count", 0) > 0 and gate.get("verifier_status") is None:
+    # auto-approved 게이트(project-init 등 스캐폴딩)는 verifier 대상 아님
+    if (
+        gate.get("edit_count", 0) > 0
+        and gate.get("verifier_status") is None
+        and not gate.get("approved_auto")
+    ):
         sys.stderr.write(
             "\n[plan-gate] ⚠️  @verifier 미호출\n"
             "  편집이 있었지만 검증이 없습니다. /done 전 @verifier 호출 필수.\n"
@@ -71,19 +76,17 @@ def main() -> int:
         # 이미 차단 — scope creep 메시지가 이미 나왔을 것
         return 0
 
-    near_limit = (
-        max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1 or post_unique >= lib.TRIGGER_UNIQUE_FILES - 1
-    )
+    near_limit = max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
     if near_limit:
         sys.stderr.write(
             f"\n[plan-gate] ⚠️  approved({auto_label})"
-            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}"
+            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}"
             f" — 다음 편집 시 차단됩니다. 작업 완료면 /done\n\n"
         )
     else:
         sys.stderr.write(
             f"\n[plan-gate] approved({auto_label})"
-            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}"
+            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}"
             f" — 새 작업이면 /done\n\n"
         )
 
