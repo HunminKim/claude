@@ -3,7 +3,7 @@
 
 동작 (D1/D2/D5/D7 + UX 풍부화):
   1. 첫 Edit 직전: working tree clean이면 lightweight tag 생성 (롤백 지점)
-  2. 호출마다 edit_count / unique_files / multi_edit_max 누적
+  2. 호출마다 edit_count / unique_files 누적
   3. created 상태에서 임계값 직전(soft hint): exit 0 + stderr 부드러운 경고
   4. created 상태에서 임계값 도달:
        - 현재 dirty 변경을 stash (gate_id 마커)
@@ -132,7 +132,6 @@ def main() -> int:
 
     # ── 카운터 누적 ──────────────────────────────────────────────────────
     target = lib.extract_target_file(tool_name, tool_input, project_root=root)
-    multi_items = lib.count_multi_edit_items(tool_name, tool_input)
 
     # ── .plan-gateignore 무시 목록 확인 (자동 추가 포함) ────────────────
     if target:
@@ -186,8 +185,6 @@ def main() -> int:
             gate["unique_files"].append(target)
         counts = gate.setdefault("file_edit_counts", {})
         counts[target] = counts.get(target, 0) + 1
-    if multi_items > gate["multi_edit_max"]:
-        gate["multi_edit_max"] = multi_items
 
     # ── soft hint (트리거 직전) ─────────────────────────────────────────
     # created 상태에서 트리거 임박 시 부드러운 경고만 출력 (차단 X).
