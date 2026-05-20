@@ -130,6 +130,27 @@ def cmd_approve(root, state) -> int:
     return 0
 
 
+def _recover_verifier_from_file(root, gate, state) -> bool:
+    """update_docs.py가 gate 업데이트를 놓쳤을 때 verifier_result.json에서 직접 복구."""
+    import json
+    from pathlib import Path as _Path
+
+    result_path = _Path(root) / "docs" / ".verifier_result.json"
+    if not result_path.exists():
+        return False
+    try:
+        verdict = json.loads(result_path.read_text(encoding="utf-8")).get("verdict")
+    except Exception:
+        return False
+    if verdict not in ("✅", "❌"):
+        return False
+    gate["state"] = "verified"
+    gate["verifier_status"] = verdict
+    lib.save_state(root, state)
+    _info(f"[plan-gate done] verifier_result.json에서 상태 복구: {verdict}")
+    return True
+
+
 def cmd_done(root, state) -> int:
     gate = _need_gate(state, "done")
     if gate is None:
@@ -144,12 +165,15 @@ def cmd_done(root, state) -> int:
         return 1
 
     if gate.get("verifier_status") is None:
-        _err(
-            "[plan-gate done] verifier 미검증 — 완료 불가.\n"
-            "  @verifier 호출 → docs/.verifier_result.json 생성 후 다시 /done.\n"
-            "  의도적으로 건너뛰려면 /skip-verify 를 명시적으로 입력."
-        )
-        return 1
+        # update_docs.py가 gate 업데이트를 놓친 경우 — verifier_result.json에서 직접 복구
+        recovered = _recover_verifier_from_file(root, gate, state)
+        if not recovered:
+            _err(
+                "[plan-gate done] verifier 미검증 — 완료 불가.\n"
+                "  @verifier 호출 → docs/.verifier_result.json 생성 후 다시 /done.\n"
+                "  의도적으로 건너뛰려면 /skip-verify 를 명시적으로 입력."
+            )
+            return 1
 
     if lib.post_approval_limit_exceeded(gate):
         _info(
