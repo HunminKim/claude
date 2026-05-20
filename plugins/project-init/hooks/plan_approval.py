@@ -19,9 +19,12 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
 
-# 슬래시 유무 모두 처리: /approve-plan, approve-plan 둘 다 동작
+# 슬래시 유무 모두 처리: /approve-plan, approve-plan, /approve 모두 동작
+# 게이트 전이는 commands/*.md 가 아닌 이 UserPromptSubmit 훅으로만 처리한다 —
+# commands/*.md 는 Claude 의 Skill 도구로 자율 호출 가능해 사용자 게이트키퍼를 우회한다.
 _ACTION_TOKENS = {
     "approve-plan": "approve",
+    "approve": "approve",
     "done": "done",
     "skip": "skip",
     "keep": "skip",
