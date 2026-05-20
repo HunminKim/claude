@@ -26,7 +26,6 @@ from typing import Any
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
 # 누더기 감지: 동일 파일 반복 패치 (파일별 편집 횟수 기준)
 TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
-TRIGGER_MULTI_EDIT_ITEMS = 5
 GC_MAX_AGE_DAYS = 30
 
 # 자동으로 .plan-gateignore에 추가할 후보 패턴 (파일명 기준, fnmatch)
@@ -274,7 +273,6 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "file_edit_counts": {},              # {파일경로: 편집횟수} — 파일별 반복 편집 감지용
         "file_edit_counts_post_approval": {},  # 승인 후 파일별 편집 횟수 (재차단 기준)
         "unique_files_post_approval": [],      # 승인 후 편집된 파일 목록
-        "multi_edit_max": 0,
         "initial_edit_count": None,
         "initial_unique_files": None,
         "approved_at": None,
@@ -317,10 +315,7 @@ def _unique_code_files(gate: dict[str, Any]) -> int:
 
 
 def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
-    return (
-        _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
-        or gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS
-    )
+    return _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
 
 
 def post_approval_stats(gate: dict[str, Any]) -> tuple[int, int]:
@@ -374,12 +369,6 @@ def extract_target_file(
         except (ValueError, OSError):
             return None
     return fp
-
-
-def count_multi_edit_items(tool_name: str, tool_input: dict[str, Any]) -> int:
-    if tool_name == "MultiEdit":
-        return len(tool_input.get("edits", []) or [])
-    return 0
 
 
 def load_gate_ignore(root: Path) -> list[str]:
@@ -497,10 +486,6 @@ def trigger_reason_human(gate: dict[str, Any]) -> str:
         reasons.append(
             f"동일 파일 반복 편집 — {hot_file} {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
         )
-    if gate["multi_edit_max"] >= TRIGGER_MULTI_EDIT_ITEMS:
-        reasons.append(
-            f"단일 MultiEdit {gate['multi_edit_max']}개 항목 (임계 {TRIGGER_MULTI_EDIT_ITEMS})"
-        )
     return " / ".join(reasons) or "임계값 도달"
 
 
@@ -527,7 +512,7 @@ def _intro_block() -> str:
         "  /rollback 으로 안전하게 되돌릴 수 있습니다.\n"
         "  비활성화: .claude/agents/verifier.md 를 삭제하면 plan-gate 가 꺼집니다.\n"
         "  임계값 조정: plugins/project-init/hooks/plan_gate_lib.py 상수\n"
-        "              (TRIGGER_REPEAT_RATIO, TRIGGER_MULTI_EDIT_ITEMS 등) 를 수정하세요.\n"
+        "              (TRIGGER_REPEAT_RATIO 등) 를 수정하세요.\n"
         "  이 안내는 한 번만 표시됩니다.\n"
     )
 
@@ -568,8 +553,6 @@ def format_trigger_message(
         "  • 영향 파일 목록:",
         _files_list(gate),
     ]
-    if gate["multi_edit_max"] > 0:
-        parts.append(f"  • MultiEdit 최대 항목 수: {gate['multi_edit_max']}")
     parts += [
         "",
         "▌ 자동으로 생성된 체크포인트",
