@@ -134,10 +134,17 @@ def main() -> int:
     target = lib.extract_target_file(tool_name, tool_input, project_root=root)
     multi_items = lib.count_multi_edit_items(tool_name, tool_input)
 
-    # ── .plan-gateignore 무시 목록 확인 ─────────────────────────────────
-    if target and lib.is_gate_ignored(target, root, lib.load_gate_ignore(root)):
-        lib.save_state(root, state)
-        return 0
+    # ── .plan-gateignore 무시 목록 확인 (자동 추가 포함) ────────────────
+    if target:
+        ignore_patterns = lib.load_gate_ignore(root)
+        added = lib.auto_add_gate_ignore(target, root, ignore_patterns)
+        if added:
+            pattern, reason = added
+            _print_stderr(f"\n[plan-gate] .plan-gateignore에 '{pattern}' 자동 추가 ({reason})\n")
+            ignore_patterns = lib.load_gate_ignore(root)
+        if lib.is_gate_ignored(target, root, ignore_patterns):
+            lib.save_state(root, state)
+            return 0
 
     # ── hot-file 경고 (세션 간 패치 누적 감지) ───────────────────────────
     hot_level, hot_count = lib.hot_file_check(root, target)
