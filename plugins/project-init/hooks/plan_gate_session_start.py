@@ -64,7 +64,7 @@ def main() -> int:
         "─" * 60,
         f"  id      : {gate['id']}",
         f"  state   : {g_state}",
-        f"  edits   : {gate['edit_count']}회 (승인 후 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}회 · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}개)",
+        f"  edits   : {gate['edit_count']}회 (승인 후 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}회)",
         f"  승인    : {auto_label} ({approved_at})",
         f"  마지막  : {elapsed_str}",
         f"  tag     : {clean_tag}",
@@ -78,17 +78,16 @@ def main() -> int:
         ]
     elif g_state == "approved":
         near_repeat = max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
-        near_unique = post_unique >= lib.TRIGGER_UNIQUE_FILES - 1
-        if near_repeat or near_unique:
+        if near_repeat:
             lines += [
                 "",
-                f"⚠️  scope creep 임박 (파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES})",
+                f"⚠️  scope creep 임박 (파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO})",
                 "  작업을 마치려면 /done, 계획 조정은 /replan.",
             ]
         else:
             lines += [
                 "",
-                f"  승인 후 : 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} · 파일 {post_unique}/{lib.TRIGGER_UNIQUE_FILES}",
+                f"  승인 후 : 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}",
                 "  새 작업이면 /done 후 시작하세요.",
             ]
     elif g_state == "created":

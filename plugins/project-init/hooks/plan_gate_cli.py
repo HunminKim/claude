@@ -68,7 +68,7 @@ def cmd_approve(root, state) -> int:
         _info(
             f"[plan-gate approve] 선승인 완료: {gate['id']}\n"
             f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
-            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or 파일 {lib.TRIGGER_UNIQUE_FILES}개"
+            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or MultiEdit {lib.TRIGGER_MULTI_EDIT_ITEMS}개 항목"
         )
         return 0
 
@@ -125,7 +125,7 @@ def cmd_approve(root, state) -> int:
     lib.save_state(root, state)
     _info(
         f"[plan-gate approve] 승인 완료: {gate['id']}\n"
-        f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or 파일 {lib.TRIGGER_UNIQUE_FILES}개 (scope creep 방지)"
+        f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 or MultiEdit {lib.TRIGGER_MULTI_EDIT_ITEMS}개 항목 (scope creep 방지)"
     )
     return 0
 
@@ -378,7 +378,7 @@ def cmd_status(root, state) -> int:
         f"  id              = {gate['id']}\n"
         f"  state           = {g_state}\n"
         f"  edits           = {gate['edit_count']}\n"
-        f"  edits_approved  = {gate['edit_count_post_approval']} (파일별 한도: 반복 {lib.TRIGGER_REPEAT_RATIO}회 / 파일 {lib.TRIGGER_UNIQUE_FILES}개)\n"
+        f"  edits_approved  = {gate['edit_count_post_approval']} (한도: 단일 파일 반복 {lib.TRIGGER_REPEAT_RATIO}회 / MultiEdit {lib.TRIGGER_MULTI_EDIT_ITEMS}개 항목)\n"
         f"  unique_files    = {len(gate['unique_files'])}\n"
         f"  multi_edit_max  = {gate['multi_edit_max']}\n"
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"
