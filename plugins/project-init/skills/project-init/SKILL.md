@@ -169,6 +169,7 @@ scripts/
 - `{{TEST_COMMAND}}` — 전체 테스트 실행 명령어
 - `{{TEST_SINGLE_COMMAND}}` — 단일 테스트 실행 명령어
 - `{{LINT_COMMAND}}` — 린트 명령어 (없으면 해당 줄 제거)
+- **다중 스택/모노레포(예: 백엔드 Python + 프론트 Next.js)**: 도메인별 lint/build/test 를 각각 별도 줄로 모두 적는다 (예: `ruff check .` 와 `npm run lint` 를 두 줄로). 한 줄만 적으면 pre-commit·verifier 가 나머지 도메인을 게이트하지 못해 위반이 조용히 누적된다.
 
 이미 `CLAUDE.md`가 있으면:
 1. 기존 내용을 읽는다
