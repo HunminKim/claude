@@ -58,11 +58,26 @@ PYEOF
     fi
 fi
 
-LINT_CMD=$(grep -E "^\s*(ruff|pylint|flake8|eslint|tsc|mypy|black|isort)\b" "$CLAUDE_MD" 2>/dev/null | head -1 | sed 's/^[[:space:]]*//')
+# CLAUDE.md 명령어 섹션에서 lint 명령을 모두 추출한다.
+# - 단독 린터/타입체커: ruff, eslint, tsc 등
+# - npm/pnpm/yarn/bun 스크립트는 lint 만 매칭 (build/test 오실행 방지)
+LINT_CMDS=$(grep -E "^\s*((ruff|pylint|flake8|eslint|tsc|mypy|black|isort)\b|(npm|pnpm|yarn|bun)(\s+run)?\s+lint\b)" "$CLAUDE_MD" 2>/dev/null | sed 's/^[[:space:]]*//')
 
-if [ -z "$LINT_CMD" ]; then
+if [ -z "$LINT_CMDS" ]; then
+    echo "[pre-commit] 경고: CLAUDE.md에 등록된 lint 명령이 없어 lint 검증을 건너뜁니다." >&2
     exit 0
 fi
 
-echo "[pre-commit] 린트 실행: $LINT_CMD"
-eval "$LINT_CMD" || { echo "[pre-commit] 린트 실패. 오류를 수정 후 다시 커밋하세요." >&2; exit 1; }
+# 매칭된 lint 명령을 모두 실행한다 (백엔드+프론트 동시 게이트). 첫 실패에서 멈추지
+# 않고 전부 돌려 위반을 한 번에 보여준다.
+LINT_FAILED=0
+while IFS= read -r LINT_CMD; do
+    [ -z "$LINT_CMD" ] && continue
+    echo "[pre-commit] 린트 실행: $LINT_CMD"
+    eval "$LINT_CMD" || { echo "[pre-commit] 린트 실패: $LINT_CMD" >&2; LINT_FAILED=1; }
+done <<< "$LINT_CMDS"
+
+if [ "$LINT_FAILED" -ne 0 ]; then
+    echo "[pre-commit] 린트 실패. 오류를 수정 후 다시 커밋하세요." >&2
+    exit 1
+fi
