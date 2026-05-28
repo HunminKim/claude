@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook — 설계 키워드 감지 시 5단계 체크리스트를 Claude context에 주입.
+
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 docs/constraints.yaml 이 없으면 무음 종료 (초기화 전 오작동 방지).
 """
 import json, os, re, sys
@@ -47,7 +50,7 @@ def main():
     if root is None:
         sys.exit(0)
     div = "━" * 57
-    print("\n".join([
+    msg = "\n".join([
         "", div,
         "[DESIGN PRECHECK] 설계 요청 감지 — 구현 전 5단계 확인",
         div, "",
@@ -59,7 +62,14 @@ def main():
         "",
         "위 5단계 확인 후 설계 결과를 docs/decisions.md 에 D-번호로 기록할 것.",
         div, "",
-    ]))
+    ])
+    advisory = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
 if __name__ == "__main__":
     main()

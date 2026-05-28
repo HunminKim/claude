@@ -4,6 +4,11 @@ verifier가 docs/.verifier_result.json 을 생성하면
 자동으로 checklist.md, completion_report.md, technical_doc.md 를 업데이트한다.
 
 이 파일은 verifier 외에 아무도 건드려서는 안 된다.
+
+출력 채널:
+- verifier ✅/❌ 결과 advisory: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+  → Claude 가 행동 지시("한국어 한 단락 요약" 등)를 받아 자기 응답에 반영
+- plan-gate 통합 경고, 결과 파일 삭제 알림: 사용자 터미널 전용 (stderr/stdout 평문)
 """
 
 import json
@@ -228,7 +233,7 @@ try:
                     _smells_block = (
                         f"\n▌ 설계 냄새 (판정 영향 없음 — 관찰 기록)\n{_smells_lines}\n"
                     )
-                print(
+                _msg = (
                     f"\n{_div}\n"
                     f"✅ verifier 검증 통과 — 사용자 결정 대기\n"
                     f"{_div}\n"
@@ -248,6 +253,12 @@ try:
                     f"  안내한 뒤, 사용자 입력을 기다린다.\n"
                     f"{_div}"
                 )
+                print(json.dumps({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PostToolUse",
+                        "additionalContext": _msg,
+                    }
+                }, ensure_ascii=False))
             else:
                 _issues_text = (
                     "\n".join(f"  • {i}" for i in issues) if issues else "  (상세 사유 없음)"
@@ -258,7 +269,7 @@ try:
                     if _has_ckpt
                     else "  /rollback  ⚠️  체크포인트 없음 — 사용 불가 (/skip 또는 /done 권장)\n"
                 )
-                print(
+                _msg = (
                     f"\n{_div}\n"
                     f"❌ verifier 검증 실패 — 사용자 결정 대기\n"
                     f"{_div}\n"
@@ -282,6 +293,12 @@ try:
                     f"  추가 Edit 시도는 D1 lock 으로 차단되므로 사용자 결정 전까지 멈춘다.\n"
                     f"{_div}"
                 )
+                print(json.dumps({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PostToolUse",
+                        "additionalContext": _msg,
+                    }
+                }, ensure_ascii=False))
 except Exception as _e:  # plan-gate 통합 실패는 verifier 흐름을 깨뜨리지 않는다
     print(f"[update_docs] plan-gate 통합 경고: {_e}", file=sys.stderr)
 
