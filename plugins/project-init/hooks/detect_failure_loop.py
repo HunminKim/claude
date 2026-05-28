@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""
-Bash 실행 실패를 누적 추적하여 연속 실패 루프를 감지한다.
-1회 실패: stdout 소프트 힌트 (exit 0).
-2회 연속: stderr 하드 경고 + exit 2 (hook error 블록으로 주입).
+"""PostToolUse hook (matcher: Bash) — Bash 실행 실패 누적 추적 → 연속 실패 루프 감지.
+
+출력 채널:
+- 1회 실패: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+- 2회 연속: 차단 (exit 2 + stderr — hook error 블록으로 주입)
+
+1회 실패에서 Claude 가 환기 메시지를 받아 "같은 접근 재시도 전 원인 확인" 으로
+행동을 보정하지 못하면 2회차 차단으로 진입한다.
 """
 
 from __future__ import annotations
@@ -140,9 +144,15 @@ def main():
     log["last_reset"] = datetime.utcnow().isoformat()
     save_log(log_path, log)
 
-    # 1회 실패: 소프트 힌트 (exit 0, 카운터 유지)
+    # 1회 실패: 소프트 힌트 (advisory, 카운터 유지)
     if log["consecutive_failures"] == 1:
-        print(format_soft_hint(log["entries"][-1]))
+        payload = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": format_soft_hint(log["entries"][-1]),
+            }
+        }
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False))
         sys.exit(0)
 
     # 임계값 도달: 하드 경고 + exit 2 (hook error 블록으로 주입)
