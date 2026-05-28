@@ -30,7 +30,7 @@ REQUIRED_BLOCKS: tuple[str, ...] = (
     "GATE:",
 )
 DELEGATION_SUBAGENTS: frozenset[str] = frozenset(
-    {"backend", "frontend", "deeplearning", "ai", "general-purpose"}
+    {"backend", "frontend", "deeplearning", "ai", "infra", "general-purpose"}
 )
 
 
