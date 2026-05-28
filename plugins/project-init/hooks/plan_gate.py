@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """PreToolUse hook (matcher: Edit|Write|MultiEdit) — plan-gate 강제.
 
+출력 채널:
+- 차단 (D1 lock / 트리거 / scope creep): exit 2 + stderr — Claude blocking error 주입
+- 환기 (자동 승인 / stale gate / 24h 잔류 / hot-file / soft hint / multi-edit hint): exit 0 + stdout hookSpecificOutput.additionalContext JSON — Claude context 주입
+- 사용자 터미널 전용 (.plan-gateignore 자동 추가): exit 0 + stderr
+
 동작 (D1/D2/D5/D7 + UX 풍부화):
   1. 첫 Edit 직전: working tree clean이면 lightweight tag 생성 (롤백 지점)
   2. 호출마다 edit_count / unique_files 누적
-  3. created 상태에서 임계값 직전(soft hint): exit 0 + stderr 부드러운 경고
+  3. created 상태에서 임계값 직전(soft hint): advisory 환기
   4. created 상태에서 임계값 도달:
        - 현재 dirty 변경을 stash (gate_id 마커)
        - clean tag 확보, todo.md 해시 캡처
-       - exit 2 + stderr 풍부한 한국어 안내 (사용자+Claude 동시 노출)
+       - exit 2 + stderr 풍부한 한국어 안내 (차단)
        - 첫 차단이면 plan-gate 소개도 함께 표시 (dismissable)
   5. approved 상태에서 scope creep(post_approval limit) 도달 시 차단
   6. verified+❌ 미해결 상태에서 새 Edit 시도하면 D1 lock으로 차단
+
+환기 메시지는 list 에 누적했다가 통과 분기에서 한 번에 JSON 출력한다.
+차단 분기에선 advisory 무시 (차단 우선, 환기는 다음 사이클로).
 """
 
 from __future__ import annotations
@@ -30,11 +38,29 @@ def _print_stderr(msg: str) -> None:
     sys.stderr.write(msg + "\n")
 
 
+def _emit_advisories(items: list[str]) -> None:
+    """누적된 환기 메시지를 hookSpecificOutput.additionalContext JSON 한 번으로 출력."""
+    if not items:
+        return
+    combined = "\n\n".join(items)
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": combined,
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.flush()
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
     except Exception:
         return 0
+
+    advisories: list[str] = []  # 환기 메시지 누적, 통과 분기에서 한 번에 emit
 
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {}) or {}
@@ -73,14 +99,14 @@ def main() -> int:
                 current_mtime = str(todo_path.stat().st_mtime)
                 prev_sha = lib.last_archived_todo_sha(root)
                 if prev_sha and current_sha == prev_sha:
-                    _print_stderr(
-                        "\n[plan-gate] ℹ️  tasks/todo.md가 이전 사이클과 동일 → 자동 승인 스킵.\n"
-                        "  새 계획을 작성하거나 /approve-plan 으로 명시 승인하세요.\n"
+                    advisories.append(
+                        "[plan-gate] ℹ️  tasks/todo.md가 이전 사이클과 동일 → 자동 승인 스킵.\n"
+                        "  새 계획을 작성하거나 /approve-plan 으로 명시 승인하세요."
                     )
                 else:
                     ok, issues = lib.validate_todo_quality(root)
                     if not ok:
-                        _print_stderr(lib.format_todo_quality_hint(issues))
+                        advisories.append(lib.format_todo_quality_hint(issues))
                     else:
                         gate["state"] = "approved"
                         gate["approved_at"] = lib.now_iso()
@@ -92,9 +118,9 @@ def main() -> int:
                         gate["initial_unique_files"] = 0
                         gate["todo_md_sha256"] = current_sha
                         gate["todo_md_mtime"] = current_mtime
-                        _print_stderr(
-                            f"\n[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복\n"
+                        advisories.append(
+                            f"[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
+                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복"
                         )
         except Exception:
             pass
@@ -102,10 +128,10 @@ def main() -> int:
     # ── stale created gate 경고: 편집이 쌓인 채 방치된 gate ────────────────
     # approved 이전 "created" 상태에서도 편집이 많이 쌓이면 /done 을 강하게 유도.
     if gate and gate["state"] == "created" and gate.get("edit_count", 0) >= 3:
-        _print_stderr(
-            f"\n[plan-gate] ⚠️  이전 작업 gate가 닫히지 않았습니다 (편집 {gate['edit_count']}회 누적).\n"
+        advisories.append(
+            f"[plan-gate] ⚠️  이전 작업 gate가 닫히지 않았습니다 (편집 {gate['edit_count']}회 누적).\n"
             "  이전 작업이 끝났다면 지금 /done 을 입력하세요.\n"
-            "  /done 없이 계속하면 카운트가 누적되어 현재 작업이 차단됩니다.\n"
+            "  /done 없이 계속하면 카운트가 누적되어 현재 작업이 차단됩니다."
         )
 
     # ── 세션 재진입 경고: 24시간 이상 된 approved gate 잔류 ──────────────
@@ -117,9 +143,9 @@ def main() -> int:
                 if created.tzinfo is None:
                     created = created.replace(tzinfo=timezone.utc)
                 if (datetime.now(timezone.utc) - created).total_seconds() > 86400:
-                    _print_stderr(
-                        f"\n[plan-gate] ⚠️  24시간 이상 된 approved gate 잔류: {gate['id']}\n"
-                        "  이전 세션에서 완료되지 않은 작업입니다. /done 또는 /rollback 으로 정리하세요.\n"
+                    advisories.append(
+                        f"[plan-gate] ⚠️  24시간 이상 된 approved gate 잔류: {gate['id']}\n"
+                        "  이전 세션에서 완료되지 않은 작업입니다. /done 또는 /rollback 으로 정리하세요."
                     )
         except Exception:
             pass
@@ -148,25 +174,14 @@ def main() -> int:
     # ── hot-file 경고 (세션 간 패치 누적 감지) ───────────────────────────
     hot_level, hot_count = lib.hot_file_check(root, target)
     if hot_level:
-        _print_stderr(lib.format_hot_file_warn(target, hot_level, hot_count))
+        advisories.append(lib.format_hot_file_warn(target, hot_level, hot_count))
 
     # ── 동일 파일 재편집 힌트: Edit → MultiEdit 유도 ─────────────────────
     # 같은 gate 내에서 이미 수정한 파일을 Edit으로 다시 호출하면
     # 차단하지 않고 additionalContext로 비차단 힌트를 전달한다.
     if tool_name == "Edit" and target and target in gate["unique_files"]:
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "allow",
-                        "additionalContext": lib.format_multi_edit_hint(target),
-                    }
-                },
-                ensure_ascii=False,
-            )
-        )
-        sys.stdout.flush()
+        advisories.append(lib.format_multi_edit_hint(target))
+        _emit_advisories(advisories)
         lib.save_state(root, state)
         return 0
 
@@ -194,7 +209,8 @@ def main() -> int:
         and not lib.trigger_threshold_exceeded(gate)
         and _max_repeat == lib.TRIGGER_REPEAT_RATIO - 1
     ):
-        _print_stderr(lib.format_soft_hint(gate))
+        advisories.append(lib.format_soft_hint(gate))
+        _emit_advisories(advisories)
         lib.save_state(root, state)
         return 0
 
@@ -241,6 +257,7 @@ def main() -> int:
         return 2
 
     # ── 통과 ────────────────────────────────────────────────────────────
+    _emit_advisories(advisories)
     lib.save_state(root, state)
     return 0
 

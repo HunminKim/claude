@@ -117,14 +117,15 @@ tasks/
 scripts/
 └── validate_arch.py            ← pre-push 아키텍처 제약 검증
 .claude/agents/
-└── verifier.md                 ← 기능 검증 전담 서브에이전트
+├── verifier.md                 ← 기능 검증 전담 서브에이전트
+└── infra.md                    ← 인프라 전문 구현 서브에이전트 (IaC/컨테이너/CI/CD/클라우드)
 .claude/
 └── plan_gate_enabled           ← plan-gate 활성화 플래그 (반드시 마지막에 생성)
 ```
 
 각 문서 파일 내용은 아래 **템플릿 섹션**을 참고한다. 프로젝트 이름, 날짜(KST 기준), 기술 스택을 템플릿에 채워 넣는다.
 
-`verifier.md`는 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/verifier.md` 템플릿을 읽어 `.claude/agents/verifier.md`로 생성한다.
+`verifier.md` 와 `infra.md` 는 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/` 의 동명 템플릿을 읽어 `.claude/agents/` 에 생성한다.
 
 `.claude/plan_gate_enabled` 파일은 **모든 파일 생성이 완료된 가장 마지막 단계**에 생성한다. 이 파일 존재 여부가 plan-gate 활성화 트리거이므로, 반드시 가장 마지막에 생성해야 project-init 실행 중 plan-gate가 조기 발동되지 않는다.
 
@@ -137,7 +138,7 @@ scripts/
 3. `.claude/rules/code-style.md` — 코드 스타일 규칙
 4. `.claude/memory/lessons.md`, `.claude/memory/workflow.md` — 메모리 파일
 5. `.claude/hooks/time_context.py`, `design-precheck.py`, `post-compact.py`, `cleanup_suggest.py` — 훅 스크립트 (settings.json 등록 대상)
-6. `.claude/agents/verifier.md` — 모든 hook 스크립트 생성 후 마지막으로 생성
+6. `.claude/agents/verifier.md` 와 `.claude/agents/infra.md` — 모든 hook 스크립트 생성 후 마지막으로 생성
 7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md` — 문서·스크립트 계층 (순서 무관)
 8. `.claude/plan_gate_enabled` — **반드시 마지막**. 이 파일이 생성된 순간부터 plan-gate가 활성화된다
 
@@ -347,6 +348,10 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 ### .claude/agents/verifier.md 템플릿
 
 `assets/templates/agents/verifier.md` 파일을 읽어 사용한다.
+
+### .claude/agents/infra.md 템플릿
+
+`assets/templates/agents/infra.md` 파일을 읽어 사용한다.
 
 ### .claude/rules/code-style.md 템플릿
 

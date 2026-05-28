@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Stop hook — Claude 응답 종료 직전 plan-gate 상태 리마인더.
 
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 approved 게이트가 활성 상태이고 응답 중에 편집이 발생했을 때
 (last_edit_ts가 응답 시작 이후로 갱신된 경우) 현재 한도 소모 현황을
-사용자에게 보여준다. 편집이 없었던 응답(조회·대화)에는 출력하지 않아
+Claude에게 환기한다. 편집이 없었던 응답(조회·대화)에는 출력하지 않아
 노이즈를 최소화한다.
 
 한도의 70% 이상 소진 시 /compact 권고 + compact 후 이어받기 프롬프트를 함께 출력한다.
 
-exit 2 로 응답을 차단하지 않는다 (정보 제공 전용).
+차단하지 않는다 (정보 제공 전용 — Claude 가 다음 응답에서 verifier 호출,
+/done 안내 등 자기 흐름에 반영).
 """
 
 from __future__ import annotations
@@ -25,11 +28,27 @@ import plan_gate_lib as lib  # noqa: E402
 _RECENT_EDIT_WINDOW_SECONDS = 300  # 5분 이내 편집 = 이번 응답의 작업
 
 
+def _emit_advisories(items: list[str]) -> None:
+    if not items:
+        return
+    combined = "\n\n".join(items)
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": combined,
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.flush()
+
+
 def main() -> int:
     try:
         json.load(sys.stdin)
     except Exception:
         return 0
+
+    advisories: list[str] = []
 
     root = lib.find_project_root()
     if root is None or not lib.is_plan_gate_enabled(root):
@@ -48,15 +67,16 @@ def main() -> int:
         and gate.get("verifier_status") is None
         and not gate.get("approved_auto")
     ):
-        sys.stderr.write(
-            "\n[plan-gate] ⚠️  @verifier 미호출\n"
+        advisories.append(
+            "[plan-gate] ⚠️  @verifier 미호출\n"
             "  편집이 있었지만 검증이 없습니다. /done 전 @verifier 호출 필수.\n"
-            "  건너뛰려면 /skip-verify 를 명시적으로 입력.\n\n"
+            "  건너뛰려면 /skip-verify 를 명시적으로 입력."
         )
 
     # 이번 응답 중 편집이 있었는지 확인 (last_edit_ts 기준)
     last_edit_str = gate.get("last_edit_ts")
     if not last_edit_str:
+        _emit_advisories(advisories)
         return 0
 
     try:
@@ -65,8 +85,10 @@ def main() -> int:
             last_edit = last_edit.replace(tzinfo=timezone.utc)
         elapsed = datetime.now(timezone.utc) - last_edit
         if elapsed > timedelta(seconds=_RECENT_EDIT_WINDOW_SECONDS):
+            _emit_advisories(advisories)
             return 0  # 최근 편집 없음 — 이번 응답에서 코드 수정 없었음
     except Exception:
+        _emit_advisories(advisories)
         return 0
 
     max_repeat, post_unique = lib.post_approval_stats(gate)
@@ -74,22 +96,24 @@ def main() -> int:
 
     if lib.post_approval_limit_exceeded(gate):
         # 이미 차단 — scope creep 메시지가 이미 나왔을 것
+        _emit_advisories(advisories)
         return 0
 
     near_limit = max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
     if near_limit:
-        sys.stderr.write(
-            f"\n[plan-gate] ⚠️  approved({auto_label})"
+        advisories.append(
+            f"[plan-gate] ⚠️  approved({auto_label})"
             f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}"
-            f" — 다음 편집 시 차단됩니다. 작업 완료면 /done\n\n"
+            f" — 다음 편집 시 차단됩니다. 작업 완료면 /done"
         )
     else:
-        sys.stderr.write(
-            f"\n[plan-gate] approved({auto_label})"
+        advisories.append(
+            f"[plan-gate] approved({auto_label})"
             f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}"
-            f" — 새 작업이면 /done\n\n"
+            f" — 새 작업이면 /done"
         )
 
+    _emit_advisories(advisories)
     return 0
 
 

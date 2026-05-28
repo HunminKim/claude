@@ -48,20 +48,73 @@
 | 작업 유형 | 위임 대상 |
 |---------|---------|
 | UI 컴포넌트, 상태 관리, 스타일링 | `@frontend` |
-| API, DB 스키마, 비즈니스 로직, 보안 | `@backend` |
+| API, DB 스키마/마이그레이션, 비즈니스 로직, 인증·인가 *로직* | `@backend` |
 | 모델, 학습 파이프라인, 데이터 전처리 | `@deeplearning` |
+| IaC, 컨테이너 이미지·오케스트레이션, CI/CD, 클라우드 리소스·IAM·시크릿·모니터링 IaC | `@infra` |
 | 구현 완료 후 검증 | `@verifier` |
 
-### 위임 시 메인이 전달할 것
-1. 구현할 기능 설명
-2. 담당 파일 범위 (건드리면 안 되는 파일 포함)
-3. 완료 기준
-4. plan-gate가 approved 상태임을 명시
+`@backend` 와 `@infra` 경계 모호 케이스는 `agents/infra.md` 의 "도메인 경계" 표를 단일 진실 원천으로 사용한다.
+Dockerfile · k8s manifest · CI workflow 정의 · IAM 정책 = `@infra`. 컨테이너 안에서 실행되는 코드 = `@backend`(또는 해당 도메인).
+
+### 위임 전 due diligence (필수)
+
+메인 Claude의 self-check만으로는 영향 파일 누락·기술 충돌·USER_DECISIONS 누설을 잡지 못한다.
+서브에이전트 위임 전 아래 2단계를 완료한다:
+
+1. **`tasks/todo.md` 5섹션 작성** — 영향 파일 / USER_DECISIONS / CONSTRAINTS / 기술 충돌 점검 / fallback. 빈 섹션은 "N/A" 명시, 블록 누락 금지.
+2. **Plan subagent 외부 검증** — `Task(subagent_type="Plan", prompt=...)` 호출. 검증 항목:
+   - 영향 파일이 비어 있지 않은가
+   - 동기/비동기·MCP 호출 방식·공유 타입 충돌 여부
+   - fallback 분기가 별도 게이트(HTML 주석 마커)로 분리됐는가
+   - USER_DECISIONS가 평문에 섞이지 않았는가
+   - 직전 위임 사이클에서 효과 본 패턴이 재적용됐는가
+
+Plan 보고에 ⚠️ 가 있으면 todo.md 보강 후 재검증. 통과 시에만 도메인 에이전트 위임.
+**"Think Before Coding"이 추상 원칙이라면 Plan subagent 호출이 그 구체 강제 절차다.**
+
+### 위임 시 메인이 전달할 것 (표준 블록)
+
+위임 프롬프트는 아래 4개 블록을 사용한다. 사용자 결정 영역과 자체 판단 영역을 평문에 섞지 않는다.
+**USER_DECISIONS / CONSTRAINTS 블록은 `tasks/todo.md`의 동일 섹션에서 그대로 발췌한다 — todo.md 가 단일 진실 원천, 위임 프롬프트는 그 파생물이다.**
+
+```
+TASK:
+  - 구현할 기능 설명
+  - 담당 파일 범위 (todo.md "영향 파일" 섹션 발췌. 건드리면 안 되는 파일 포함)
+  - 완료 기준 (기계적으로 판별 가능한 형태)
+
+USER_DECISIONS:
+  - todo.md "USER_DECISIONS" 섹션 그대로 발췌
+  - 자유도 0 — 변경·우회·차선책 자체 선택 모두 금지
+  - 예: "검색은 web_search MCP 도구 사용"
+  - 비어 있으면 "없음" 명시 (블록 자체는 누락 금지)
+
+CONSTRAINTS:
+  - todo.md "CONSTRAINTS" 섹션 그대로 발췌
+  - 막히면 즉시 중단 후 메인에 결정 요청 — 자체 해결 시도 금지
+
+GATE:
+  - plan-gate 상태: approved
+  - Plan subagent 외부 검증: 통과
+```
+
+USER_DECISIONS 블록은 누락 금지. 사용자가 한 번이라도 명시 선택한 결정은 자유도 0 —
+서브에이전트가 "비슷한 효과의 차선책"으로 임의 구현하지 못하게 막는 게 이 블록의 목적이다.
+
+### 서브에이전트 보고 신뢰성 (변경 증거 강제)
+
+도메인 에이전트가 보고를 올려도 working tree는 메인과 공유되므로 보고가 부정확할 수 있다. 메인은:
+
+- 보고에 "변경 증거" 섹션이 있는지 확인 (시작 SHA + git status + git diff --stat 원문)
+- 없으면 보고를 ⚠️ 신뢰성 격하 → 메인이 직접 `git diff --stat <시작SHA>..HEAD` 실행
+- 자연어 파일 목록이 git diff --stat 출력과 어긋나면 에이전트에 재확인 요청
+- 메인의 직접 확인 결과가 우선 — 자연어 자기보고는 보조 자료다
 
 ### 제약
 - 서브에이전트 하나당 작업 하나만 할당
 - `/approve-plan` 없이 구현 위임 금지
 - 위임받은 에이전트가 막히면 메인에 보고 (자체 해결 시도 금지)
+- USER_DECISIONS 충돌 보고를 받으면 임의 재해석 금지 — 사용자에게 확인
 
 ## Think Before Coding (구현 전 필수 확인)
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook — 시간 관련 키워드 감지 시 현재 KST 시각을 컨텍스트에 주입.
 
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 Claude는 학습 데이터 기준 시간만 알고 실시간 시각을 모른다.
-이 훅이 시스템 시간을 읽어 exit 2로 주입하면 Claude가 정확한 KST 기준으로 대화한다.
+이 훅이 시스템 시간을 읽어 additionalContext 로 주입하면 Claude가 정확한 KST 기준으로 대화한다.
 """
 
 from __future__ import annotations
@@ -44,11 +46,18 @@ def main() -> int:
     except Exception:
         return 0
 
-    sys.stderr.write(
-        f"[time-context] 현재 시각: {kst}\n"
-        "시간 관련 질문에는 반드시 위 KST 기준 시각을 사용하세요. 학습 데이터 기준 시간 추정 금지.\n"
-    )
-    return 2
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": (
+                f"[time-context] 현재 시각: {kst}. "
+                "시간 관련 질문에는 반드시 이 KST 기준 시각을 사용하세요. "
+                "학습 데이터 기준 시간 추정 금지."
+            ),
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
