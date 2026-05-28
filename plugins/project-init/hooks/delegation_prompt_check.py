@@ -7,11 +7,15 @@ matcher: Task
 1. tool_name 이 Task 가 아니면 silent exit 0
 2. subagent_type 이 도메인/일반 에이전트가 아니면 silent exit 0 (verifier/Plan/Explore 등은 통과)
 3. tool_input.prompt 에서 TASK / USER_DECISIONS / CONSTRAINTS / GATE 4블록 존재 확인
-4. 누락 시 stderr + exit 2 — 보강 후 재호출 유도
-5. 통과 시 Plan subagent 외부 검증 환기 메시지 출력 + exit 0 — 강제 아닌 알림
+4. 누락 시 stderr + exit 2 — Claude context 에 blocking error 주입, 보강 후 재호출 유도
+5. 통과 시 hookSpecificOutput JSON 출력 (permissionDecision=allow + additionalContext) + exit 0
+   — 차단 없이 Plan 검증 환기 메시지를 Claude context 에 주입 (exit 0 + plain stderr 는
+   사용자 터미널만 보이고 메인 context 에 안 들어가므로 무효)
 
 한계: 정규식 기반이라 블록 존재만 점검한다. 블록 내용 적정성과 Plan 검증 실제 호출 여부는
 CLAUDE.md 의 "위임 전 due diligence" 자연어 절차에 의존한다.
+
+참고: https://code.claude.com/docs/en/hooks.md (PreToolUse hookSpecificOutput 스펙)
 """
 
 from __future__ import annotations
@@ -55,11 +59,19 @@ def main() -> int:
         )
         return 2
 
-    print(
-        "[delegation-prompt-check] 도메인 위임 직전 — Plan subagent 외부 검증 호출했는가? "
-        'Task(subagent_type="Plan", ...) 로 tasks/todo.md 5섹션 검증 권장 (강제 아님, 환기).',
-        file=sys.stderr,
-    )
+    advisory = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": (
+                "[delegation-prompt-check] 도메인 위임 직전 — "
+                "Plan subagent 외부 검증 호출했는가? "
+                'Task(subagent_type="Plan", ...) 로 tasks/todo.md 5섹션 검증 권장 '
+                "(강제 아님, 환기)."
+            ),
+        }
+    }
+    print(json.dumps(advisory, ensure_ascii=False))
     return 0
 
 
