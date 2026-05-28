@@ -48,9 +48,13 @@
 | 작업 유형 | 위임 대상 |
 |---------|---------|
 | UI 컴포넌트, 상태 관리, 스타일링 | `@frontend` |
-| API, DB 스키마, 비즈니스 로직, 보안 | `@backend` |
+| API, DB 스키마/마이그레이션, 비즈니스 로직, 인증·인가 *로직* | `@backend` |
 | 모델, 학습 파이프라인, 데이터 전처리 | `@deeplearning` |
+| IaC, 컨테이너 이미지·오케스트레이션, CI/CD, 클라우드 리소스·IAM·시크릿·모니터링 IaC | `@infra` |
 | 구현 완료 후 검증 | `@verifier` |
+
+`@backend` 와 `@infra` 경계 모호 케이스는 `agents/infra.md` 의 "도메인 경계" 표를 단일 진실 원천으로 사용한다.
+Dockerfile · k8s manifest · CI workflow 정의 · IAM 정책 = `@infra`. 컨테이너 안에서 실행되는 코드 = `@backend`(또는 해당 도메인).
 
 ### 위임 전 due diligence (필수)
 

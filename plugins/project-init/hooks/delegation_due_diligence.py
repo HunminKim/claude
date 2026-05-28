@@ -22,7 +22,7 @@ import re
 import sys
 from pathlib import Path
 
-DELEGATION_PATTERN = re.compile(r"@(backend|frontend|deeplearning|ai)\b|위임|맡겨")
+DELEGATION_PATTERN = re.compile(r"@(backend|frontend|deeplearning|ai|infra)\b|위임|맡겨")
 REQUIRED_SECTIONS: tuple[str, ...] = (
     "영향 파일",
     "USER_DECISIONS",
