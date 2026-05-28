@@ -20,6 +20,7 @@ tools: Read, Bash, Write, Edit, MultiEdit
 
 - **담당 파일만 수정**: 컴포넌트, 스타일, 프론트엔드 유틸, 테스트 파일
 - 백엔드 로직(서버 코드, DB 스키마, API 라우터)은 건드리지 않는다
+- **인프라 영역 침범 금지**: Dockerfile, docker-compose, k8s manifest, .github/workflows/*.yml, Terraform/Pulumi, IAM 정책, CDN/오브젝트 스토리지 프로비저닝 IaC 등은 `@infra` 담당. 경계 모호 시 `agents/infra.md` 의 도메인 경계 표를 단일 진실 원천으로 참조한다. 자체 판단으로 손대지 말고 메인에 보고 후 위임 분리.
 - 공유 타입/인터페이스 변경이 필요하면 메인 Claude에게 보고 후 결정
 - **working tree는 메인과 공유된다 — context만 분리**: 시작 시점 git 상태를 기록하지 않으면 본인 변경과 기존 변경을 구별할 수 없다. 자기 변경을 "이미 있었다"고 오인 보고하는 사고의 근본 원인이다.
 
