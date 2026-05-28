@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook — 작업 경계 자동 감지.
 
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 Layer 1 — 시간 기반 자동 done (신뢰도 높음):
   approved/created 게이트의 last_edit_ts로부터 BOUNDARY_TIMEOUT_MINUTES 이상 경과하면
   자동으로 done 처리한다. (점심·자리 비움 등 긴 공백 후 새 작업 복귀 대응)
@@ -20,6 +22,16 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
+
+
+def emit_advisory(msg: str) -> None:
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
 
 
 def main() -> int:
@@ -62,7 +74,7 @@ def main() -> int:
         elapsed_h = elapsed.total_seconds() / 3600
         gate_id_short = gate["id"][:28] + "…"
         lib.do_gate_done(root, state, gate)
-        sys.stderr.write(
+        emit_advisory(
             f"\n[task-boundary] 게이트 자동 종료\n"
             f"  마지막 편집으로부터 {elapsed_h:.1f}시간 경과"
             f" (임계 {lib.BOUNDARY_TIMEOUT_MINUTES}분)\n"
@@ -92,7 +104,7 @@ def main() -> int:
             if near_limit
             else ""
         )
-        sys.stderr.write(
+        emit_advisory(
             f"[plan-gate] 진행 중인 작업 있음 (approved/{auto_label}, 편집 {edit_count}회){near_msg}\n"
             f"  구현 시작 전 사용자에게 반드시 물어보세요:\n\n"
             f'  "새 요청이 들어왔습니다. 어떻게 진행할까요?\n'
@@ -102,7 +114,7 @@ def main() -> int:
         )
     else:
         # state == "created": 트리거 전이지만 편집이 쌓인 상태
-        sys.stderr.write(
+        emit_advisory(
             f"[gate] created — 편집 {edit_count}회 누적 중\n"
             f"  ★ 이전 작업이 완료됐으면 반드시 /done 을 입력하세요. 입력하지 않으면\n"
             f"    카운트가 계속 누적되어 새 작업이 차단될 수 있습니다.\n\n"

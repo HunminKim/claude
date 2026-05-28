@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Stop hook — 임시 파일 패턴 감지 시 Claude에게 정리 제안.
+
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 docs/constraints.yaml 의 temp_patterns 기준으로 스캔.
 임시 파일이 없으면 무음 종료.
 """
@@ -111,7 +114,13 @@ def main():
         "삭제할 파일을 지정하거나 '모두 삭제'라고 말씀해 주세요.",
         div, "",
     ]
-    print("\n".join(lines))
+    advisory = {
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": "\n".join(lines),
+        }
+    }
+    sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
 
 if __name__ == "__main__":

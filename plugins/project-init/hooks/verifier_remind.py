@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """PostToolUse hook (matcher: Edit|Write|MultiEdit) — verifier 미호출 상기.
 
-코드 파일 수정 후 @verifier 를 한 번도 호출하지 않았으면 stderr 로 리마인드를 출력한다.
-차단하지 않는다 (exit 0).
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
+코드 파일 수정 후 @verifier 를 한 번도 호출하지 않았으면 Claude context 에
+verifier 호출 환기 메시지를 주입한다. 차단하지 않는다.
 
 출력 조건 (AND):
   - gate["state"] == "approved" AND verifier_status is None
@@ -59,10 +61,16 @@ def main() -> int:
     if count < 2 or count % 2 != 0:
         return 0
 
-    sys.stderr.write(
-        f"\n[plan-gate] 💡 코드 수정 {count}회 — @verifier 검증이 아직 없습니다.\n"
-        "  기능 구현이 완료됐으면 @verifier 를 호출해 검증하세요.\n\n"
-    )
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": (
+                f"[plan-gate] 💡 코드 수정 {count}회 — @verifier 검증이 아직 없습니다.\n"
+                "  기능 구현이 완료됐으면 @verifier 를 호출해 검증하세요."
+            ),
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
     return 0
 
 

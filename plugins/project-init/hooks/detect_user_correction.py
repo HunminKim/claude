@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook — 한국어 교정 신호 감지 시 메인 Claude에 alert.
+
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 직접 lessons.md를 Edit하지 않는다 (4컬럼 패턴 추출은 LLM 판단 필요).
 """
 
@@ -71,25 +74,30 @@ def main():
         action = "교정 확정. 응답 시작 전 즉시 lessons.md 항목을 추가하라."
     else:
         action = "교정 가능성 있음. 대화 맥락 확인 후 필요 시 lessons.md 항목을 추가하라."
-    print(
-        "\n".join(
-            [
-                "",
-                div,
-                f"[USER CORRECTION DETECTED — {level}]",
-                div,
-                "",
-                action,
-                "항목 추가 시:",
-                f"  1. {lessons} '행동 교정 패턴' 표에 항목 추가",
-                "     컬럼: 날짜(KST) | 상황 | 잘못한 접근 | 올바른 접근",
-                "  2. 동일 실수 재발 방지 규칙 1줄 도출",
-                "  3. 그 후 사용자 요청에 응답",
-                div,
-                "",
-            ]
-        )
+    msg = "\n".join(
+        [
+            "",
+            div,
+            f"[USER CORRECTION DETECTED — {level}]",
+            div,
+            "",
+            action,
+            "항목 추가 시:",
+            f"  1. {lessons} '행동 교정 패턴' 표에 항목 추가",
+            "     컬럼: 날짜(KST) | 상황 | 잘못한 접근 | 올바른 접근",
+            "  2. 동일 실수 재발 방지 규칙 1줄 도출",
+            "  3. 그 후 사용자 요청에 응답",
+            div,
+            "",
+        ]
     )
+    advisory = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
 
 if __name__ == "__main__":
