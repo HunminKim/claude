@@ -21,6 +21,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/delegation_prompt_check.py",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -82,6 +92,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/detect_task_boundary.py",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/delegation_due_diligence.py",
+            "timeout": 5
           }
         ]
       }

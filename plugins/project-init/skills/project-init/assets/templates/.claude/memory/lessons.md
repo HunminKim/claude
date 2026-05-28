@@ -37,3 +37,5 @@
 | 사용자 명시 결정은 자유도 0 | 위임 프롬프트의 `USER_DECISIONS:` 블록 — 차선책 자체 선택 금지 |
 | 효과 본 임시방편은 즉시 절차로 승격 | `/done` 전에 CLAUDE.md / workflow.md 갱신 여부 확인 |
 | 서브에이전트는 working tree를 공유한다 (context만 분리) | 작업 시작 시 `git rev-parse HEAD` + `git status` 기록 강제 |
+| 메인의 self-check 는 due diligence 누락을 잡지 못한다 | 위임 직전 `Task(subagent_type="Plan", ...)` 외부 검증 의무 |
+| tasks/todo.md 는 위임 프롬프트의 단일 진실 원천 | 5섹션(영향 파일/USER_DECISIONS/CONSTRAINTS/기술 충돌/fallback) 강제 작성, 위임 시 그대로 발췌 |
