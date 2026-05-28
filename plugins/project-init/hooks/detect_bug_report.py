@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook — 버그 보고 감지 시 'Think Before Fixing' 체크리스트 주입.
 
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 동작:
   1. stdin JSON에서 prompt 추출
   2. 버그 키워드 검사 (한영 혼재)
   3. 자명한 오탈자·누락 키워드 있으면 허용 (즉시 수정 예외)
-  4. 버그 키워드 O + 오탈자 X → exit 2 + stderr 체크리스트 주입
+  4. 버그 키워드 O + 오탈자 X → additionalContext 로 체크리스트 주입 (차단 아님)
 """
 from __future__ import annotations
 
@@ -83,7 +85,13 @@ def main() -> int:
         DIVIDER,
         "",
     ])
-    sys.stderr.write(msg)
+    advisory = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
     return 0
 
 

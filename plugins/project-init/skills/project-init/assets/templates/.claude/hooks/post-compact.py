@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """PostCompact hook — /compact 후 CLAUDE.md 핵심 섹션 재주입 + plan-gate 자동 복구.
 
+출력 채널:
+- CLAUDE.md 재주입: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+- plan-gate 복구 알림: 사용자 터미널 전용 (stderr)
+
 동작 단계:
-1. CLAUDE.md 핵심 섹션을 Claude context에 재주입 (워크플로우 규칙 소실 방지)
+1. CLAUDE.md 핵심 섹션을 additionalContext 로 Claude context 에 재주입 (워크플로우 규칙 소실 방지)
 2. .claude/plan_gate_enabled 자동 복구 — /compact 도중 마커가 휘발돼 plan-gate가 침묵하는 사고 방지
    단, 사용자가 명시 비활성화한 경우(`.claude/plan_gate_off_explicit` 마커)는 복구하지 않는다.
 """
@@ -73,13 +77,20 @@ def main() -> None:
     if not content:
         sys.exit(0)
     div = "━" * 57
-    print("\n".join([
+    msg = "\n".join([
         "", div,
         "[POST-COMPACT] CLAUDE.md 핵심 규칙 재주입",
         div, "",
         content,
         "", div, "",
-    ]))
+    ])
+    advisory = {
+        "hookSpecificOutput": {
+            "hookEventName": "PostCompact",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
 if __name__ == "__main__":
     main()
