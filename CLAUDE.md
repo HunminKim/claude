@@ -19,17 +19,36 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 
 ## 훅 컨벤션 (모든 훅 작성 시 필수)
 
-- shebang `#!/usr/bin/env python3` + 한국어 docstring (역할 + 동작 단계)
+- shebang `#!/usr/bin/env python3` + 한국어 docstring (역할 + 동작 단계 + 출력 채널 명시)
 - `from __future__ import annotations` + 타입 힌트 (`dict[str, Any]`, `Path | None`)
 - 표준 라이브러리만 — 외부 의존 추가 시 install.sh 갱신
 - f-string, Python 3.10+ (PEP 604/585)
 - snake_case 파일명
 - stdin: `{"tool_name", "tool_input", "session_id", ...}` JSON
-- stderr: 사용자 + Claude 둘 다 보는 채널. 한국어
-- exit code: `0`=정상, `2`=경고/피드백(Claude 컨텍스트 주입), 그 외=오류
+- 모든 메시지는 한국어
 - stdin 파싱 실패는 silent exit 0 (훅이 흐름을 막지 않는다)
 - 루트 settings.json: `python3 "$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>.py`
 - 플러그인 hooks.json: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.py`
+
+### 출력 채널 (의도별 단일 선택 — 혼용 금지)
+
+훅이 메시지를 출력할 때 의도에 맞는 채널을 선택한다. docstring 첫 줄에
+`출력 채널: <차단|환기|사용자전용>` 을 명시한다. 같은 의도의 훅들이 서로 다른
+채널로 갈라지는 것이 사고의 원인이었다 — 의도와 채널을 1:1 로 맞춘다.
+
+- **차단/강제** (편집 거부·중단·위반 차단): `exit 2 + stderr`
+  - Claude 에게 blocking error 로 주입 → 다음 턴에 행동 보정
+  - 예: `plan_gate`, `dangerous_bash_check`, `verifier_sandbox`, `delegation_due_diligence`
+- **비차단 환기** (Claude 행동 환기·정보 주입·advisory): `exit 0 + stdout` 으로 `hookSpecificOutput.additionalContext` JSON 출력
+  - 차단 없이 Claude context 에 메시지 주입 → Claude 가 자기 응답에 반영
+  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `post-compact`
+- **사용자 터미널 전용** (Claude 행동 영향 없음, 사용자 정보 알림): `exit 0 + stderr`
+  - 사용자 터미널에만 보임 — Claude 는 못 봄
+  - 예: `plan_gate_stop_alert`, `plan_gate_gc` (Stop / SessionEnd 시점 정보)
+
+**금지 패턴**: `exit 0 + plain stderr` 또는 `exit 0 + plain stdout` 으로 **Claude 환기 메시지**를 출력하지 않는다 — 사용자 터미널만 보이고 Claude context 진입 안 됨, 환기가 무효가 된다. Claude 가 봐야 하는 메시지는 반드시 `hookSpecificOutput.additionalContext` JSON 으로 감싼다.
+
+참고: https://code.claude.com/docs/en/hooks.md (PreToolUse hookSpecificOutput 스펙)
 
 ## 코드 품질 (PostToolUse 자동)
 
