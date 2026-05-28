@@ -4,6 +4,9 @@
 # 훅 상태 (사용자별 flag 파일 — ruff_warned, plan_gate_intro_seen 등)
 .claude/state/
 
+# 환경 변수 / 시크릿
+.env
+
 # OS
 .DS_Store
 Thumbs.db
