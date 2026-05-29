@@ -14,6 +14,7 @@ plugins/
   project-init/              하네스/검증/체크포인트 자동화
   harness-check/             진단 스킬
   prompt-log/                제거 가능 prompt 통계 (default deny)
+complit/                     하네스 수정·회고 리포트 누적
 install.sh                   마켓플레이스 + 플러그인 일괄 설치
 ```
 
@@ -38,10 +39,10 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 
 - **차단/강제** (편집 거부·중단·위반 차단): `exit 2 + stderr`
   - Claude 에게 blocking error 로 주입 → 다음 턴에 행동 보정
-  - 예: `plan_gate`, `dangerous_bash_check`, `verifier_sandbox`, `delegation_due_diligence`
+  - 예: `plan_gate`, `dangerous_bash_check`, `detect_failure_loop`(2회 분기), `delegation_due_diligence`
 - **비차단 환기** (Claude 행동 환기·정보 주입·advisory): `exit 0 + stdout` 으로 `hookSpecificOutput.additionalContext` JSON 출력
   - 차단 없이 Claude context 에 메시지 주입 → Claude 가 자기 응답에 반영
-  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `post-compact`
+  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `verifier_remind`
 - **사용자 터미널 전용** (Claude 행동 영향 없음, 사용자 정보 알림): `exit 0 + stderr`
   - 사용자 터미널에만 보임 — Claude 는 못 봄
   - 예: `plan_gate_stop_alert`, `plan_gate_gc` (Stop / SessionEnd 시점 정보)

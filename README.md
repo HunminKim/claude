@@ -68,16 +68,14 @@ checklist / completion_report / technical_doc 자동 업데이트
 체크포인트를 자동으로 만들어 롤백 가능하게 한다. 사용자는 메시지 토큰만으로
 모든 단계를 제어한다 (코드/파일시스템 직접 접근 불필요).
 
-**트리거 조건** (PreToolUse 훅, OR):
-- `Edit`/`Write`/`MultiEdit` 호출 ≥ 3회
-- 영향 파일 ≥ 3개
-- 단일 `MultiEdit` 항목 ≥ 5개
+**트리거 조건** (PreToolUse 훅):
+- 단일 코드 파일을 `Edit`/`Write`/`MultiEdit` 로 ≥ 5회 반복 편집 (문서 파일은 카운트 제외)
 
 **워크플로우**:
 
 ```
-Claude: Edit 시도 (1·2·3차)
-    ↓ 3차에서 차단 (트리거 임계값 도달)
+Claude: 같은 코드 파일 반복 편집 (1·2·…·5차)
+    ↓ 5차에서 차단 (단일 파일 반복 임계값 도달)
 PreToolUse 훅: git stash + git tag (체크포인트 생성)
     ↓
 Claude: tasks/todo.md 작성
@@ -86,7 +84,7 @@ Claude: 계획 요약 → 사용자에게 /approve-plan 요청
     ↓
 사용자: /approve-plan
     ↓ todo.md SHA-256 검증
-plan_approval 훅 + 슬래시 커맨드: gate.state = "approved"
+plan_approval 훅(UserPromptSubmit): plan_gate_cli approve 호출 → gate.state = "approved"
     ↓
 Claude: 구현 진행 (max(initial+2, 5) 초과 시 scope creep 차단)
     ↓

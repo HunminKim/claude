@@ -280,7 +280,7 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 > **plan-gate — 슬래시 커맨드 가이드**
 >
 > plan-gate는 큰 변경이 검토 없이 진행되는 것을 막는 자동 게이트다.
-> `Edit/Write/MultiEdit 3회`, `영향 파일 3개`, `MultiEdit 5항목` 중 하나라도 초과하면
+> 같은 코드 파일을 `Edit/Write/MultiEdit`으로 5회 이상 반복 편집하면
 > PreToolUse 훅이 차단하고 git tag + git stash로 체크포인트를 자동 생성한다.
 >
 > **[공식 Plan Mode 사용 시] 자동 승인 플로우:**
