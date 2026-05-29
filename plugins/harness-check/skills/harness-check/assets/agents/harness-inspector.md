@@ -20,7 +20,7 @@ tools: read, bash
 |------|------|
 | `.claude/agents/verifier.md` | 검증 서브에이전트 |
 | `.claude/settings.json` 또는 `hooks.json` | PostToolUse 훅 설정 |
-| `docs/update_docs.py` 또는 훅 경로의 `update_docs.py` | 훅 실행 스크립트 |
+| PostToolUse 훅에 verifier 결과 반영 wiring 존재 | `update_docs`(또는 동등 스크립트)가 PostToolUse 에 연결돼 있는지. project-init 으로 만든 프로젝트는 이 스크립트가 플러그인 내부(`${CLAUDE_PLUGIN_ROOT}/hooks/update_docs.py`)에 상주하고 프로젝트로 복사되지 않으므로, 프로젝트 경로에서 파일을 찾지 말고 설정상 wiring 만 확인한다 |
 | `docs/checklist.md` | 소단위 완료 추적 |
 | `docs/completion_report.md` | 검증 결과 누적 |
 | `docs/technical_doc.md` | 기술 문서 누적 |
@@ -60,7 +60,7 @@ tools: read, bash
 아래 중 하나라도 해당하면 ❌:
 - `verifier.md` 없음
 - 훅 설정 파일 없음
-- `update_docs.py` 없음
+- PostToolUse 훅에 verifier 결과 반영 wiring 자체가 없음 (※ 프로젝트 경로의 `update_docs.py` 파일 부재는 ❌ 사유가 아니다 — 이 스크립트는 플러그인 내부에 상주한다)
 - `.verifier_result.json` 잔존 (훅 실패 상태)
 - `checklist_phase`/`checklist_row` 필드 누락 (텍스트 매칭 오류 위험)
 
@@ -88,7 +88,7 @@ tools: read, bash
 |------|------|------|
 | verifier.md 존재 | ✅/❌ | |
 | 훅 설정 | ✅/❌ | |
-| update_docs.py | ✅/❌ | |
+| verifier 결과 반영 훅 wiring | ✅/❌ | 플러그인 상주 스크립트, 설정 wiring 확인 |
 | .verifier_result.json 잔존 | 없음/있음 | |
 | checklist_phase/row 스키마 | ✅/❌ | |
 | completion_report ↔ checklist 정합성 | ✅/⚠️ | 차이: N개 |
