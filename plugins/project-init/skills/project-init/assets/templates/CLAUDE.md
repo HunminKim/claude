@@ -129,7 +129,7 @@ USER_DECISIONS 블록은 누락 금지. 사용자가 한 번이라도 명시 선
 ## 개발 워크플로우
 
 - 코드 수정 전 `docs/technical_doc.md` 및 연관 모듈 먼저 확인 (충돌 방지)
-- **plan-gate (자동 강제)**: 동일 파일 반복 편집 3회 이상 OR 영향 파일 6개 이상 OR MultiEdit 항목 5개 이상이면 PreToolUse 훅이 자동 차단한다. `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 차단 시점에 `git tag` + `git stash`로 체크포인트 자동 생성. `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on` 으로 활성화, `/plan-gate-off` 로 비활성화).
+- **plan-gate (자동 강제)**: 같은 코드 파일을 5회 이상 반복 편집하면 PreToolUse 훅이 자동 차단한다 (문서 파일은 카운트 제외). `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 차단 시점에 `git tag` + `git stash`로 체크포인트 자동 생성. `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on` 으로 활성화, `/plan-gate-off` 로 비활성화).
 
 ### 외과적 변경 원칙 (Surgical Changes)
 
