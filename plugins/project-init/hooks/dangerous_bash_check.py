@@ -5,8 +5,12 @@
   1. stdin JSON에서 tool_input.command 추출
   2. 파괴적 패턴 감지 (rm -rf /, find / -delete 등)
   3. 핵심 운영 파일 직접 삭제 감지
-  4. 위험 감지 시 exit 2 (차단 + 사유 출력)
-  5. 안전한 명령은 exit 0 (통과)
+  4. 비밀 파일 내용 출력 명령 감지 (cat/head/tail .env 등)
+  5. 인라인 토큰/시크릿 감지 (ghp_, sk-ant-, AKIA 등)
+  6. 위험 감지 시 exit 2 (차단 + 사유 출력)
+  7. 안전한 명령은 exit 0 (통과)
+
+출력 채널: 차단
 """
 from __future__ import annotations
 
@@ -43,6 +47,38 @@ _PROTECTED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── Layer: 비밀 파일 내용 출력 명령 ──────────────────────
+
+# cat/head/tail/less/more + 비밀 파일 패턴 (grep 제외 — 코드 검색 오탐 방지)
+_READ_CMDS = r"(?:cat|head|tail|less|more|bat|batcat)"
+_SECRET_FILES = (
+    r"(?:\.env(?:\.local|\.production|\.development|\.staging|\.prod|\.dev)?)"
+    r"|(?:\.netrc|\.pgpass|\.npmrc|\.pypirc)"
+    r"|(?:id_rsa|id_ed25519|id_ecdsa|id_dsa)"
+    r"|(?:credentials\.json|token\.json|secrets\.(?:ya?ml|json|toml))"
+    r"|(?:service_account[\w.-]*\.json)"
+    r"|(?:[\w.-]*\.(?:pem|key|p12|pfx|jks|keystore))"
+)
+_SECRET_READ_RE = re.compile(
+    rf"(?:^|&&|\||;|\s){_READ_CMDS}\s+[^;|&\n]*(?:{_SECRET_FILES})\b",
+    re.IGNORECASE,
+)
+
+# ── Layer: 인라인 토큰/시크릿 감지 ──────────────────────
+
+INLINE_TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # 순서: 구체적 패턴 → 일반 패턴 (sk-ant- 가 sk- 보다 먼저)
+    (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "Anthropic API 키"),
+    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "OpenAI API 키"),
+    (re.compile(r"ghp_[A-Za-z0-9]{30,}"), "GitHub PAT"),
+    (re.compile(r"ghs_[A-Za-z0-9]{30,}"), "GitHub Secret"),
+    (re.compile(r"gho_[A-Za-z0-9]{30,}"), "GitHub OAuth 토큰"),
+    (re.compile(r"github_pat_[A-Za-z0-9_]{30,}"), "GitHub Fine-grained PAT"),
+    (re.compile(r"AKIA[0-9A-Z]{16}"), "AWS Access Key"),
+    (re.compile(r"xox[baprs]-[A-Za-z0-9\-]+"), "Slack 토큰"),
+    (re.compile(r"https?://[^\s:]+:[^\s@]+@"), "URL 내장 인증정보"),
+]
+
 
 def _check(command: str) -> tuple[bool, str]:
     """(차단여부, 사유) 반환."""
@@ -51,6 +87,11 @@ def _check(command: str) -> tuple[bool, str]:
             return True, reason
     if _PROTECTED_RE.search(command):
         return True, "핵심 운영 파일 직접 삭제 감지"
+    if _SECRET_READ_RE.search(command):
+        return True, "비밀 파일 내용 출력 명령 감지"
+    for pat, label in INLINE_TOKEN_PATTERNS:
+        if pat.search(command):
+            return True, f"인라인 시크릿 감지 ({label})"
     return False, ""
 
 
