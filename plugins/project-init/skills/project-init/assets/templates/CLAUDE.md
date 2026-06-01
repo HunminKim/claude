@@ -129,7 +129,7 @@ USER_DECISIONS 블록은 누락 금지. 사용자가 한 번이라도 명시 선
 ## 개발 워크플로우
 
 - 코드 수정 전 `docs/technical_doc.md` 및 연관 모듈 먼저 확인 (충돌 방지)
-- **plan-gate (자동 강제)**: 동일 파일 반복 편집 3회 이상 OR 영향 파일 6개 이상 OR MultiEdit 항목 5개 이상이면 PreToolUse 훅이 자동 차단한다. `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 차단 시점에 `git tag` + `git stash`로 체크포인트 자동 생성. `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on` 으로 활성화, `/plan-gate-off` 로 비활성화).
+- **plan-gate (자동 강제)**: 같은 코드 파일을 5회 이상 반복 편집하면 PreToolUse 훅이 자동 차단한다 (문서 파일은 카운트 제외). `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 차단 시점에 `git tag` + `git stash`로 체크포인트 자동 생성. `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on` 으로 활성화, `/plan-gate-off` 로 비활성화).
 
 ### 외과적 변경 원칙 (Surgical Changes)
 
@@ -138,6 +138,7 @@ USER_DECISIONS 블록은 누락 금지. 사용자가 한 번이라도 명시 선
 - **기존 데드코드 불가침**: 이미 있던 미사용 import·함수·변수는 언급만 한다. 삭제는 명시 요청 시에만.
 - **자신이 만든 고아는 즉시 정리**: 이번 변경으로 새로 생긴 미사용 import·변수·함수는 바로 제거한다
 - **변경 근거 테스트**: 로직 변경·API 수정은 사용자 요청으로 직접 설명할 수 있어야 한다. 설명 불가능한 줄은 되돌린다.
+- **기존 파일 전체 재작성 금지**: 디스크에 있는 파일 본문을 통째로 갈아엎기 전, 현재 내용을 Read 한 뒤 Edit/MultiEdit 로 필요한 부분만 고친다. 내용을 가정한 채 Write 전체 덮어쓰기 금지. "복원하면 된다"고 단정하지 말고 `git status`·`git log -- <파일>` 로 추적·커밋 여부를 먼저 확인한다 — untracked·uncommitted 파일은 덮어쓰면 복구 불가다.
 
 - 진행이 막히면 즉시 중단 → 계획 재수립 → 사용자 확인 (밀어붙이지 않음)
 - 코드 수정 후 사용자 실행 전 반드시 `@verifier` 호출 (예외 없음)

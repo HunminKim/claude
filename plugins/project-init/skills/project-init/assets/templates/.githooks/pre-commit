@@ -19,6 +19,21 @@ if git diff --cached --name-only | grep -q "^$DECISIONS$"; then
     fi
 fi
 
+# 대량 본문 축소 경고 (advisory, 비차단): 추적 파일이 절반 미만으로 줄면 알림.
+# 통째 덮어쓰기·실수 truncate를 커밋 직전에 가시화한다. 정당한 축소(파일 분할·
+# 생성물 재생성 등)일 수 있으므로 차단하지 않고 경고만 한다.
+SHRUNK=$(git diff --cached --numstat | awk -F'\t' '
+    $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
+        added = $1; removed = $2;
+        if (removed >= 50 && added < removed * 0.5)
+            print "  " $3 " (-" removed " / +" added ")"
+    }')
+if [ -n "$SHRUNK" ]; then
+    echo "[pre-commit] 경고: 다음 파일이 대폭 축소되었습니다 — 의도한 변경인지 확인하세요:" >&2
+    echo "$SHRUNK" >&2
+    echo "[pre-commit] 의도한 변경이면 그대로 커밋하세요 (차단하지 않음)." >&2
+fi
+
 # 임시 파일 커밋 방어: docs/constraints.yaml 의 temp_patterns 기준
 if command -v python3 &>/dev/null; then
     TEMP_STAGED=$(PROJECT_ROOT="$PROJECT_ROOT" python3 << 'PYEOF'
