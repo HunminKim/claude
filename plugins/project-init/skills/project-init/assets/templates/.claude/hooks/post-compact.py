@@ -2,7 +2,7 @@
 """PostCompact hook — /compact 후 CLAUDE.md 핵심 섹션 재주입 + plan-gate 자동 복구.
 
 출력 채널:
-- CLAUDE.md 재주입: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+- CLAUDE.md 재주입: 환기 (exit 0 + stdout systemMessage JSON)
 - plan-gate 복구 알림: 사용자 터미널 전용 (stderr)
 
 동작 단계:
@@ -85,10 +85,7 @@ def main() -> None:
         "", div, "",
     ])
     advisory = {
-        "hookSpecificOutput": {
-            "hookEventName": "PostCompact",
-            "additionalContext": msg,
-        }
+        "systemMessage": msg,
     }
     sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
