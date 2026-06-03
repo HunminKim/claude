@@ -6,7 +6,7 @@
 docs/constraints.yaml 의 temp_patterns 기준으로 스캔.
 임시 파일이 없으면 무음 종료.
 """
-import json, os, sys
+import json, os, subprocess, sys, time
 from pathlib import Path
 from datetime import datetime
 
@@ -15,10 +15,13 @@ SKIP_DIRS = {
     "env", ".env", ".mypy_cache", ".pytest_cache", ".ruff_cache",
 }
 
+SCAN_BUDGET_SEC = 5.0
+
 DEFAULT_PATTERNS = {
     "prefixes": ["tmp_", "scratch_", "debug_", "exp_"],
     "suffixes": ["_tmp", "_scratch", "_debug"],
     "dirs": ["tmp/", "scratch/", ".experiments/"],
+    "exclude_dirs": [],
 }
 
 
@@ -48,16 +51,40 @@ def load_patterns(root: Path) -> dict:
     return DEFAULT_PATTERNS
 
 
+def _git_tracked_and_untracked(root: Path) -> list[Path] | None:
+    """git 트래킹/언트래킹(.gitignore 적용) 파일 목록. git 미사용 시 None."""
+    if not (root / ".git").exists():
+        return None
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-co", "--exclude-standard"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if res.returncode != 0:
+            return None
+        return [root / line for line in res.stdout.splitlines() if line]
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
 def scan_temp_files(root: Path, patterns: dict) -> list[Path]:
     prefixes = patterns.get("prefixes", DEFAULT_PATTERNS["prefixes"])
     suffixes = patterns.get("suffixes", DEFAULT_PATTERNS["suffixes"])
     temp_dirs = [d.rstrip("/") for d in patterns.get("dirs", DEFAULT_PATTERNS["dirs"])]
+    user_skip = {d.rstrip("/") for d in patterns.get("exclude_dirs", [])}
+    skip = SKIP_DIRS | user_skip
 
-    found = []
-    for path in root.rglob("*"):
+    deadline = time.monotonic() + SCAN_BUDGET_SEC
+    candidates = _git_tracked_and_untracked(root)
+
+    found: list[Path] = []
+    iterator = candidates if candidates is not None else root.rglob("*")
+    for path in iterator:
+        if time.monotonic() > deadline:
+            return []
         if not path.is_file():
             continue
-        if any(part in SKIP_DIRS for part in path.parts):
+        if any(part in skip for part in path.relative_to(root).parts):
             continue
         rel = path.relative_to(root)
         name = path.name

@@ -232,6 +232,12 @@ SKILL.md 의 `<!-- >>> [prompt-log] -->` 마커로 감싸진 부분만 제거하
 > 1. (권장) Claude Code 재시작 — `claude --continue` 로 대화를 유지하며 재시작
 > 2. 재시작이 어려우면 `.claude/memory/workflow.md` 의 'verifier fallback' 절차 사용
 
+> **PostToolUse wiring 출처**
+>
+> verifier 가 `docs/.verifier_result.json` 을 쓰면 plugin `hooks.json` 의
+> `PostToolUse: Write` 매처가 `${CLAUDE_PLUGIN_ROOT}/hooks/update_docs.py` 를 자동 실행한다.
+> 사용자 `.claude/settings.json` 에 별도 등록 불필요 (plugin install 시 자동 wiring).
+
 생성된 파일 목록을 보여주고, 사용자에게 다음을 안내한다:
 - `docs/plan.md` 에서 개발 계획(Phase/Sprint 로드맵)을 채워달라고
 - `docs/context_note.md` 에서 프로젝트 배경/맥락을 기록해달라고
