@@ -70,15 +70,21 @@ def main() -> int:
         # 슬래시 유무 무관하게 처리 (/approve-plan, approve-plan 모두 동작)
         _run_cli(cli, _ACTION_TOKENS[normalized], root)
     elif prompt:
-        # 새 작업 프롬프트 — verified ✅ 상태면 자동 done 처리
-        # verified ❌ 는 사용자가 /retry|/skip|/rollback 중 선택해야 하므로 건드리지 않는다
+        # verified ✅ 상태에서 비-슬래시 프롬프트 → 환기만 (자동 done 하지 않음)
+        # 사용자 질의("결과 어땠지?")와 새 작업을 구분할 수 없으므로 자동 실행 금지
         state = lib.load_state(root)
         gate = lib.current_gate(state)
         if gate and gate["state"] == "verified" and gate.get("verifier_status") == "✅":
-            _run_cli(cli, "done", root)
-            sys.stderr.write(
-                "[plan-gate] 이전 gate auto-done (verified ✅) — 새 작업을 시작합니다.\n"
-            )
+            advisory = {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": (
+                        "[plan-gate] 이전 gate verified ✅ — "
+                        "작업이 끝났으면 /done 입력. 이어서 질문 중이면 무시."
+                    ),
+                }
+            }
+            sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
     return 0
 
