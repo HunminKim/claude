@@ -48,7 +48,6 @@ temp_patterns:
     - "tmp_"
     - "scratch_"
     - "debug_"
-    - "exp_"
   # 파일명 줄기 접미사 — 확장자 제외 (예: result_tmp.csv, weights_debug.pt)
   suffixes:
     - "_tmp"

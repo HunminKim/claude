@@ -46,10 +46,10 @@ try:
     with open(root / 'docs' / 'constraints.yaml') as f:
         data = yaml.safe_load(f) or {}
     p = data.get('temp_patterns', {})
-    prefixes = p.get('prefixes', ['tmp_', 'scratch_', 'debug_', 'exp_'])
+    prefixes = p.get('prefixes', ['tmp_', 'scratch_', 'debug_'])
     suffixes = p.get('suffixes', ['_tmp', '_scratch', '_debug'])
 except Exception:
-    prefixes = ['tmp_', 'scratch_', 'debug_', 'exp_']
+    prefixes = ['tmp_', 'scratch_', 'debug_']
     suffixes = ['_tmp', '_scratch', '_debug']
 
 staged = subprocess.run(

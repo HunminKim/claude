@@ -18,7 +18,7 @@ SKIP_DIRS = {
 SCAN_BUDGET_SEC = 5.0
 
 DEFAULT_PATTERNS = {
-    "prefixes": ["tmp_", "scratch_", "debug_", "exp_"],
+    "prefixes": ["tmp_", "scratch_", "debug_"],
     "suffixes": ["_tmp", "_scratch", "_debug"],
     "dirs": ["tmp/", "scratch/", ".experiments/"],
     "exclude_dirs": [],

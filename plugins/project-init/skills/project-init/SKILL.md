@@ -266,7 +266,7 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 - `docs/constraints.yaml` — 의존성·아키텍처 제약 + 임시 파일 네이밍 규칙 SSOT
 
 **임시 파일 네이밍 규칙** (`docs/constraints.yaml > temp_patterns`):
-- 접두사: `tmp_`, `scratch_`, `debug_`, `exp_` (예: `tmp_analysis.py`, `debug_output.csv`)
+- 접두사: `tmp_`, `scratch_`, `debug_` (예: `tmp_analysis.py`, `debug_output.csv`)
 - 접미사: `_tmp`, `_scratch`, `_debug` (예: `result_tmp.csv`, `weights_debug.pt`)
 - 디렉토리: `tmp/`, `scratch/`, `.experiments/`
 - 세션 종료 시 Stop 훅이 자동 감지 → Claude에게 정리 여부 질문
