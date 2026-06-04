@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stop hook — Claude 응답 종료 직전 plan-gate 상태 리마인더.
 
-출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+출력 채널: 환기 (exit 0 + stdout systemMessage JSON)
 
 approved 게이트가 활성 상태이고 응답 중에 편집이 발생했을 때
 (last_edit_ts가 응답 시작 이후로 갱신된 경우) 현재 한도 소모 현황을
@@ -33,10 +33,7 @@ def _emit_advisories(items: list[str]) -> None:
         return
     combined = "\n\n".join(items)
     payload = {
-        "hookSpecificOutput": {
-            "hookEventName": "Stop",
-            "additionalContext": combined,
-        }
+        "systemMessage": combined,
     }
     sys.stdout.write(json.dumps(payload, ensure_ascii=False))
     sys.stdout.flush()

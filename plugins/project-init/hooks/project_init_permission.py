@@ -34,11 +34,8 @@ def main() -> int:
         return 0
 
     result = {
-        "hookSpecificOutput": {
-            "hookEventName": "PermissionRequest",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": "project-init 진행 중 자동 승인",
-        }
+        "permissionDecision": "allow",
+        "reason": "project-init 진행 중 자동 승인",
     }
     print(json.dumps(result, ensure_ascii=False))
     return 0
