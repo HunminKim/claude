@@ -595,12 +595,17 @@ def format_trigger_message(
 
 
 def format_multi_edit_hint(file_path: str) -> str:
-    """동일 파일 재편집 감지 — MultiEdit 유도 힌트 (additionalContext 용)."""
+    """동일 파일 재편집 감지 — 편집 묶기 유도 힌트 (additionalContext 용).
+
+    주의: MultiEdit 툴은 현행 Claude Code 에서 제거됨 — 존재하지 않는 툴을
+    권하지 않는다. 같은 응답 안에 Edit 을 모으거나 replace_all 을 권한다.
+    """
     short = file_path.split("/")[-1]
     return (
         f"[plan-gate] {short} 은 이번 작업에서 이미 수정됐습니다. "
-        f"같은 파일의 여러 위치를 수정할 때는 Edit 여러 번 대신 MultiEdit 한 번으로 묶어서 호출하세요. "
-        f"(이전 Edit 은 이미 적용됐으므로 edits 배열에 포함하지 않아도 됩니다.)"
+        f"같은 파일의 추가 수정은 한 응답 안에 Edit 호출을 모아서 처리하거나, "
+        f"동일 문자열 반복 치환이면 replace_all 을 사용하세요. "
+        f"(편집 호출마다 plan-gate 카운터가 누적됩니다.)"
     )
 
 

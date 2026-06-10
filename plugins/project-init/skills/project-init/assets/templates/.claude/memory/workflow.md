@@ -59,7 +59,7 @@
 서브에이전트 위임 직전 메인은 Plan subagent를 호출해 외부 검증한다:
 
 ```
-Task(subagent_type="Plan", prompt="""
+Agent(subagent_type="Plan", prompt="""
 다음 tasks/todo.md 를 위임 직전 검증한다:
 <todo.md 본문 발췌>
 
@@ -110,9 +110,9 @@ working tree는 메인과 공유되지만 context는 분리되어 있어, 시작
 
 ### verifier fallback (@verifier "agent not found" 시)
 
-`.claude/agents/verifier.md` 는 세션 시작 시에만 로드된다. project-init 직후 동일 세션에서 `@verifier` 호출이 실패하면 아래 절차로 대체한다:
+`.claude/agents/verifier.md` 는 세션 시작 시에만 로드된다 (예외: `/agents` 인터페이스로 만든 에이전트는 즉시 적용). 사용자가 직접 타이핑할 때의 수동 멘션 형태는 `@agent-verifier` 다. project-init 직후 동일 세션에서 verifier 호출이 실패하면 아래 절차로 대체한다:
 
-1. `Task` tool로 `subagent_type="general-purpose"` 호출
+1. `Agent` tool로 `subagent_type="general-purpose"` 호출
 2. 첫 메시지에 `.claude/agents/verifier.md` 전문을 컨텍스트로 첨부
 3. `docs/.verifier_result.json` 을 표준 스키마로 직접 작성하도록 요청
    - 필수 필드: `feature_name`, `verdict`(✅/❌), `test_items`, `issues`, `evidence`, `implementation`

@@ -1,8 +1,8 @@
 ---
 name: deeplearning
 description: AI/딥러닝 전문 구현 에이전트. 모델 아키텍처, 학습 파이프라인, 데이터 전처리, 평가 루프를 직접 구현한다. 메인 Claude가 /approve-plan 완료 후 "@deeplearning 구현해줘", "@ai 모델 만들어줘", "학습 파이프라인 맡겨" 등으로 위임한다.
-model: claude-sonnet-4-6
-tools: Read, Bash, Write, Edit, MultiEdit
+model: sonnet
+tools: Read, Bash, Write, Edit
 ---
 
 # Deep Learning 구현 에이전트

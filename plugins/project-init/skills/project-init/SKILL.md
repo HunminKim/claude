@@ -235,9 +235,10 @@ SKILL.md 의 `<!-- >>> [prompt-log] -->` 마커로 감싸진 부분만 제거하
 
 > **⚠️ verifier 인식 — 세션 재시작 필요**
 >
-> `.claude/agents/verifier.md` 는 Claude Code 세션 시작 시 한 번만 스캔된다.
-> project-init으로 막 생성된 verifier는 **현재 세션에서 @verifier로 호출되지 않는다.**
-> 다음 중 하나로 적용한다:
+> `.claude/agents/verifier.md` 는 Claude Code 세션 시작 시 한 번만 스캔된다
+> (예외: `/agents` 인터페이스로 만든 에이전트는 즉시 적용 — 파일 직접 생성은 재시작 필요).
+> project-init으로 막 생성된 verifier는 **현재 세션에서 호출되지 않는다.**
+> 수동 멘션 형태는 `@agent-verifier` 다. 다음 중 하나로 적용한다:
 > 1. (권장) Claude Code 재시작 — `claude --continue` 로 대화를 유지하며 재시작
 > 2. 재시작이 어려우면 `.claude/memory/workflow.md` 의 'verifier fallback' 절차 사용
 
@@ -295,7 +296,7 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 > **plan-gate — 슬래시 커맨드 가이드**
 >
 > plan-gate는 큰 변경이 검토 없이 진행되는 것을 막는 자동 게이트다.
-> 같은 코드 파일을 `Edit/Write/MultiEdit`으로 5회 이상 반복 편집하면
+> 같은 코드 파일을 `Edit/Write`로 5회 이상 반복 편집하면
 > PreToolUse 훅이 차단하고 git tag + git stash로 체크포인트를 자동 생성한다.
 >
 > **[공식 Plan Mode 사용 시] 자동 승인 플로우:**

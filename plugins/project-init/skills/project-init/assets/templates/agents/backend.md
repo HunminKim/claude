@@ -1,8 +1,8 @@
 ---
 name: backend
 description: 백엔드 전문 구현 에이전트. API 엔드포인트, DB 스키마, 비즈니스 로직, 인증/인가, 쿼리 최적화를 직접 구현한다. 메인 Claude가 /approve-plan 완료 후 "@backend 구현해줘", "API 만들어줘", "DB 작업 맡겨" 등으로 위임한다.
-model: claude-sonnet-4-6
-tools: Read, Bash, Write, Edit, MultiEdit
+model: sonnet
+tools: Read, Bash, Write, Edit
 ---
 
 # Backend 구현 에이전트

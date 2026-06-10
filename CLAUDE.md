@@ -31,6 +31,9 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 - stdin 파싱 실패는 silent exit 0 (훅이 흐름을 막지 않는다)
 - 루트 settings.json: `python3 "$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>.py`
 - 플러그인 hooks.json: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.py`
+- 서브에이전트 matcher 는 `Agent|Task` (v2.1.63에서 Task→Agent 개명, 구버전 호환).
+  matcher 의 letter-only 토큰은 tool_name **정확일치** — 죽은 토큰(MultiEdit 등)은
+  무해하지만, 개명된 툴을 옛 이름 단독으로 매치하면 훅이 조용히 죽는다
 
 ### 출력 채널 (의도별 단일 선택 — 혼용 금지)
 

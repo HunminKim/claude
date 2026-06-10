@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """PreToolUse 훅 — subagent 호출 직전 위임 프롬프트 표준 4블록 확인 + Plan 검증 환기.
 
-matcher: Task
+matcher: Agent|Task (v2.1.63에서 Task → Agent 개명 — 구버전 호환 위해 둘 다.
+matcher 의 letter-only 토큰은 tool_name 정확일치라 "Task" 단독이면 현행에서 발화 0)
 
 동작 단계:
-1. tool_name 이 Task 가 아니면 silent exit 0
+1. tool_name 이 Agent/Task 가 아니면 silent exit 0
 2. subagent_type 이 도메인/일반 에이전트가 아니면 silent exit 0 (verifier/Plan/Explore 등은 통과)
 3. tool_input.prompt 에서 TASK / USER_DECISIONS / CONSTRAINTS / GATE 4블록 존재 확인
 4. 누락 시 stderr + exit 2 — Claude context 에 blocking error 주입, 보강 후 재호출 유도
@@ -40,7 +41,7 @@ def main() -> int:
     except Exception:
         return 0
 
-    if (data.get("tool_name") or "") != "Task":
+    if (data.get("tool_name") or "") not in ("Agent", "Task"):
         return 0
 
     tool_input = data.get("tool_input") or {}
@@ -66,7 +67,7 @@ def main() -> int:
             "additionalContext": (
                 "[delegation-prompt-check] 도메인 위임 직전 — "
                 "Plan subagent 외부 검증 호출했는가? "
-                'Task(subagent_type="Plan", ...) 로 tasks/todo.md 5섹션 검증 권장 '
+                'Agent 툴(subagent_type="Plan") 로 tasks/todo.md 5섹션 검증 권장 '
                 "(강제 아님, 환기)."
             ),
         }

@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Read(**)",
+      "Read",
       "Write(docs/.verifier_result.json)",
       "Bash(pytest *)",
       "Bash(python -m pytest *)",

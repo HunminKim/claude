@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """PermissionRequest hook — project-init 진행 중 권한 자동 승인.
 
+출력 채널: 결정 주입 (exit 0 + stdout hookSpecificOutput.decision JSON)
+— PermissionRequest 의 공식 스키마는 hookSpecificOutput.decision.behavior 다.
+  top-level permissionDecision 은 PreToolUse 전용 형태로 이 이벤트에선 무효
+  (v1.30.0 채널 교정 — hooks.md PermissionRequest 스펙 기준).
+
 /tmp/.claude_init_in_progress 신호 파일이 존재하는 동안
-Write, Edit, MultiEdit, Bash, Read 작업을 자동 승인한다.
+Write, Edit, Bash, Read 작업을 자동 승인한다.
 
 흐름:
   1. project-init 스킬이 시작 시 touch /tmp/.claude_init_in_progress (승인 1회)
@@ -34,8 +39,13 @@ def main() -> int:
         return 0
 
     result = {
-        "permissionDecision": "allow",
-        "reason": "project-init 진행 중 자동 승인",
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {
+                "behavior": "allow",
+                "message": "project-init 진행 중 자동 승인",
+            },
+        }
     }
     print(json.dumps(result, ensure_ascii=False))
     return 0

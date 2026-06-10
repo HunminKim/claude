@@ -1,8 +1,8 @@
 ---
 name: frontend
 description: 프론트엔드 전문 구현 에이전트. UI 컴포넌트, 상태 관리, 스타일링, 접근성, 성능 최적화를 직접 구현한다. 메인 Claude가 /approve-plan 완료 후 "@frontend 구현해줘", "컴포넌트 만들어줘", "UI 작업 맡겨" 등으로 위임한다.
-model: claude-sonnet-4-6
-tools: Read, Bash, Write, Edit, MultiEdit
+model: sonnet
+tools: Read, Bash, Write, Edit
 ---
 
 # Frontend 구현 에이전트

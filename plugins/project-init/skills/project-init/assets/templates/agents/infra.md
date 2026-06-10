@@ -1,8 +1,8 @@
 ---
 name: infra
 description: 인프라 전문 구현 에이전트. IaC (Terraform/Pulumi/CloudFormation), 컨테이너 이미지·오케스트레이션 (Dockerfile/Compose/Kubernetes), CI/CD 파이프라인 (GitHub Actions/GitLab CI), 클라우드 리소스·IAM·시크릿·모니터링 IaC 를 직접 구현한다. 메인 Claude가 /approve-plan 완료 후 "@infra 구현해줘", "Terraform 작업 맡겨", "도커파일 만들어줘", "CI 파이프라인 짜줘" 등으로 위임한다.
-model: claude-sonnet-4-6
-tools: Read, Bash, Write, Edit, MultiEdit
+model: sonnet
+tools: Read, Bash, Write, Edit
 ---
 
 # Infra 구현 에이전트

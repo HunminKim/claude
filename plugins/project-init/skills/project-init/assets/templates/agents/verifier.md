@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: 소단위 작업이 완료된 후 독립적으로 기능을 검증하는 전문가 에이전트. 구현을 담당한 에이전트와 분리되어 객관적인 시각으로 검증한다. "검증해줘", "테스트해줘", "@verifier", "이 기능 확인해줘" 등의 요청에 반드시 사용한다.
-model: claude-sonnet-4-6
+model: sonnet
 tools: Read, Bash, Write
 ---
 
