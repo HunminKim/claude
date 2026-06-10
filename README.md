@@ -130,7 +130,7 @@ update_docs 훅: gate.state = "verified", verifier_status 기록
 └── projects-allowed.json     # 동의 whitelist
 ```
 
-record 스키마: prompt(sanitized) + tools 카운트(edit/write/bash/task) + 영향 파일 + plan-gate 메타(read-only) + outcome.
+record 스키마: prompt(sanitized) + tools 카운트(edit/write/bash/agent 등) + 영향 파일 + plan-gate 메타(read-only) + outcome. plan-gate 토큰은 평문(`done`)·슬래시(`/done`)·네임스페이스(`/project-init:done`) 모두 `is_token`으로 정규화 인식.
 
 **Sanitize**: API key, JWT, AWS, 이메일 등 정규식 마스킹 (`[REDACTED:type]` 치환).
 

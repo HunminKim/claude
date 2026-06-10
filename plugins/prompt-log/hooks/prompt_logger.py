@@ -43,14 +43,15 @@ def main() -> int:
         return 0  # default deny: 동의 안 한 프로젝트는 저장 X
 
     sanitized = pl.pl_sanitize(prompt_text).strip()
-    is_token = sanitized in pl.PL_TOKEN_SET
+    # 평문("done")·슬래시("/done")·네임스페이스("/project-init:done") 모두 정규화
+    token_value = pl.pl_normalize_token(sanitized)
 
     active = pl.pl_load_active(root)
 
     # 토큰 입력은 직전 active record에만 추가하고 새 prompt 시작 X
-    if is_token and active is not None:
+    if token_value is not None and active is not None:
         tokens = active.setdefault("user_tokens_during", [])
-        tokens.append({"token": sanitized, "ts": pl.pl_now_iso()})
+        tokens.append({"token": token_value, "ts": pl.pl_now_iso()})
         pl.pl_save_active(root, active)
         return 0
 
@@ -64,12 +65,8 @@ def main() -> int:
             sys.stderr.write(f"[prompt-log] flush 실패: {e}\n")
         pl.pl_clear_active(root)
 
-    # 새 active 시작
+    # 새 active 시작 (토큰 여부는 pl_make_active_record 가 pl_normalize_token 으로 판정)
     new_active = pl.pl_make_active_record(root, prompt_text, session_id)
-    if is_token:
-        # active 없는데 토큰이 들어온 경우 (드뭄): 별개 record로 기록 가능하도록 유지
-        new_active["prompt"]["is_token"] = True
-        new_active["prompt"]["token_value"] = sanitized
     pl.pl_save_active(root, new_active)
     return 0
 

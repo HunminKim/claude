@@ -75,10 +75,10 @@
   },
   "tools": {
     "edit": 5, "write": 2, "multi_edit": 0,
-    "bash": 3, "task": 1, "other": 0, "total": 11
+    "bash": 3, "task": 0, "agent": 1, "other": 0, "total": 11
   },
   "files": {"unique_count": 4, "sample": ["src/a.py", "..."]},
-  "user_tokens_during": [{"token": "/approve-plan", "ts": "..."}],
+  "user_tokens_during": [{"token": "approve-plan", "ts": "..."}],
   "plan_gate": {                  // plan-gate 적용 프로젝트만, 없으면 null
     "gate_id": "plan-gate_...",
     "state": "approved",

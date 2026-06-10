@@ -50,6 +50,7 @@ def main() -> int:
             "multi_edit": 0,
             "bash": 0,
             "task": 0,
+            "agent": 0,
             "other": 0,
             "total": 0,
         },

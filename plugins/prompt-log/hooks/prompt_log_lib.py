@@ -242,13 +242,34 @@ def pl_clear_active(project_root: Path) -> None:
 
 
 # ── [prompt-log] schema / store ──────────────────────────────────────────
-PL_TOKEN_SET = {
-    "/approve-plan",
-    "/done",
-    "/rollback",
-    "/retry",
-    "/replan",
+# plan-gate 전이 토큰 값 — project-init plan_approval._ACTION_TOKENS 와 동기 유지.
+# (플러그인 간 import 불가 — 변경 시 양쪽 함께 갱신. tests/smoke_test.py 가 대조)
+PL_TOKEN_VALUES = {
+    "approve-plan",
+    "approve",
+    "done",
+    "skip",
+    "keep",
+    "skip-verify",
+    "rollback",
+    "retry",
+    "replan",
 }
+
+
+def pl_normalize_token(text: str) -> str | None:
+    """prompt 텍스트가 plan-gate 토큰이면 정규화된 토큰 값, 아니면 None.
+
+    실데이터에서 관측된 3가지 입력 형태를 모두 흡수한다 (260610 분석 — 구버전
+    슬래시 정확일치 세트는 98건 중 0건 인식):
+    - 평문: "done", "approve"          (UserPromptSubmit fallback 경로)
+    - 슬래시: "/done"
+    - 플러그인 네임스페이스: "/project-init:done"
+    """
+    t = text.strip().lstrip("/")
+    if t.startswith("project-init:"):
+        t = t[len("project-init:"):]
+    return t if t in PL_TOKEN_VALUES else None
 
 
 def pl_now_iso() -> str:
@@ -273,7 +294,7 @@ def pl_make_active_record(
     project_root: Path, prompt_text: str, session_id: str | None
 ) -> dict[str, Any]:
     sanitized = pl_sanitize(prompt_text or "")
-    is_token = sanitized.strip() in PL_TOKEN_SET
+    token_value = pl_normalize_token(sanitized)
     return {
         "prompt_id": pl_new_prompt_id(),
         "session_id": session_id or "",
@@ -283,8 +304,8 @@ def pl_make_active_record(
         "prompt": {
             "text": sanitized,
             "len": len(sanitized),
-            "is_token": is_token,
-            "token_value": sanitized.strip() if is_token else None,
+            "is_token": token_value is not None,
+            "token_value": token_value,
         },
         "tools": {
             "edit": 0,
@@ -292,6 +313,7 @@ def pl_make_active_record(
             "multi_edit": 0,
             "bash": 0,
             "task": 0,
+            "agent": 0,
             "other": 0,
             "total": 0,
         },
@@ -382,6 +404,9 @@ def pl_tool_bucket(tool_name: str) -> str:
         return "bash"
     if tool_name == "Task":
         return "task"
+    if tool_name == "Agent":
+        # v2.1.63에서 Task → Agent 개명. task 버킷과 분리해 신구 데이터 구분 가능하게.
+        return "agent"
     return "other"
 
 
