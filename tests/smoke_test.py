@@ -257,6 +257,66 @@ def t_command_files() -> None:
             check(f"commands/{fname}: CLI 액션 '{action}' 호출", f"plan_gate_cli.py\" {action}" in text)
 
 
+def t_platform_compat() -> None:
+    """현행 Claude Code 호환성 — 플랫폼 드리프트 회귀 방지.
+
+    v2.1.63에서 Task → Agent 개명으로 위임 가드가 조용히 죽었던 사고(260611 감사),
+    MultiEdit 툴 소멸로 죽은 권고가 배포되던 사고의 재발을 막는다.
+    """
+    print("[11] 플랫폼 호환성")
+    hooks_json = (REPO / "plugins" / "project-init" / "hooks" / "hooks.json").read_text()
+    check("위임 가드 matcher에 Agent 포함", '"Agent|Task"' in hooks_json)
+    pl_hooks = (REPO / "plugins" / "prompt-log" / "hooks" / "hooks.json").read_text()
+    check("prompt-log matcher에 Agent 포함", "Agent" in pl_hooks)
+
+    # delegation_prompt_check 행위: Agent 이름으로 차단/허용 (프로젝트 불필요 — 순수 입력 판정)
+    hook = HOOKS / "delegation_prompt_check.py"
+    r = subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps({"tool_name": "Agent", "tool_input": {"subagent_type": "backend", "prompt": "x"}}),
+        capture_output=True, text=True,
+    )
+    check("Agent 위임 + 4블록 누락 → 차단", r.returncode == 2, f"rc={r.returncode}")
+    full = "TASK: x\nUSER_DECISIONS: 없음\nCONSTRAINTS: y\nGATE: approved"
+    r = subprocess.run(
+        [sys.executable, str(hook)],
+        input=json.dumps({"tool_name": "Agent", "tool_input": {"subagent_type": "backend", "prompt": full}}),
+        capture_output=True, text=True,
+    )
+    ok = r.returncode == 0 and "hookSpecificOutput" in r.stdout
+    check("Agent 위임 + 4블록 완비 → allow JSON", ok, f"rc={r.returncode}")
+
+    # prompt-log 토큰 정규화 ↔ plan_approval._ACTION_TOKENS 동기
+    sys.path.insert(0, str(HOOKS))
+    sys.path.insert(0, str(REPO / "plugins" / "prompt-log" / "hooks"))
+    import plan_approval
+
+    import prompt_log_lib as pl
+
+    check(
+        "PL_TOKEN_VALUES == plan_approval 토큰 집합",
+        set(plan_approval._ACTION_TOKENS) == pl.PL_TOKEN_VALUES,
+        f"차이: {set(plan_approval._ACTION_TOKENS) ^ pl.PL_TOKEN_VALUES}",
+    )
+    for text, want in [("done", "done"), ("/done", "done"), ("/project-init:done", "done"), ("오늘 뭐했지", None)]:
+        check(f"토큰 정규화 {text!r} → {want!r}", pl.pl_normalize_token(text) == want)
+    check("Agent → agent 버킷", pl.pl_tool_bucket("Agent") == "agent")
+    check("TaskCreate 는 other (오탐 방지)", pl.pl_tool_bucket("TaskCreate") == "other")
+
+    # 죽은 툴 prose 잔존 금지 (matcher 의 하위호환 토큰은 허용)
+    bad = subprocess.run(
+        ["grep", "-rln", "MultiEdit 한 번\\|Edit/MultiEdit\\|Task(subagent_type",
+         str(REPO / "plugins" / "project-init" / "skills")],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    check("템플릿 prose에 죽은 툴 권고 없음", not bad, f"잔존: {bad}")
+    fm = subprocess.run(
+        ["grep", "-rln", "tools:.*MultiEdit", str(REPO / "plugins" / "project-init" / "skills")],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    check("에이전트 frontmatter에 MultiEdit 없음", not fm, f"잔존: {fm}")
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -283,6 +343,7 @@ def main() -> int:
         t_channel_shapes(base)
     t_scaffold_consistency()
     t_command_files()
+    t_platform_compat()
     t_version_sync()
     print(f"\n결과: {PASS} 통과, {FAIL} 실패")
     return 1 if FAIL else 0
