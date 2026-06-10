@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """PostToolUse hook (Edit|Write|MultiEdit) — ruff 자동 정렬 + 잔존 lint 보고 + ast 복잡도 경고.
 
+출력 채널:
+- 차단 (잔존 lint 위반): exit 2 + stderr — Claude blocking error 주입
+- 환기 (ast 복잡도 경고, 관찰 모드): exit 0 + stdout hookSpecificOutput.additionalContext JSON
+  — plain stderr 는 Claude 에 도달하지 않아 환기가 무효였음 (채널 교정)
+- 사용자전용 (ruff 미설치 안내): exit 0 + stderr, 세션당 1회
+
 동작:
   1. stdin JSON에서 tool_name / tool_input.file_path 추출
   2. .py 파일이 아니거나 파일이 없으면 exit 0 (no-op)
   3. ruff 미설치면 세션당 1회 stderr 안내 후 exit 0 (graceful skip)
   4. ruff check --fix <file> (format은 Surgical Changes 원칙에 따라 비활성화)
   5. 잔존 ruff 오류 있으면 stderr + exit 2 (Claude 컨텍스트 주입)
-  6. ast 복잡도 분석: 함수 길이·CC 초과 시 stderr 경고 (exit 0, 관찰 모드)
+  6. ast 복잡도 분석: 함수 길이·CC 초과 시 advisory 환기 (차단 분기에선 생략 — 차단 우선)
 """
 
 from __future__ import annotations
@@ -149,6 +155,7 @@ def main() -> int:
         return 0
 
     exit_code = 0
+    advisories: list[str] = []
     for file_path in file_paths:
         target = Path(file_path)
         if target.suffix != ".py" or not target.exists():
@@ -170,15 +177,28 @@ def main() -> int:
             exit_code = 2
             continue
 
-        # ── ast 복잡도 경고 (관찰 모드 — exit 0) ────────────────────────────
+        # ── ast 복잡도 경고 (관찰 모드 — 환기 채널에 누적) ─────────────────
         complexity_warns = _check_ast_complexity(target)
         if complexity_warns:
-            sys.stderr.write(f"\n[ast_check] {target.name}: 복잡도 경고 (작업 계속됩니다)\n")
-            sys.stderr.write("\n".join(complexity_warns) + "\n")
-            sys.stderr.write(
-                "→ 리팩터링을 고려하세요."
-                " ⚠️  표시 항목은 향후 차단 예정입니다.\n\n"
+            advisories.append(
+                f"[ast_check] {target.name}: 복잡도 경고 (작업 계속됩니다)\n"
+                + "\n".join(complexity_warns)
+                + "\n→ 리팩터링을 고려하세요. ⚠️  표시 항목은 향후 차단 예정입니다."
             )
+
+    # 차단 분기에선 advisory 생략 (차단 우선) — 통과 시에만 환기 JSON 출력
+    if exit_code == 0 and advisories:
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PostToolUse",
+                        "additionalContext": "\n\n".join(advisories),
+                    }
+                },
+                ensure_ascii=False,
+            )
+        )
 
     return exit_code
 

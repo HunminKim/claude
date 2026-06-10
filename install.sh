@@ -1,18 +1,41 @@
 #!/bin/bash
 # 새 환경에서 Claude Code 플러그인 일괄 설치
 # 사용법: bash install.sh
+#
+# 설계 원칙: 실패를 삼키지 않는다.
+# - 각 명령의 stderr 를 캡처해 "이미 설치됨"과 "진짜 에러"를 구분한다
+# - 마지막에 claude plugin list 로 실제 설치 여부를 자가 검증한다
 
-set -e
+set -u
+
+FAIL=0
+
+run_step() {
+  # $1: 표시 라벨, 이후: 실행할 명령
+  local label="$1"
+  shift
+  local out
+  if out=$("$@" 2>&1); then
+    echo "      ✔ ${label}"
+  elif echo "$out" | grep -qiE 'already|이미'; then
+    echo "      ✔ ${label} (이미 설치/등록됨)"
+  else
+    echo "      ✘ ${label} 실패:"
+    echo "$out" | sed 's/^/        /'
+    FAIL=1
+  fi
+}
 
 echo "=== Claude Code 플러그인 설치 ==="
 
 # 1. 마켓플레이스 등록
-echo "[1/2] 마켓플레이스 등록 중..."
-claude plugins marketplace add HunminKim/claude --name hunminkim 2>/dev/null || \
-  echo "      (이미 등록됨)"
+#    이름은 .claude-plugin/marketplace.json 의 name(hunminkim)에서 자동 파생된다.
+#    (claude-plugins-official 은 CLI 내장 마켓플레이스라 등록 불필요)
+echo "[1/3] 마켓플레이스 등록 중..."
+run_step "marketplace hunminkim" claude plugin marketplace add HunminKim/claude
 
 # 2. 플러그인 설치
-echo "[2/2] 플러그인 설치 중..."
+echo "[2/3] 플러그인 설치 중..."
 
 # 공식 플러그인
 OFFICIAL=(
@@ -22,25 +45,38 @@ OFFICIAL=(
   "hookify"
 )
 for plugin in "${OFFICIAL[@]}"; do
-  echo "      $plugin@claude-plugins-official"
-  claude plugins install "${plugin}@claude-plugins-official" --yes 2>/dev/null || \
-    echo "      (이미 설치됨: $plugin)"
+  run_step "${plugin}@claude-plugins-official" \
+    claude plugin install "${plugin}@claude-plugins-official"
 done
 
 # 개인 플러그인
-echo "      project-init@hunminkim"
-claude plugins install project-init@hunminkim --yes 2>/dev/null || \
-  echo "      (이미 설치됨: project-init)"
-
-echo "      harness-check@hunminkim"
-claude plugins install harness-check@hunminkim --yes 2>/dev/null || \
-  echo "      (이미 설치됨: harness-check)"
+run_step "project-init@hunminkim" claude plugin install project-init@hunminkim
+run_step "harness-check@hunminkim" claude plugin install harness-check@hunminkim
 
 # >>> [prompt-log] integration begin
-echo "      prompt-log@hunminkim"
-claude plugins install prompt-log@hunminkim --yes 2>/dev/null || \
-  echo "      (이미 설치됨: prompt-log)"
+run_step "prompt-log@hunminkim" claude plugin install prompt-log@hunminkim
 # <<< [prompt-log] integration end
 
+# 3. 자가 검증 — 설치 목록에 실제로 존재하는지 확인 (무음 실패 방지)
+echo "[3/3] 설치 검증 중..."
+EXPECTED=(
+  "code-review" "code-simplifier" "skill-creator" "hookify"
+  "project-init" "harness-check"
+  "prompt-log"
+)
+INSTALLED=$(claude plugin list 2>/dev/null || true)
+for plugin in "${EXPECTED[@]}"; do
+  if echo "$INSTALLED" | grep -q "$plugin"; then
+    echo "      ✔ $plugin"
+  else
+    echo "      ✘ $plugin — 설치 확인 실패"
+    FAIL=1
+  fi
+done
+
 echo ""
-echo "=== 완료! Claude Code를 재시작하거나 /reload-plugins 를 실행하세요. ==="
+if [ "$FAIL" -ne 0 ]; then
+  echo "=== 일부 단계가 실패했습니다. 위 에러 메시지를 확인하세요. ==="
+  exit 1
+fi
+echo "=== 완료! Claude Code를 재시작하거나 /plugin 으로 확인하세요. ==="

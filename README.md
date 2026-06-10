@@ -15,7 +15,7 @@ bash install.sh
 2. 공식 플러그인 설치 (code-review, code-simplifier, skill-creator, hookify)
 3. 개인 플러그인 설치 (project-init, harness-check, prompt-log)
 
-설치 후 Claude Code 재시작 또는 `/reload-plugins`
+설치 후 Claude Code 재시작 (현재 상태는 `/plugin` 으로 확인)
 
 ---
 
@@ -104,7 +104,7 @@ update_docs 훅: gate.state = "verified", verifier_status 기록
 **체크포인트**: `git tag .claude/gate/<id>/clean` + `[plan-gate] <id>` stash entry
 **GC**: SessionEnd 훅이 30일 이상된 tag·stash·gate 기록 정리
 
-**가드**: `.claude/agents/verifier.md` 가 없는 (project-init 미적용) 프로젝트에선 plan-gate가 자동 비활성화된다.
+**활성화 스위치**: `.claude/plan_gate_enabled` 파일 존재 여부로 판정한다 (`/plan-gate-on` · `/plan-gate-off` 로 토글). `verifier.md` 존재 여부와는 독립이다.
 
 <!-- >>> [prompt-log] integration begin -->
 ### prompt-log
@@ -140,7 +140,7 @@ bash plugins/prompt-log/uninstall.sh
 claude plugins uninstall prompt-log
 ```
 
-**식별 마커 컨벤션**: 추가된 모든 코드는 `[prompt-log]` 식별 마커로 검색 가능 (`grep -rn '\[prompt-log\]' ~/.claude-config/`). 외부 통합 부분은 `<!-- >>> [prompt-log] integration begin -->` ~ `<!-- <<< [prompt-log] integration end -->` 마커로 감싸져 있어 안전하게 제거 가능.
+**식별 마커 컨벤션**: 추가된 모든 코드는 `[prompt-log]` 식별 마커로 검색 가능 (`grep -rn '\[prompt-log\]' ~/claude-config/`). 외부 통합 부분은 `<!-- >>> [prompt-log] integration begin -->` ~ `<!-- <<< [prompt-log] integration end -->` 마커로 감싸져 있어 안전하게 제거 가능.
 
 자세한 내용: `plugins/prompt-log/README.md`. 미뤄둔 항목: `plugins/prompt-log/V2_TODO.md`.
 <!-- <<< [prompt-log] integration end -->
@@ -150,5 +150,9 @@ claude plugins uninstall prompt-log
 ## 플러그인 업데이트
 
 ```bash
-claude plugins update project-init@hunminkim
+# 마켓플레이스 메타데이터 갱신 후 플러그인별 업데이트 (재시작 필요)
+claude plugin marketplace update hunminkim
+claude plugin update project-init@hunminkim
+claude plugin update harness-check@hunminkim
+claude plugin update prompt-log@hunminkim
 ```

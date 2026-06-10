@@ -42,10 +42,12 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
   - 예: `plan_gate`, `dangerous_bash_check`, `detect_failure_loop`(2회 분기), `delegation_due_diligence`
 - **비차단 환기** (Claude 행동 환기·정보 주입·advisory): `exit 0 + stdout` 으로 `hookSpecificOutput.additionalContext` JSON 출력
   - 차단 없이 Claude context 에 메시지 주입 → Claude 가 자기 응답에 반영
-  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `verifier_remind`
+  - Stop 훅도 이 채널 지원 (턴 끝에 주입, 대화 계속) — `systemMessage` 는 사용자 전용이라 환기 불가
+  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `verifier_remind`, `plan_gate_stop_alert`(Stop), `plan_gate_session_start`(SessionStart)
 - **사용자 터미널 전용** (Claude 행동 영향 없음, 사용자 정보 알림): `exit 0 + stderr`
   - 사용자 터미널에만 보임 — Claude 는 못 봄
-  - 예: `plan_gate_stop_alert`, `plan_gate_gc` (Stop / SessionEnd 시점 정보)
+  - 예: `plan_gate_gc` (SessionEnd 시점 정보 — Claude 주입 불가 이벤트)
+  - 주입 불가 이벤트 주의: `PostCompact`/`SessionEnd` 는 side-effect 전용이라 additionalContext 가 무효 — compact 후 재주입은 `SessionStart(matcher: compact)` 를 쓴다
 
 **금지 패턴**: `exit 0 + plain stderr` 또는 `exit 0 + plain stdout` 으로 **Claude 환기 메시지**를 출력하지 않는다 — 사용자 터미널만 보이고 Claude context 진입 안 됨, 환기가 무효가 된다. Claude 가 봐야 하는 메시지는 반드시 `hookSpecificOutput.additionalContext` JSON 으로 감싼다.
 
@@ -65,6 +67,8 @@ ruff 미설치 시 graceful skip(세션당 1회 안내). 설정은 `pyproject.to
 
 - 새 훅·기능 추가 전 기존 `plan_gate_lib`, `prompt_log_lib`에서 흡수 가능한지 검토
 - 커밋 전 `git diff` 자체 검토 (특히 `plugins/*/hooks/*.json` 매처 변경)
+- **커밋 전 `python3 tests/smoke_test.py` 실행 필수** — 훅은 조용히 실패하므로
+  행위 검증 없이는 회귀를 알 수 없다 (Edit 카운터 dead 회귀가 실제 사고 사례)
 - ruff 잔존 오류는 같은 PR 안에서 fix — 다음 PR로 미루지 않는다
 - prompt-log 관련 코드는 `[prompt-log]` 마커로 `grep -rn` 검색 가능해야 함
 - **Simplicity First 적용**: 하네스 코드(`hooks/`, `plugins/`)도 동일하게 단순성 우선

@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "project-init",
-      "description": "v1.27.0 | 프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md·에이전트(frontend/backend/deeplearning/infra/verifier)·plan-gate 자동 세팅. /harness-update — 하네스 최신화. /monitor [시간] — 학습·배치 작업 자동 간격 모니터링.",
+      "description": "v1.28.0 | 프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md·에이전트(frontend/backend/deeplearning/infra/verifier)·plan-gate 자동 세팅. /harness-update — 하네스 최신화. /monitor [시간] — 학습·배치 작업 자동 간격 모니터링.",
       "source": "./plugins/project-init",
       "category": "development"
     },
@@ -20,7 +20,7 @@
     },
     {
       "name": "prompt-log",
-      "description": "v1.0.0 | 사용자 prompt + 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적. /project-init 통합 동의, plugins/prompt-log/uninstall.sh 1줄 제거.",
+      "description": "v1.0.1 | 사용자 prompt + 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적. /project-init 통합 동의, plugins/prompt-log/uninstall.sh 1줄 제거.",
       "source": "./plugins/prompt-log",
       "category": "development"
     }
