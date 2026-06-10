@@ -15,6 +15,7 @@ plugins/
   harness-check/             진단 스킬
   prompt-log/                제거 가능 prompt 통계 (default deny)
 complit/                     하네스 수정·회고 리포트 누적
+tests/                       smoke_test.py — 훅 행위 검증 (커밋 전 실행 필수)
 install.sh                   마켓플레이스 + 플러그인 일괄 설치
 ```
 

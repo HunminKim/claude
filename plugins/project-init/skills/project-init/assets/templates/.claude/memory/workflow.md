@@ -227,6 +227,7 @@ Plan Mode로 계획 작성 → tasks/todo.md 작성 → 사용자 Accept
 | `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
 | `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |
 | `/skip` | verifier ❌ 후 현재 변경 보존 | 문제 인지 채로 gate 마감 (`/keep` 도 동일) |
+| `/skip-verify` | verifier 판정 전, 검증 없이 마감할 때 | 검증 생략 마감 (⏭️ 기록. 판정 ✅/❌ 후엔 사용 불가) |
 | `/retry` | verifier ❌ 후 재구현 | approved 상태 복귀, 카운터 누적 유지 |
 | `/rollback` | 전체 되돌리기 (체크포인트 필수) | git reset → checkpoint tag, stash 복원 안내 |
 

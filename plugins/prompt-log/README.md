@@ -169,7 +169,7 @@ claude plugins uninstall prompt-log
 
 외부 통합 (project-init / marketplace.json / install.sh / 루트 README) 의 prompt-log 추가 부분도 마커로 감싸져 있어 안전하게 제거 가능:
 ```bash
-grep -rn '\[prompt-log\]' ~/.claude-config/   # 모든 흔적 위치
+grep -rn '\[prompt-log\]' ~/claude-config/   # 모든 흔적 위치 (저장소 clone 경로 기준)
 ```
 
 ## plan-gate 와의 관계
@@ -189,7 +189,7 @@ prompt-log 는 plan-gate state(`<project>/.claude/state/plan_gate.json`)를 **re
 
 검색:
 ```bash
-grep -rn '\[prompt-log\]' ~/.claude-config/
+grep -rn '\[prompt-log\]' ~/claude-config/   # 저장소 clone 경로 기준
 ```
 
 ## V2 예정 (V2_TODO.md)

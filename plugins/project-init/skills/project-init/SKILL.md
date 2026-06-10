@@ -341,6 +341,7 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 > | `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
 > | `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |
 > | `/retry` | verifier ❌ 후 재구현 | approved 복귀, 카운터 누적 |
+> | `/skip-verify` | verifier 판정 전, 검증 없이 마감 | 검증 생략 마감 (⏭️ 기록) |
 > | `/rollback` | 전체 되돌릴 때 | git reset → checkpoint |
 
 ---
