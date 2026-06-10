@@ -230,6 +230,33 @@ def t_scaffold_consistency() -> None:
         check(f"agents/{agent}.md: SKILL.md 생성 배선", f"{agent}.md" in skill)
 
 
+def t_command_files() -> None:
+    """plan_approval 토큰마다 사용자 호출용 슬래시 커맨드가 존재해야 한다.
+
+    현행 CLI 는 미등록 슬래시 입력(/done 등)을 거부하므로, 커맨드 파일이 없으면
+    문서가 안내하는 슬래시 경로가 통째로 죽는다 (v1.29.0 현장 사고 사례).
+    또한 전이 커맨드는 disable-model-invocation: true 로 Claude 자율 호출을 막아야 한다.
+    """
+    print("[10] 전이 토큰 ↔ 슬래시 커맨드 정합")
+    cmds_dir = REPO / "plugins" / "project-init" / "commands"
+    # plan_approval._ACTION_TOKENS 의 토큰 → 커맨드 파일명 (keep 은 skip 의 별칭)
+    sys.path.insert(0, str(HOOKS))
+    import plan_approval
+
+    for token in plan_approval._ACTION_TOKENS:
+        fname = "skip.md" if token == "keep" else ("approve-plan.md" if token == "approve" else f"{token}.md")
+        f = cmds_dir / fname
+        check(f"토큰 '{token}' → commands/{fname} 존재", f.exists())
+        if f.exists():
+            text = f.read_text()
+            check(
+                f"commands/{fname}: disable-model-invocation",
+                "disable-model-invocation: true" in text,
+            )
+            action = plan_approval._ACTION_TOKENS[token]
+            check(f"commands/{fname}: CLI 액션 '{action}' 호출", f"plan_gate_cli.py\" {action}" in text)
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -255,6 +282,7 @@ def main() -> int:
         t_dangerous_bash(base)
         t_channel_shapes(base)
     t_scaffold_consistency()
+    t_command_files()
     t_version_sync()
     print(f"\n결과: {PASS} 통과, {FAIL} 실패")
     return 1 if FAIL else 0

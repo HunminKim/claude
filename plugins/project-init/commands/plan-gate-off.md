@@ -1,6 +1,7 @@
 ---
 description: plan-gate를 비활성화한다. .claude/plan_gate_enabled 파일을 삭제한다.
 allowed-tools: Bash
+disable-model-invocation: true
 ---
 
 ```bash

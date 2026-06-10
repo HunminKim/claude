@@ -23,8 +23,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import plan_gate_lib as lib  # noqa: E402
 
 # 슬래시 유무 모두 처리: /approve-plan, approve-plan, /approve 모두 동작
-# 게이트 전이는 commands/*.md 가 아닌 이 UserPromptSubmit 훅으로만 처리한다 —
-# commands/*.md 는 Claude 의 Skill 도구로 자율 호출 가능해 사용자 게이트키퍼를 우회한다.
+#
+# 전이 경로는 2개이며 둘 다 사용자 게이트키퍼를 지킨다 (CLI 가 idempotent 라 중복 안전):
+# 1. 슬래시 커맨드 commands/<token>.md — disable-model-invocation: true 라
+#    사용자만 호출 가능 (Claude Skill 도구 자율 호출 차단, 공식 frontmatter).
+#    현행 CLI 는 미등록 슬래시 입력을 거부하므로 커맨드 등록이 필수다.
+# 2. 슬래시 없는 평문 토큰("done" 등) — 이 UserPromptSubmit 훅이 fallback 처리.
 _ACTION_TOKENS = {
     "approve-plan": "approve",
     "approve": "approve",
