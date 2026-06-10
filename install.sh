@@ -12,13 +12,12 @@ FAIL=0
 
 run_step() {
   # $1: 표시 라벨, 이후: 실행할 명령
+  # 참고: 현행 CLI 는 이미 설치/등록된 경우에도 exit 0 (실측) — 별도 분기 불필요
   local label="$1"
   shift
   local out
   if out=$("$@" 2>&1); then
     echo "      ✔ ${label}"
-  elif echo "$out" | grep -qiE 'already|이미'; then
-    echo "      ✔ ${label} (이미 설치/등록됨)"
   else
     echo "      ✘ ${label} 실패:"
     echo "$out" | sed 's/^/        /'
@@ -66,7 +65,7 @@ EXPECTED=(
 )
 INSTALLED=$(claude plugin list 2>/dev/null || true)
 for plugin in "${EXPECTED[@]}"; do
-  if echo "$INSTALLED" | grep -q "$plugin"; then
+  if echo "$INSTALLED" | grep -qw "$plugin"; then
     echo "      ✔ $plugin"
   else
     echo "      ✘ $plugin — 설치 확인 실패"

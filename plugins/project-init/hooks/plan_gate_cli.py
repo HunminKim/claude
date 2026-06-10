@@ -247,6 +247,19 @@ def cmd_skip_verify(root, state) -> int:
         _err(f"[plan-gate skip-verify] 현재 상태 '{gate['state']}'에서는 사용 불가.")
         return 1
 
+    # 이미 verifier 판정이 있으면 ⏭️ 로 덮어쓰지 않는다 — 기록 왜곡 방지
+    # (❌ 를 ⏭️ 로 바꾸면 "검증 실패" 사실이 "건너뜀"으로 둔갑한다)
+    existing = gate.get("verifier_status")
+    if existing == "❌":
+        _err(
+            "[plan-gate skip-verify] verifier ❌ 판정이 이미 있습니다 — 사용 불가.\n"
+            "  실패 기록을 보존하며 마감하려면 /skip, 재시도는 /retry, 되돌리기는 /rollback."
+        )
+        return 1
+    if existing == "✅":
+        _err("[plan-gate skip-verify] verifier ✅ 판정이 이미 있습니다 — /done 을 쓰세요.")
+        return 1
+
     _info(
         "[plan-gate skip-verify] ⚠️  verifier 검증 없이 완료 처리합니다.\n"
         "  건너뛴 사실이 gate 기록에 남습니다. 체크포인트는 정리됩니다."

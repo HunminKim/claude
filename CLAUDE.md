@@ -47,7 +47,7 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 - **사용자 터미널 전용** (Claude 행동 영향 없음, 사용자 정보 알림): `exit 0 + stderr`
   - 사용자 터미널에만 보임 — Claude 는 못 봄
   - 예: `plan_gate_gc` (SessionEnd 시점 정보 — Claude 주입 불가 이벤트)
-  - 주입 불가 이벤트 주의: `PostCompact`/`SessionEnd` 는 side-effect 전용이라 additionalContext 가 무효 — compact 후 재주입은 `SessionStart(matcher: compact)` 를 쓴다
+  - decision control 없는 이벤트 주의: `PostCompact`/`SessionEnd` 는 side-effect 용도로 분류돼 있어 환기 채널을 기대하지 않는다 — compact 후 재주입은 `SessionStart(matcher: compact)` 가 공식 권장 경로
 
 **금지 패턴**: `exit 0 + plain stderr` 또는 `exit 0 + plain stdout` 으로 **Claude 환기 메시지**를 출력하지 않는다 — 사용자 터미널만 보이고 Claude context 진입 안 됨, 환기가 무효가 된다. Claude 가 봐야 하는 메시지는 반드시 `hookSpecificOutput.additionalContext` JSON 으로 감싼다.
 

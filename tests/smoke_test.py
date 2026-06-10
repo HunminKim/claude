@@ -102,7 +102,11 @@ def t_plan_gate(base: Path) -> None:
 
     p = make_project(base, "pg_write")
     rcs = [run_hook(hook, edit_payload("Write", p / "app.py"), p).returncode for _ in range(5)]
-    check("같은 파일 Write 5회째 차단", rcs[4] == 2, f"rcs={rcs}")
+    check(
+        "같은 파일 Write 5회째 차단 (1~4회는 통과)",
+        rcs[:4] == [0, 0, 0, 0] and rcs[4] == 2,
+        f"rcs={rcs}",
+    )
 
 
 def t_skip_verify(base: Path) -> None:

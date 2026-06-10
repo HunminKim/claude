@@ -5,9 +5,9 @@
 - CLAUDE.md 재주입: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
 - plan-gate 복구 알림: 사용자 터미널 전용 (stderr)
 
-공식 스펙: PostCompact 이벤트는 side-effect 전용이라 컨텍스트 주입이
-불가능하다. 재주입은 SessionStart(matcher: compact)에서만 동작한다 —
-settings.json 배선도 SessionStart.compact 로 등록돼 있다 (채널 교정).
+공식 가이드는 compaction 후 컨텍스트 재주입 경로로 SessionStart(matcher:
+compact)를 권장한다 (PostCompact 는 decision control 없는 side-effect
+이벤트). settings.json 배선도 SessionStart.compact 로 등록돼 있다.
 
 동작 단계:
 1. CLAUDE.md 핵심 섹션을 additionalContext 로 Claude context 에 재주입 (워크플로우 규칙 소실 방지)
