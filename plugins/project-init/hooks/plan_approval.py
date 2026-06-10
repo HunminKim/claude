@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook — plan-gate 토큰 fallback 처리.
 
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON
+— verified ✅ 분기. CLI 위임 출력은 CLI 의 채널을 그대로 전달)
+
 슬래시 커맨드(`/approve-plan` 등)는 commands/*.md 정의가 1차로 처리하지만,
 사용자가 슬래시 커맨드 형태가 아닌 평문 메시지로 토큰을 입력해도 동일하게
 plan-gate 상태를 갱신할 수 있도록 fallback을 제공한다.
@@ -28,6 +31,7 @@ _ACTION_TOKENS = {
     "done": "done",
     "skip": "skip",
     "keep": "skip",
+    "skip-verify": "skip-verify",
     "rollback": "rollback",
     "retry": "retry",
     "replan": "replan",

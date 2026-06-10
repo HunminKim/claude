@@ -52,7 +52,10 @@ _PROTECTED_RE = re.compile(
 # cat/head/tail/less/more + 비밀 파일 패턴 (grep 제외 — 코드 검색 오탐 방지)
 _READ_CMDS = r"(?:cat|head|tail|less|more|bat|batcat)"
 _SECRET_FILES = (
-    r"(?:\.env(?:\.local|\.production|\.development|\.staging|\.prod|\.dev)?)"
+    # .env 계열 — 단, 안전 템플릿(.example/.sample/.template/.dist)은 허용
+    # (secret_read_guard 의 _ALLOW_ENV_RE 와 동일 정책)
+    r"(?:\.env(?:\.local|\.production|\.development|\.staging|\.prod|\.dev)?"
+    r"(?![\w.-]*\.(?:example|sample|template|dist)\b))"
     r"|(?:\.netrc|\.pgpass|\.npmrc|\.pypirc)"
     r"|(?:id_rsa|id_ed25519|id_ecdsa|id_dsa)"
     r"|(?:credentials\.json|token\.json|secrets\.(?:ya?ml|json|toml))"

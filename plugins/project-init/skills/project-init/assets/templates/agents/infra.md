@@ -64,7 +64,21 @@ tools: Read, Bash, Write, Edit, MultiEdit
 
 ### 1. 사전 확인 (구현 전 필수)
 ```bash
-python3 .claude/plugins/project-init/hooks/plan_gate_cli.py status
+# plan-gate 상태 확인 — 프로젝트 로컬 state 파일을 직접 읽는다
+# (플러그인 설치 경로는 서브에이전트가 알 수 없으므로 CLI 호출 금지)
+python3 - <<'EOF'
+import json, pathlib
+p = pathlib.Path(".claude/state/plan_gate.json")
+g = None
+if p.exists():
+    d = json.loads(p.read_text())
+    g = (d.get("gates") or {}).get(d.get("current_gate_id") or "")
+if not g:
+    print("state: (활성 게이트 없음)")
+else:
+    print("state:", g.get("state"))
+    print("approved_auto:", "yes" if g.get("approved_auto") else "no")
+EOF
 
 # 시작 시점 기록 (완료 보고의 "변경 증거" 기준점 — 누락 금지)
 git rev-parse HEAD          # 시작 SHA — 출력값을 기록

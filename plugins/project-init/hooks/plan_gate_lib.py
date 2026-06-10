@@ -510,9 +510,9 @@ def _intro_block() -> str:
         "  큰 변경을 사용자가 검토하지 못한 채로 진행되는 것을 막는 자동 게이트입니다.\n"
         "  차단 시점에 git tag + git stash로 자동 체크포인트를 생성하므로,\n"
         "  /rollback 으로 안전하게 되돌릴 수 있습니다.\n"
-        "  비활성화: .claude/agents/verifier.md 를 삭제하면 plan-gate 가 꺼집니다.\n"
-        "  임계값 조정: plugins/project-init/hooks/plan_gate_lib.py 상수\n"
-        "              (TRIGGER_REPEAT_RATIO 등) 를 수정하세요.\n"
+        "  비활성화: /plan-gate-off 입력 (.claude/plan_gate_enabled 삭제).\n"
+        "  카운트 제외: 문서·메타파일은 .plan-gateignore 에 패턴을 추가하면\n"
+        "              편집 카운터에서 빠집니다.\n"
         "  이 안내는 한 번만 표시됩니다.\n"
     )
 
@@ -696,9 +696,11 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> Non
         pass
 
 
-def last_archived_todo_sha(root: Path) -> str | None:
-    """직전 done 사이클에서 기록한 todo.md 해시를 반환. 없으면 None."""
-    state = load_state(root)
+def last_archived_todo_sha(state: dict[str, Any]) -> str | None:
+    """직전 done 사이클에서 기록한 todo.md 해시를 반환. 없으면 None.
+
+    호출자가 이미 로드한 state 를 받는다 — 디스크 재읽기 방지.
+    """
     done_gates = [
         g for g in state.get("gates", {}).values()
         if g.get("state") == "done" and g.get("archived_todo_sha")

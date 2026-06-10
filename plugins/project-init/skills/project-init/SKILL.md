@@ -80,8 +80,11 @@ touch /tmp/.claude_init_in_progress
 ```
 README.md                       ← 프로젝트 소개         (기능 완료 시 업데이트)
 CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
+.plan-gateignore                ← plan-gate 편집 카운터 제외 목록 (문서·메타파일)
 .claude/
-├── settings.json               ← design-precheck + PostCompact hook 등록
+├── settings.json               ← 훅 등록 SSOT (아래 hooks/ 6종 전부 여기 배선됨)
+├── commands/
+│   └── skip.md                 ← /skip 슬래시 커맨드 설명 (전이는 plan_approval 훅이 처리)
 ├── rules/
 │   └── code-style.md           ← 코드 스타일 규칙 (코드 파일 편집 시 자동 로드)
 ├── memory/
@@ -90,8 +93,10 @@ CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
 ├── hooks/
 │   ├── time_context.py         ← 시간 키워드 감지 → 현재 KST 시각 자동 주입
 │   ├── design-precheck.py      ← 설계 키워드 감지 → 체크리스트 출력
-│   ├── post-compact.py         ← /compact 후 CLAUDE.md 핵심 섹션 재주입
-│   └── cleanup_suggest.py      ← 세션 종료 시 임시 파일 감지 → 정리 제안
+│   ├── post-compact.py         ← compact 후 CLAUDE.md 핵심 섹션 재주입 (SessionStart matcher: compact)
+│   ├── cleanup_suggest.py      ← 세션 종료 시 임시 파일 감지 → 정리 제안
+│   ├── git_hooks_setup.py      ← SessionStart 시 core.hooksPath 멱등 재설정
+│   └── verifier_sandbox.py     ← Bash 명령의 production 경로 쓰기 가드 (PreToolUse)
 └── skills/                     ← 재사용 절차 보관 디렉토리
     └── .gitkeep
 .githooks/
@@ -118,14 +123,17 @@ scripts/
 └── validate_arch.py            ← pre-push 아키텍처 제약 검증
 .claude/agents/
 ├── verifier.md                 ← 기능 검증 전담 서브에이전트
-└── infra.md                    ← 인프라 전문 구현 서브에이전트 (IaC/컨테이너/CI/CD/클라우드)
+├── infra.md                    ← 인프라 전문 구현 서브에이전트 (IaC/컨테이너/CI/CD/클라우드)
+├── backend.md                  ← 백엔드 구현 서브에이전트 (API/DB/비즈니스 로직)
+├── frontend.md                 ← 프론트엔드 구현 서브에이전트 (UI/상태/스타일)
+└── deeplearning.md             ← 딥러닝 구현 서브에이전트 (모델/학습/데이터)
 .claude/
 └── plan_gate_enabled           ← plan-gate 활성화 플래그 (반드시 마지막에 생성)
 ```
 
 각 문서 파일 내용은 아래 **템플릿 섹션**을 참고한다. 프로젝트 이름, 날짜(KST 기준), 기술 스택을 템플릿에 채워 넣는다.
 
-`verifier.md` 와 `infra.md` 는 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/` 의 동명 템플릿을 읽어 `.claude/agents/` 에 생성한다.
+`.claude/agents/` 5종(`verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md`)은 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/` 의 동명 템플릿을 읽어 생성한다. CLAUDE.md 위임 표가 5종 전부를 전제하므로 일부만 생성하면 `@frontend` 등의 호출이 "agent not found" 로 실패한다.
 
 `.claude/plan_gate_enabled` 파일은 **모든 파일 생성이 완료된 가장 마지막 단계**에 생성한다. 이 파일 존재 여부가 plan-gate 활성화 트리거이므로, 반드시 가장 마지막에 생성해야 project-init 실행 중 plan-gate가 조기 발동되지 않는다.
 
@@ -137,9 +145,9 @@ scripts/
 2. `.claude/settings.json` — 훅 등록 파일. 훅 스크립트보다 먼저 생성하지 않으면 Claude가 훅 없이 실행될 수 있음
 3. `.claude/rules/code-style.md` — 코드 스타일 규칙
 4. `.claude/memory/lessons.md`, `.claude/memory/workflow.md` — 메모리 파일
-5. `.claude/hooks/time_context.py`, `design-precheck.py`, `post-compact.py`, `cleanup_suggest.py` — 훅 스크립트 (settings.json 등록 대상)
-6. `.claude/agents/verifier.md` 와 `.claude/agents/infra.md` — 모든 hook 스크립트 생성 후 마지막으로 생성
-7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md` — 문서·스크립트 계층 (순서 무관)
+5. `.claude/hooks/` 6종 — `time_context.py`, `design-precheck.py`, `post-compact.py`, `cleanup_suggest.py`, `git_hooks_setup.py`, `verifier_sandbox.py` (settings.json 등록 대상 전부 — 일부만 생성하면 매 세션 file-not-found 에러 발생)
+6. `.claude/agents/` 5종 — `verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md` — 모든 hook 스크립트 생성 후 생성
+7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md`, `.plan-gateignore`, `.claude/commands/skip.md` — 문서·스크립트 계층 (순서 무관)
 8. `.claude/plan_gate_enabled` — **반드시 마지막**. 이 파일이 생성된 순간부터 plan-gate가 활성화된다
 
 ### 3단계: CLAUDE.md 생성
@@ -249,12 +257,12 @@ SKILL.md 의 `<!-- >>> [prompt-log] -->` 마커로 감싸진 부분만 제거하
 - `technical_doc.md`, `completion_report.md`, `checklist.md` 는 @verifier가 소단위 완료마다 자동 업데이트
 - `deployment_guide.md` 는 개발 중 환경 관련 내용을 수시로 기록, 완료 후 정리
 - `README.md` 는 기능 완료 시 직접 업데이트 (새 기능·API 변경·사용법 변경 시)
-- `retrospective.md` 는 초기화 시 생성하지 않는다 — 사용자 완료 사인 후 `assets/templates/retrospective.md` 템플릿으로 생성한다
+- `retrospective.md` 는 초기화 시 생성하지 않는다 — 사용자 완료 사인 후 `assets/templates/docs/retrospective.md` 템플릿으로 생성한다
 
 **Git hook 설정 안내** (git 저장소인 경우):
 ```bash
 git config core.hooksPath .githooks
-chmod +x .githooks/pre-commit .githooks/pre-push
+chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ```
 - `pre-commit`: CLAUDE.md 린트 명령어 자동 실행
 - `pre-push`: `docs/constraints.yaml` 기반 아키텍처 위반 검사
@@ -359,6 +367,18 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 
 `assets/templates/agents/infra.md` 파일을 읽어 사용한다.
 
+### .claude/agents/backend.md 템플릿
+
+`assets/templates/agents/backend.md` 파일을 읽어 사용한다.
+
+### .claude/agents/frontend.md 템플릿
+
+`assets/templates/agents/frontend.md` 파일을 읽어 사용한다.
+
+### .claude/agents/deeplearning.md 템플릿
+
+`assets/templates/agents/deeplearning.md` 파일을 읽어 사용한다.
+
 ### .claude/rules/code-style.md 템플릿
 
 `assets/templates/.claude/rules/code-style.md` 파일을 읽어 `.claude/rules/code-style.md`로 생성한다.
@@ -386,6 +406,22 @@ chmod +x .githooks/pre-commit .githooks/pre-push
 ### .claude/hooks/cleanup_suggest.py 템플릿
 
 `assets/templates/.claude/hooks/cleanup_suggest.py` 파일을 읽어 `.claude/hooks/cleanup_suggest.py`로 생성한다.
+
+### .claude/hooks/git_hooks_setup.py 템플릿
+
+`assets/templates/.claude/hooks/git_hooks_setup.py` 파일을 읽어 `.claude/hooks/git_hooks_setup.py`로 생성한다.
+
+### .claude/hooks/verifier_sandbox.py 템플릿
+
+`assets/templates/.claude/hooks/verifier_sandbox.py` 파일을 읽어 `.claude/hooks/verifier_sandbox.py`로 생성한다.
+
+### .claude/commands/skip.md 템플릿
+
+`assets/templates/.claude/commands/skip.md` 파일을 읽어 `.claude/commands/skip.md`로 생성한다.
+
+### .plan-gateignore 템플릿
+
+`assets/templates/.plan-gateignore` 파일을 읽어 프로젝트 루트 `.plan-gateignore`로 생성한다.
 
 ### .githooks/pre-commit 템플릿
 

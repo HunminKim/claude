@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """SessionStart hook — 세션 재개 시 plan-gate 상태 능동 보고.
 
-새 세션(시작·재개·compact 후) 진입 시 활성 approved gate가 있으면
-additionalContext 채널로 현황을 즉시 주입한다. Claude가 메시지를
-받기 전에 컨텍스트가 로드되므로 첫 응답부터 올바른 상태를 반영한다.
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
+새 세션(시작·재개·compact 후) 진입 시 활성 gate가 있으면
+hookSpecificOutput.additionalContext 채널로 현황을 즉시 주입한다.
+Claude가 메시지를 받기 전에 컨텍스트가 로드되므로 첫 응답부터
+올바른 상태를 반영한다.
+
+주의: top-level {"additionalContext": ...} 는 공식 스펙에 없는 형태라
+무시된다 — 반드시 hookSpecificOutput 래퍼로 감싼다 (v1.28.0 수정).
 """
 
 from __future__ import annotations
@@ -98,7 +104,12 @@ def main() -> int:
 
     lines += ["─" * 60, ""]
 
-    result = {"additionalContext": "\n".join(lines)}
+    result = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": "\n".join(lines),
+        }
+    }
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
     return 0
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """SessionEnd hook — 오래된 plan-gate 체크포인트 GC.
 
+출력 채널: 사용자전용 (exit 0 + stderr — SessionEnd 는 Claude 주입 불가 이벤트)
+
 정책 (D7): 30일 이상 경과한 .claude/gate/*/clean tag와 [plan-gate] stash를 삭제.
-state 파일의 done/rolled_back gate 기록도 30일 후 정리.
+state 파일의 done/rolled_back gate 기록은 닫힌 시각(closed_at,
+없으면 created_at) 기준 30일 후 정리.
 """
 
 from __future__ import annotations
@@ -35,7 +38,8 @@ def gc_state(state: dict, cutoff: datetime) -> int:
         if g["state"] not in ("done", "rolled_back"):
             keep[gid] = g
             continue
-        ts = _parse_iso(g.get("created_at", ""))
+        # 닫힌 시각 기준 만료 — 오래 살다 최근에 닫힌 gate 가 조기 GC 되지 않게
+        ts = _parse_iso(g.get("closed_at") or g.get("created_at", ""))
         if ts is None or ts >= cutoff:
             keep[gid] = g
             continue
@@ -134,7 +138,7 @@ def main() -> int:
     removed_stashes = gc_stashes(root, cutoff)
 
     if removed_state or removed_tags or removed_stashes:
-        sys.stdout.write(
+        sys.stderr.write(
             f"[plan-gate gc] 정리 완료: state={removed_state} "
             f"tags={removed_tags} stashes={removed_stashes}\n"
         )

@@ -3,8 +3,10 @@
 
 usage: plan_gate_cli.py {approve|done|rollback|retry|replan|status}
 
+출력 채널: 사용자전용 (훅이 아닌 CLI — stdout 사람용 메시지.
+UserPromptSubmit 경유 시 plan_approval.py 가 출력을 그대로 전달)
+
 각 액션은 idempotent하게 동작한다 (같은 결과를 반복 호출해도 안전).
-출력은 stdout으로 사람이 읽을 수 있는 메시지를 작성한다.
 exit 0: 성공, exit 1: 잘못된 상태 전이.
 """
 

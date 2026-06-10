@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Stop hook — 임시 파일 패턴 감지 시 Claude에게 정리 제안.
 
-출력 채널: 환기 (exit 0 + stdout systemMessage JSON)
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
+공식 스펙: Stop 훅의 additionalContext는 턴 끝에 주입되어 Claude가
+다음 응답에서 반영한다. systemMessage는 사용자 터미널 전용이라
+"Claude에게 정리 제안" 의도에 맞지 않는다 (채널 교정).
 
 docs/constraints.yaml 의 temp_patterns 기준으로 스캔.
 임시 파일이 없으면 무음 종료.
@@ -142,7 +146,10 @@ def main():
         div, "",
     ]
     advisory = {
-        "systemMessage": "\n".join(lines),
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": "\n".join(lines),
+        }
     }
     sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 

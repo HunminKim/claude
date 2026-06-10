@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Stop hook — Claude 응답 종료 직전 plan-gate 상태 리마인더.
 
-출력 채널: 환기 (exit 0 + stdout systemMessage JSON)
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
+공식 스펙: Stop 훅의 additionalContext는 턴 끝에 주입되고 대화가
+이어지므로 Claude가 다음 응답에서 반영할 수 있다. systemMessage는
+사용자 터미널 전용이라 환기 의도에 맞지 않는다 (v1.28.0 채널 교정).
 
 approved 게이트가 활성 상태이고 응답 중에 편집이 발생했을 때
 (last_edit_ts가 응답 시작 이후로 갱신된 경우) 현재 한도 소모 현황을
@@ -33,7 +37,10 @@ def _emit_advisories(items: list[str]) -> None:
         return
     combined = "\n\n".join(items)
     payload = {
-        "systemMessage": combined,
+        "hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": combined,
+        }
     }
     sys.stdout.write(json.dumps(payload, ensure_ascii=False))
     sys.stdout.flush()

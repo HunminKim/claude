@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""PostCompact hook — /compact 후 CLAUDE.md 핵심 섹션 재주입 + plan-gate 자동 복구.
+"""SessionStart(matcher: compact) hook — compact 후 CLAUDE.md 핵심 섹션 재주입 + plan-gate 자동 복구.
 
 출력 채널:
-- CLAUDE.md 재주입: 환기 (exit 0 + stdout systemMessage JSON)
+- CLAUDE.md 재주입: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
 - plan-gate 복구 알림: 사용자 터미널 전용 (stderr)
+
+공식 스펙: PostCompact 이벤트는 side-effect 전용이라 컨텍스트 주입이
+불가능하다. 재주입은 SessionStart(matcher: compact)에서만 동작한다 —
+settings.json 배선도 SessionStart.compact 로 등록돼 있다 (채널 교정).
 
 동작 단계:
 1. CLAUDE.md 핵심 섹션을 additionalContext 로 Claude context 에 재주입 (워크플로우 규칙 소실 방지)
@@ -66,8 +70,8 @@ def restore_plan_gate(root: Path) -> None:
 def main() -> None:
     try:
         json.load(sys.stdin)
-    except Exception as exc:
-        print(f"[post-compact] stdin 파싱 오류: {exc}", file=sys.stderr)
+    except Exception:
+        pass  # stdin 파싱 실패는 silent — 훅이 흐름을 막지 않는다
     root = find_project_root()
     restore_plan_gate(root)
     claude_md = find_claude_md(root)
@@ -85,7 +89,10 @@ def main() -> None:
         "", div, "",
     ])
     advisory = {
-        "systemMessage": msg,
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": msg,
+        }
     }
     sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 

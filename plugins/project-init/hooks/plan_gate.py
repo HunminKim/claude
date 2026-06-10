@@ -97,7 +97,7 @@ def main() -> int:
                 # 파일을 한 번만 읽어 sha 계산 (TOCTOU 방지)
                 current_sha = hashlib.sha256(todo_text.encode()).hexdigest()
                 current_mtime = str(todo_path.stat().st_mtime)
-                prev_sha = lib.last_archived_todo_sha(root)
+                prev_sha = lib.last_archived_todo_sha(state)
                 if prev_sha and current_sha == prev_sha:
                     advisories.append(
                         "[plan-gate] ℹ️  tasks/todo.md가 이전 사이클과 동일 → 자동 승인 스킵.\n"
@@ -178,12 +178,11 @@ def main() -> int:
 
     # ── 동일 파일 재편집 힌트: Edit → MultiEdit 유도 ─────────────────────
     # 같은 gate 내에서 이미 수정한 파일을 Edit으로 다시 호출하면
-    # 차단하지 않고 additionalContext로 비차단 힌트를 전달한다.
+    # 비차단 힌트만 누적하고 흐름은 계속 탄다 (카운터·트리거 정상 동작).
+    # 주의: 여기서 early-return 하면 file_edit_counts가 1에 고정되어
+    #       반복편집 트리거가 Edit 툴에서 영구히 죽는다 (v1.28.0 회귀 수정).
     if tool_name == "Edit" and target and target in gate["unique_files"]:
         advisories.append(lib.format_multi_edit_hint(target))
-        _emit_advisories(advisories)
-        lib.save_state(root, state)
-        return 0
 
     gate["edit_count"] += 1
     gate["last_edit_ts"] = lib.now_iso()
