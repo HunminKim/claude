@@ -2,6 +2,8 @@
 # [prompt-log] removable plugin — see plugins/prompt-log/README.md
 """SessionEnd 훅 — 마지막 active prompt를 finalize/flush.
 
+출력 채널: 사용자전용 (exit 0 + stderr — flush 실패 경고만. 평시 무출력)
+
 동작:
 1. 동의 검사. 미동의면 exit 0
 2. active record 있으면 finalize(ended_by="session_end") → 월별 jsonl append

@@ -2,6 +2,8 @@
 # [prompt-log] removable plugin — see plugins/prompt-log/README.md
 """UserPromptSubmit 훅 — 새 prompt 도착 시 처리.
 
+출력 채널: 사용자전용 (exit 0 + stderr — flush 실패 경고만. 평시 무출력)
+
 동작:
 1. 동의 검사 (글로벌 whitelist + 프로젝트 marker). 미동의면 즉시 exit 0
 2. 기존 active prompt가 있으면 finalize → 월별 jsonl flush

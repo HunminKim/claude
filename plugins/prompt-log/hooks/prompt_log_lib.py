@@ -224,9 +224,13 @@ def pl_save_active(project_root: Path, active: dict[str, Any]) -> None:
         fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
         try:
             tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps(active, ensure_ascii=False, indent=2))
+            # 내용 기록 전에 0600 확보 — 기록 후 chmod 하면 그 사이
+            # prompt 본문이 group/other readable 로 노출되는 race 발생
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            os.fchmod(fd, 0o600)  # tmp 잔존물이 0644 였던 경우 강제 교정
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(active, ensure_ascii=False, indent=2))
             tmp.replace(p)
-            p.chmod(0o600)
         finally:
             fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
@@ -356,9 +360,11 @@ def pl_append_record(record: dict[str, Any]) -> None:
     with open(lock_file, "w") as lock_f:
         fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
         try:
-            with open(p, "a", encoding="utf-8") as f:
+            # append 전에 0600 으로 생성 — 기록 후 chmod 의 노출 race 방지
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(line)
-            p.chmod(0o600)
         finally:
             fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 

@@ -14,6 +14,8 @@
 set -e
 
 GLOBAL_DIR="$HOME/.claude/prompt-log"
+# 저장소 루트 — 스크립트 위치에서 자동 산출 (clone 경로 하드코딩 금지)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "[prompt-log] uninstall 시작"
 echo
@@ -42,13 +44,13 @@ echo "  ✓ active state $active_removed개 삭제"
 echo
 echo "[prompt-log] 외부 통합 흔적 (수동 제거 권장):"
 echo "  다음 명령으로 모든 흔적 위치 확인:"
-echo "      grep -rn '\\[prompt-log\\]' ~/.claude-config/ 2>/dev/null"
+echo "      grep -rn '\\[prompt-log\\]' \"$REPO_ROOT\" 2>/dev/null"
 echo
 echo "  마크업 마커로 감싸진 부분 자동 제거 (위험할 수 있어 수동 권장):"
 echo "      sed -i.bak '/>>> \\[prompt-log\\] integration begin/,/<<< \\[prompt-log\\] integration end/d' \\"
-echo "        ~/.claude-config/README.md ~/.claude-config/install.sh \\"
-echo "        ~/.claude-config/.claude-plugin/marketplace.json \\"
-echo "        ~/.claude-config/plugins/project-init/skills/project-init/SKILL.md"
+echo "        \"$REPO_ROOT\"/README.md \"$REPO_ROOT\"/install.sh \\"
+echo "        \"$REPO_ROOT\"/.claude-plugin/marketplace.json \\"
+echo "        \"$REPO_ROOT\"/plugins/project-init/skills/project-init/SKILL.md"
 
 # 4. 플러그인 자체 제거 안내
 echo
@@ -56,4 +58,4 @@ echo "[prompt-log] 플러그인 제거 명령:"
 echo "      claude plugins uninstall prompt-log"
 echo
 echo "[prompt-log] 완료. 잔여물 확인:"
-echo "      grep -rn '\\[prompt-log\\]' ~/.claude-config/"
+echo "      grep -rn '\\[prompt-log\\]' \"$REPO_ROOT\""

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # [prompt-log] removable plugin — see plugins/prompt-log/README.md
-"""prompt-log CLI — /prompt-log-status 등 슬래시 커맨드 백엔드."""
+"""prompt-log CLI — /prompt-log-status 등 슬래시 커맨드 백엔드.
+
+출력 채널: 사용자전용 (훅이 아닌 CLI — stdout 사람용 메시지)
+"""
 
 from __future__ import annotations
 
@@ -28,7 +31,7 @@ def cmd_status() -> int:
     for f in jsonl_files:
         try:
             lines = f.read_text(encoding="utf-8").splitlines()
-            total_records += len([l for l in lines if l.strip()])
+            total_records += len([ln for ln in lines if ln.strip()])
             total_bytes += f.stat().st_size
         except Exception:
             pass

@@ -2,6 +2,8 @@
 # [prompt-log] removable plugin — see plugins/prompt-log/README.md
 """PreToolUse 훅 — 도구 호출 카운트 누적.
 
+출력 채널: 사용자전용 (exit 0 + stderr — 저장 실패 경고만. 평시 무출력)
+
 matcher: Edit|Write|MultiEdit|Bash|Task
 
 동작:
