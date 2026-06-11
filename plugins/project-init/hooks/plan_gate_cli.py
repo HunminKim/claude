@@ -153,6 +153,25 @@ def _recover_verifier_from_file(root, gate, state) -> bool:
     return True
 
 
+def _done_from_created(root, state, gate) -> int:
+    """created(승인 전) 상태에서 verifier 요구 없이 우아하게 마감.
+
+    cp·문서 위주 작업이 승인 절차를 건드리지 않고 끝났을 때 /done 이 거부되던
+    갭(리포트 260612 #2) 해소. working tree 는 건드리지 않는다(변경 보존).
+    """
+    has_cp = bool(
+        gate.get("checkpoint_clean_tag") or gate.get("checkpoint_dirty_stash_ref")
+    )
+    lib.do_gate_done(root, state, gate)
+    tail = (
+        "  체크포인트를 정리했습니다."
+        if has_cp
+        else "  정리할 체크포인트가 없습니다 — 승인·검증 절차 없이 종료합니다."
+    )
+    _info(f"[plan-gate done] 승인 전(created) 상태에서 마감합니다: {gate['id']}\n{tail}")
+    return 0
+
+
 def cmd_done(root, state) -> int:
     gate = _need_gate(state, "done")
     if gate is None:
@@ -161,6 +180,10 @@ def cmd_done(root, state) -> int:
     if gate["state"] == "done":
         _info("[plan-gate done] 이미 완료됨.")
         return 0
+
+    # created(승인 전): verifier 요구 없이 우아하게 마감 (리포트 260612 #2)
+    if gate["state"] == "created":
+        return _done_from_created(root, state, gate)
 
     if gate["state"] not in ("approved", "verified"):
         _err(f"[plan-gate done] 현재 상태 '{gate['state']}'에서는 완료 불가.")

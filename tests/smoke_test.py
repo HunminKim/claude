@@ -517,6 +517,32 @@ def t_cleanup_untracked_only(base: Path) -> None:
     check("untracked debug_output.json 감지", "debug_output.json" in out, f"out={out[:200]!r}")
 
 
+def t_done_from_created(base: Path) -> None:
+    """created(승인 전) 상태에서 /done 이 거부 대신 우아하게 마감 (리포트 260612 #2).
+
+    cp·문서 위주 작업이 plan-gate 임계 미달로 승인 없이 진행되다 종료될 때,
+    기존엔 /done 이 "현재 상태 'created'에서는 완료 불가"로 거부되던 갭을 막는다.
+    """
+    print("[16] created 상태 /done 우아한 마감")
+    p = make_project(base, "created_done")
+    (p / ".claude" / "agents").mkdir(parents=True)
+    (p / ".claude" / "agents" / "verifier.md").write_text("# verifier")  # cli 관리대상 판정용
+    gate_hook = HOOKS / "plan_gate.py"
+    f = p / "x.py"
+    for _ in range(6):
+        run_hook(gate_hook, edit_payload("Edit", f), p)
+    check("plan_gate 발동 → created", get_gate(p)["state"] == "created", get_gate(p)["state"])
+    cli = HOOKS / "plan_gate_cli.py"
+    r = subprocess.run(
+        [sys.executable, str(cli), "done"],
+        capture_output=True, text=True, cwd=str(p),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(p)},
+    )
+    check("created 에서 /done exit 0 (거부 안 함)", r.returncode == 0, f"rc={r.returncode} err={r.stderr[:120]!r}")
+    check("created 마감 안내 출력", "created" in r.stdout, f"out={r.stdout[:150]!r}")
+    check("gate done 처리됨", get_gate(p)["state"] == "done", get_gate(p)["state"])
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -564,6 +590,7 @@ def main() -> int:
         t_delegation_guard(base)
         t_install_python_gate(base)
         t_cleanup_untracked_only(base)
+        t_done_from_created(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()
