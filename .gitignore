@@ -7,6 +7,10 @@
 # 환경 변수 / 시크릿
 .env
 
+# prompt-log 런타임 수집 데이터 — 정식 위치는 ~/.claude/prompt-log/ (저장소 커밋 금지)
+# 루트 고정(/) — plugins/prompt-log/ 는 플러그인 코드라 제외
+/prompt-log/
+
 # OS
 .DS_Store
 Thumbs.db
