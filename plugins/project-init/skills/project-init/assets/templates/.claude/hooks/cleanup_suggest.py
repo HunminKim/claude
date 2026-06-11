@@ -57,13 +57,17 @@ def load_patterns(root: Path) -> dict:
     return DEFAULT_PATTERNS
 
 
-def _git_tracked_and_untracked(root: Path) -> list[Path] | None:
-    """git 트래킹/언트래킹(.gitignore 적용) 파일 목록. git 미사용 시 None."""
+def _git_untracked(root: Path) -> list[Path] | None:
+    """git 언트래킹(.gitignore 제외) 파일 목록. git 미사용 시 None (rglob fallback).
+
+    tracked 파일은 정식 구성요소라 임시 파일일 수 없다 → -o(others)만 본다.
+    이렇게 하면 *_debug.h 같은 정식 소스(tracked)가 _debug suffix 패턴에 오탐되지 않는다.
+    """
     if not (root / ".git").exists():
         return None
     try:
         res = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-co", "--exclude-standard"],
+            ["git", "-C", str(root), "ls-files", "-o", "--exclude-standard"],
             capture_output=True, text=True, timeout=3,
         )
         if res.returncode != 0:
@@ -81,7 +85,7 @@ def scan_temp_files(root: Path, patterns: dict) -> list[Path]:
     skip = SKIP_DIRS | user_skip
 
     deadline = time.monotonic() + SCAN_BUDGET_SEC
-    candidates = _git_tracked_and_untracked(root)
+    candidates = _git_untracked(root)
 
     found: list[Path] = []
     iterator = candidates if candidates is not None else root.rglob("*")

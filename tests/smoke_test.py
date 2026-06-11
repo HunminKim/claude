@@ -495,6 +495,28 @@ def _hook_needs_future(path: Path) -> bool:
     return any(_anno_needs_future(a) for a in _collect_annotations(tree))
 
 
+def t_cleanup_untracked_only(base: Path) -> None:
+    """cleanup_suggest: tracked 파일은 정리 후보 제외, untracked 산출물만 감지 (오탐 회귀 방지).
+
+    리포트 260612: tracked 인 *_debug.h 가 _debug suffix 패턴에 오탐되던 문제.
+    git ls-files -o(untracked only) 로 좁혀 tracked 정식 소스를 제외한다.
+    """
+    print("[15] cleanup_suggest untracked-only")
+    hook = TEMPLATES / ".claude" / "hooks" / "cleanup_suggest.py"
+    p = make_project(base, "cleanup")
+    (p / "docs").mkdir()
+    (p / "docs" / "constraints.yaml").write_text("temp_patterns: {}\n")
+    (p / "src").mkdir()
+    (p / "src" / "fcws_debug.h").write_text("int x;\n")  # tracked
+    subprocess.run(["git", "-C", str(p), "add", "src/fcws_debug.h"], check=True)
+    subprocess.run(["git", "-C", str(p), "commit", "-qm", "src"], check=True)
+    (p / "debug_output.json").write_text("{}\n")  # untracked 산출물
+    r = run_hook(hook, {}, p)
+    out = r.stdout
+    check("tracked fcws_debug.h 미감지 (오탐 제거)", "fcws_debug.h" not in out, f"out={out[:200]!r}")
+    check("untracked debug_output.json 감지", "debug_output.json" in out, f"out={out[:200]!r}")
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -541,6 +563,7 @@ def main() -> int:
         t_secret_commit_guard(base)
         t_delegation_guard(base)
         t_install_python_gate(base)
+        t_cleanup_untracked_only(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()
