@@ -244,7 +244,8 @@ def t_command_files() -> None:
     import plan_approval
 
     for token in plan_approval._ACTION_TOKENS:
-        fname = "skip.md" if token == "keep" else ("approve-plan.md" if token == "approve" else f"{token}.md")
+        # 평문 토큰마다 동명 슬래시 커맨드가 1:1 존재해야 한다 (별칭 비대칭 방지)
+        fname = f"{token}.md"
         f = cmds_dir / fname
         check(f"토큰 '{token}' → commands/{fname} 존재", f.exists())
         if f.exists():
