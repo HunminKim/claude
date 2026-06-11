@@ -68,6 +68,7 @@ rm .claude/plan_gate_enabled
 | `.claude/hooks/git_hooks_setup.py` | `.claude/hooks/git_hooks_setup.py` | diff 확인 후 업데이트 (없으면 신규 생성) |
 | `.claude/hooks/verifier_sandbox.py` | `.claude/hooks/verifier_sandbox.py` | diff 확인 후 업데이트 (없으면 신규 생성) |
 | `.plan-gateignore` | `.plan-gateignore` | 없으면 신규 생성 (있으면 보존 — 사용자 편집 파일) |
+| `.gitignore` | `gitignore` | 없으면 신규 생성. 있으면 비밀 차단 패턴(.env 계열, *.pem/*.key, credentials.json, .claude/state/) 누락분만 append |
 
 > **잔존물 정리**: 프로젝트에 `.claude/commands/skip.md` 가 있으면 **삭제를 권고**한다
 > (구버전 스캐폴드 산물). v1.29.0부터 /done·/skip 등 전이 커맨드는 플러그인이 제공하며,

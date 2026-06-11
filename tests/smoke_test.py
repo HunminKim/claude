@@ -257,6 +257,47 @@ def t_command_files() -> None:
             check(f"commands/{fname}: CLI 액션 '{action}' 호출", f"plan_gate_cli.py\" {action}" in text)
 
 
+def t_secret_commit_guard(base: Path) -> None:
+    """운영 정보 git 추적 차단 — .gitignore 템플릿 + pre-commit 2차 방어."""
+    print("[12] 비밀 파일 git 추적 차단")
+    gi = TEMPLATES / "gitignore"
+    check(".gitignore 템플릿 존재", gi.exists())
+    if gi.exists():
+        text = gi.read_text()
+        for pat in [".env", "!.env.example", "*.pem", "credentials.json", ".claude/state/"]:
+            check(f".gitignore 템플릿에 {pat!r}", pat in text)
+
+    p = base / "secguard"
+    p.mkdir()
+    subprocess.run(["git", "init", "-q", str(p)], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.email", "s@t"], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.name", "s"], check=True)
+    hooks = p / ".githooks"
+    hooks.mkdir()
+    import shutil
+
+    hook = hooks / "pre-commit"
+    shutil.copy(TEMPLATES / ".githooks" / "pre-commit", hook)
+    hook.chmod(0o755)
+    subprocess.run(["git", "-C", str(p), "config", "core.hooksPath", ".githooks"], check=True)
+    (p / "CLAUDE.md").write_text("# r")
+    subprocess.run(["git", "-C", str(p), "add", "CLAUDE.md"], check=True)
+    subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "init"], capture_output=True)
+
+    def try_commit(fname: str) -> int:
+        (p / fname).write_text("x")
+        subprocess.run(["git", "-C", str(p), "add", "-f", fname], check=True)
+        r = subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "t"], capture_output=True)
+        subprocess.run(["git", "-C", str(p), "reset", "-q"], capture_output=True)
+        return r.returncode
+
+    check(".env 커밋 차단", try_commit(".env") != 0)
+    check("id_rsa 커밋 차단", try_commit("id_rsa") != 0)
+    check("server.pem 커밋 차단", try_commit("server.pem") != 0)
+    check(".env.example 커밋 허용", try_commit(".env.example") == 0)
+    check("일반 파일 커밋 허용", try_commit("app.py") == 0)
+
+
 def t_platform_compat() -> None:
     """현행 Claude Code 호환성 — 플랫폼 드리프트 회귀 방지.
 
@@ -341,6 +382,7 @@ def main() -> int:
         t_update_docs(base)
         t_dangerous_bash(base)
         t_channel_shapes(base)
+        t_secret_commit_guard(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

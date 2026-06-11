@@ -9,6 +9,27 @@ if [ ! -f "$CLAUDE_MD" ]; then
     exit 0
 fi
 
+# 비밀 파일 커밋 차단 (.gitignore 가 깨져도 동작하는 2차 방어)
+# 정책은 dangerous_bash_check / secret_read_guard 의 시크릿 파일 목록과 동일 계열.
+SECRET_STAGED=$(git diff --cached --name-only | while IFS= read -r f; do
+    base="${f##*/}"
+    case "$base" in
+        .env.example|.env.sample|.env.template|.env.dist) ;;
+        .env|.env.*) echo "$f" ;;
+        id_rsa*|id_ed25519*|id_ecdsa*|id_dsa*) echo "$f" ;;
+        *.pem|*.key|*.p12|*.pfx|*.jks|*.keystore) echo "$f" ;;
+        credentials.json|token.json|secrets.yaml|secrets.yml|secrets.json|secrets.toml) echo "$f" ;;
+        .netrc|.pgpass|.pypirc) echo "$f" ;;
+    esac
+done)
+if [ -n "$SECRET_STAGED" ]; then
+    echo "[pre-commit] 🚫 차단: 비밀 파일이 스테이징되어 있습니다:" >&2
+    echo "$SECRET_STAGED" | sed 's/^/  /' >&2
+    echo "[pre-commit] 비밀값은 .env(git 미추적)에 두고, docs에는 키 이름만 기록하세요." >&2
+    echo "[pre-commit] 정말 의도한 커밋이면 git commit --no-verify 로 우회." >&2
+    exit 1
+fi
+
 # decisions.md append-only 보호: 줄 삭제 감지
 DECISIONS="docs/decisions.md"
 if git diff --cached --name-only | grep -q "^$DECISIONS$"; then

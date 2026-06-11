@@ -1,0 +1,40 @@
+# ── 비밀/운영 정보 — 절대 커밋 금지 (project-init 기본) ──────────────
+# 비밀값(계정·토큰·비밀번호)은 .env 에만 둔다. docs 에는 키 이름만 기록.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.dist
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+credentials.json
+token.json
+secrets.yaml
+secrets.yml
+secrets.json
+secrets.toml
+.netrc
+.pgpass
+
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ── 로그/임시 (constraints.yaml temp_patterns 와 동기) ────────────────
+*.log
+tmp/
+scratch/
+.experiments/
+
+# ── 하네스 런타임 상태 (커밋 대상 아님) ──────────────────────────────
+.claude/state/
+.claude/settings.local.json
+docs/.verifier_result.json

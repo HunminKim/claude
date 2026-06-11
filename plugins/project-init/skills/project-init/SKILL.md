@@ -80,6 +80,7 @@ touch /tmp/.claude_init_in_progress
 ```
 README.md                       ← 프로젝트 소개         (기능 완료 시 업데이트)
 CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
+.gitignore                      ← 비밀(.env 계열)·임시·하네스 상태 git 추적 차단
 .plan-gateignore                ← plan-gate 편집 카운터 제외 목록 (문서·메타파일)
 .claude/
 ├── settings.json               ← 훅 등록 SSOT (아래 hooks/ 6종 전부 여기 배선됨)
@@ -145,7 +146,7 @@ scripts/
 4. `.claude/memory/lessons.md`, `.claude/memory/workflow.md` — 메모리 파일
 5. `.claude/hooks/` 6종 — `time_context.py`, `design-precheck.py`, `post-compact.py`, `cleanup_suggest.py`, `git_hooks_setup.py`, `verifier_sandbox.py` (settings.json 등록 대상 전부 — 일부만 생성하면 매 세션 file-not-found 에러 발생)
 6. `.claude/agents/` 5종 — `verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md` — 모든 hook 스크립트 생성 후 생성
-7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md`, `.plan-gateignore` — 문서·스크립트 계층 (순서 무관)
+7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md`, `.gitignore`, `.plan-gateignore` — 문서·스크립트 계층 (순서 무관)
    - 주의: `.claude/commands/` 에 plan-gate 커맨드(skip.md 등)를 만들지 않는다 —
      /done·/skip 등 전이 커맨드는 플러그인이 제공하며, 프로젝트 로컬 동명 커맨드가
      플러그인 커맨드를 가려(shadow) 무력화할 수 있다
@@ -417,6 +418,13 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ### .claude/hooks/verifier_sandbox.py 템플릿
 
 `assets/templates/.claude/hooks/verifier_sandbox.py` 파일을 읽어 `.claude/hooks/verifier_sandbox.py`로 생성한다.
+
+### .gitignore 템플릿
+
+`assets/templates/gitignore` 파일을 읽어 프로젝트 루트 `.gitignore`로 생성한다.
+(템플릿 파일명에 점이 없는 것은 이 저장소 자체의 git 동작에 영향을 주지 않기 위함)
+**이미 `.gitignore` 가 있으면 덮어쓰지 않는다** — 비밀 차단 패턴(`.env` 계열,
+`*.pem`/`*.key`, `credentials.json` 등)과 `.claude/state/` 중 누락된 항목만 append 한다.
 
 ### .plan-gateignore 템플릿
 
