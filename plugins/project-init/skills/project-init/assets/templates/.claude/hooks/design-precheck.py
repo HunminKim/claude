@@ -5,6 +5,8 @@
 
 docs/constraints.yaml 이 없으면 무음 종료 (초기화 전 오작동 방지).
 """
+from __future__ import annotations
+
 import json, os, re, sys
 from pathlib import Path
 

@@ -14,6 +14,8 @@ compact)를 권장한다 (PostCompact 는 decision control 없는 side-effect
 2. .claude/plan_gate_enabled 자동 복구 — /compact 도중 마커가 휘발돼 plan-gate가 침묵하는 사고 방지
    단, 사용자가 명시 비활성화한 경우(`.claude/plan_gate_off_explicit` 마커)는 복구하지 않는다.
 """
+from __future__ import annotations
+
 import json, os, sys
 from pathlib import Path
 

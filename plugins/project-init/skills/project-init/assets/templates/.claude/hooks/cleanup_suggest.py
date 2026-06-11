@@ -10,6 +10,8 @@
 docs/constraints.yaml 의 temp_patterns 기준으로 스캔.
 임시 파일이 없으면 무음 종료.
 """
+from __future__ import annotations
+
 import json, os, subprocess, sys, time
 from pathlib import Path
 from datetime import datetime

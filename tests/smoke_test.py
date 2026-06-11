@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -458,6 +459,60 @@ def t_platform_compat() -> None:
     check("에이전트 frontmatter에 MultiEdit 없음", not fm, f"잔존: {fm}")
 
 
+_PEP604_GENERICS = {"list", "dict", "tuple", "set", "frozenset", "type"}
+
+
+def _anno_needs_future(anno: ast.expr) -> bool:
+    """어노테이션 노드가 PEP604(BitOr) 또는 제네릭 서브스크립트를 쓰면 True."""
+    for sub in ast.walk(anno):
+        if isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.BitOr):
+            return True
+        if (
+            isinstance(sub, ast.Subscript)
+            and isinstance(sub.value, ast.Name)
+            and sub.value.id in _PEP604_GENERICS
+        ):
+            return True
+    return False
+
+
+def _collect_annotations(tree: ast.Module) -> list:
+    """함수 시그니처·변수 어노테이션 노드만 모은다 (본문 비트연산 오탐 방지)."""
+    annos = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            if node.returns:
+                annos.append(node.returns)
+            a = node.args
+            annos += [x.annotation for x in a.posonlyargs + a.args + a.kwonlyargs if x.annotation]
+        elif isinstance(node, ast.AnnAssign) and node.annotation:
+            annos.append(node.annotation)
+    return annos
+
+
+def _hook_needs_future(path: Path) -> bool:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return any(_anno_needs_future(a) for a in _collect_annotations(tree))
+
+
+def t_hook_future_imports() -> None:
+    """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
+
+    리포트 260612: 템플릿 훅 3종이 future import 누락 + `Path | None` 사용으로 3.8 에서 TypeError.
+    future import 가 PEP563 으로 어노테이션을 문자열화해야 3.7~3.9 에서 안전하다.
+    """
+    print("[14] 훅 future-import 일관성 (3.8 호환)")
+    hook_dirs = [HOOKS, REPO / "plugins" / "prompt-log" / "hooks", TEMPLATES / ".claude" / "hooks"]
+    offenders = []
+    for d in hook_dirs:
+        for f in sorted(d.glob("*.py")):
+            if "from __future__ import annotations" in f.read_text(encoding="utf-8"):
+                continue
+            if _hook_needs_future(f):
+                offenders.append(f.name)
+    check("PEP604/제네릭 쓰는 훅은 future import 보유", not offenders, f"위반: {offenders}")
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -489,6 +544,7 @@ def main() -> int:
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()
+    t_hook_future_imports()
     t_version_sync()
     print(f"\n결과: {PASS} 통과, {FAIL} 실패")
     return 1 if FAIL else 0
