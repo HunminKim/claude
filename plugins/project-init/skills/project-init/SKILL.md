@@ -73,6 +73,32 @@ touch "${TMPDIR:-/tmp}/.claude_init_in_progress"
 
 사용자 답변을 받은 후 다음 단계로 진행한다. 빌드/테스트 명령어를 모른다고 하면 해당 항목을 `# TBD` 로 채워둔다.
 
+### 1.5단계: Python 버전 결정
+
+1단계에서 확인한 요구사항을 근거로, **파일 생성 전에** Python 버전을 확정한다.
+프로젝트가 쓰는 Python 과 하네스(`.claude/hooks/`)가 쓰는 Python 은 별개다 — 분리해서 결정한다.
+
+**(a) 프로젝트 Python 버전** (Python 스택인 경우만):
+
+- 기존 프로젝트: `pyproject.toml` 의 `requires-python` → `.python-version` → 활성 venv/conda 순으로 단서를 찾는다
+- 빈 프로젝트이고 단서가 없으면 **AskUserQuestion 툴**로 묻는다:
+  - 질문: "프로젝트 Python 버전 제약이 있나요?" — 옵션: `["3.12+ (Recommended)", "3.10~3.11", "3.9 이하 (레거시 제약)", "기타 (직접 입력)"]`
+- 결정된 버전을 `{{TECH_STACK}}` 에 포함시킨다 (예: `Python 3.11 / FastAPI`)
+
+**(b) 하네스 인터프리터 확인** (모든 프로젝트 — Python 스택이 아니어도 수행):
+
+`.claude/hooks/` 6종은 프로젝트 스택과 무관하게 PATH 의 `python3` 로 실행된다.
+구버전 환경(예: conda 3.7 env 활성 상태)에서는 훅 전체가 SyntaxError 로 조용히 무력화된다.
+
+1. `python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])'` 로 현재 `python3` 버전을 확인한다
+2. **3.10 이상**: 그대로 진행 — settings.json 의 `python3` 를 유지한다
+3. **3.10 미만**: `command -v python3.13 python3.12 python3.11 python3.10` 으로 대체 인터프리터를 찾는다
+   (나열 순서 = 선호 순서, 첫 번째로 발견되는 버전 사용).
+   찾으면 2단계에서 settings.json 생성 시 모든 훅 명령의 `python3` 를 그 **절대경로**로 교체하고,
+   CLAUDE.md "알려진 버그 / 제약" 섹션에 한 줄 기록한다 (다른 머신에서는 경로 재조정 필요)
+4. 대체 인터프리터도 없으면: 훅이 동작하지 않음을 경고하고 Python 3.10+ 설치를 안내한 뒤,
+   **AskUserQuestion 툴**로 계속 진행할지 확인한다 — 옵션: `["훅 비활성 상태로 계속 진행", "중단하고 Python 설치 후 재실행"]`
+
 ### 2단계: docs/ 폴더 + 서브에이전트 생성
 
 아래 파일들을 생성한다. 이미 파일이 존재하면 **AskUserQuestion 툴**로 덮어쓰기 여부를 확인한다:
@@ -141,7 +167,7 @@ scripts/
 파일 생성은 아래 순서를 지킨다. 순서를 어기면 중간에 plan-gate가 발동되거나 훅이 settings.json 없이 등록될 수 있다.
 
 1. `.claude/` 디렉토리 구조 생성 (mkdir)
-2. `.claude/settings.json` — 훅 등록 파일. 훅 스크립트보다 먼저 생성하지 않으면 Claude가 훅 없이 실행될 수 있음
+2. `.claude/settings.json` — 훅 등록 파일. 훅 스크립트보다 먼저 생성하지 않으면 Claude가 훅 없이 실행될 수 있음. 1.5단계 (b) 에서 대체 인터프리터가 결정됐으면 템플릿의 `python3` 를 전부 그 절대경로로 교체해 생성한다
 3. `.claude/rules/code-style.md` — 코드 스타일 규칙
 4. `.claude/memory/lessons.md`, `.claude/memory/workflow.md` — 메모리 파일
 5. `.claude/hooks/` 6종 — `time_context.py`, `design-precheck.py`, `post-compact.py`, `cleanup_suggest.py`, `git_hooks_setup.py`, `verifier_sandbox.py` (settings.json 등록 대상 전부 — 일부만 생성하면 매 세션 file-not-found 에러 발생)
