@@ -14,7 +14,7 @@ description: 프로젝트 초기화 스킬 — 새 프로젝트를 시작할 때
 **가장 먼저** 아래 명령을 실행한다. 이 명령 하나만 사용자가 승인하면 이후 모든 파일 생성·Bash 명령은 자동 승인된다.
 
 ```bash
-touch /tmp/.claude_init_in_progress
+touch "${TMPDIR:-/tmp}/.claude_init_in_progress"
 ```
 
 이 파일이 존재하는 동안 PermissionRequest 훅이 Write/Edit/Bash 작업을 자동 승인한다.
@@ -198,7 +198,7 @@ scripts/
 모든 파일 생성이 끝나면 신호 파일을 삭제해 정상 모드로 복귀한다:
 
 ```bash
-rm /tmp/.claude_init_in_progress
+rm -f "${TMPDIR:-/tmp}/.claude_init_in_progress"
 ```
 
 ### 5단계: 완료 보고

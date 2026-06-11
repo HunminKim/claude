@@ -1,9 +1,13 @@
-# 260611 하드코딩 전수 검사 (미처리 — 추후 일괄 수정 대기)
+# 260611 하드코딩 전수 검사 (H1~H5·M1·M2·M4·M5 처리 완료 / M3·M6 결정 후 종결)
 
 > 발단: "범용 하네스인데 특정 프로젝트/특정 사고 케이스에 하드코딩된 부분이 있는지
 > 전수 검사" 요청. 4개 병렬 에이전트(hooks / prompt-log·루트 / skills·templates /
 > install·meta·tests)로 134개 파일 스윕 후 높음 항목 전부 직접 검증.
-> **이 문서는 발견 기록이며 아직 아무것도 수정하지 않았다.** 처리 시 항목별 체크.
+>
+> **처리 현황 (260611)**: H1(데이터 유출) 선처리 완료. 이후 나머지 일괄 처리 —
+> H2~H5·M1·M2·M4·M5 수정 + smoke 161통과 + 행위 검증 완료. M3(KST)·M6(harness-check
+> 결합)은 사용자 결정으로 "의도된 설계" 종결(무수정). 아래 항목별 체크 참조.
+> 릴리스: project-init v1.33.0, prompt-log v1.1.1.
 
 ## 🔴 높음 — 다른 환경에서 오동작/무동작 또는 데이터 유출
 
@@ -28,53 +32,53 @@
   ※ settings.local.json 의 PAT 는 push 시도에서 **무효 확인됨** (이미 폐기 상태)
   — 죽은 allowlist 줄이므로 로컬 정리만 남음
 
-### H2. install.sh 원격 저장소 하드코딩 — 로컬 클론이 무의미
+### H2. install.sh 원격 저장소 하드코딩 — ✅ 260611 처리
 
-- [ ] `install.sh:34` — `claude plugin marketplace add HunminKim/claude`
+- [x] `install.sh:34` — `claude plugin marketplace add HunminKim/claude`
 - 항상 GitHub 원격 main 을 받음. fork·사내 미러·오프라인·로컬 수정본에서 오동작.
-  README 의 "로컬 클론 후 설치" 서사와 모순 (`README.md:8-9` `~/claude-config` 안내).
-- **처리**: `add .` 또는 스크립트 위치(`BASH_SOURCE`) 기준 경로 등록으로 교체.
+- **처리 완료**: `SCRIPT_DIR` 기준 로컬 우선 + 원격 fallback (사용자 결정).
+  스크립트 옆에 `.claude-plugin/marketplace.json` 있으면 그 로컬 경로 등록, 없으면
+  `HunminKim/claude` fallback. 공식 문서 확인: 로컬 경로 등록 → marketplace.json 의
+  `name`(hunminkim)으로 식별 → `install @hunminkim` 정상. 행위 검증: bash 문법 OK +
+  로컬 소스 선택 분기 동작 확인.
 
-### H3. `/tmp/.claude_init_in_progress` — POSIX 고정 경로 양쪽 계약
+### H3. `/tmp/.claude_init_in_progress` — ✅ 260611 처리
 
-- [ ] `plugins/project-init/hooks/project_init_permission.py:24` (`_SIGNAL_FILE`)
-- [ ] `plugins/project-init/skills/project-init/SKILL.md:17,201` (touch / rm)
-- 신호 파일 계약이 `/tmp` 리터럴 — 경로 어긋나면 자동승인이 **조용히 무동작**
-  (PermissionRequest 그냥 통과). Windows 비호환.
-- **처리**: `tempfile.gettempdir()` 또는 `CLAUDE_PROJECT_DIR` 하위로. 훅·SKILL 양쪽 동기 수정.
+- [x] `project_init_permission.py` — `_SIGNAL_FILE = Path(tempfile.gettempdir()) / ...`
+- [x] `SKILL.md:17,201` — `touch/rm "${TMPDIR:-/tmp}/.claude_init_in_progress"`
+- **처리 완료**: 플랫폼 임시 경로로 양쪽 동기화 (Python tempfile ↔ bash ${TMPDIR:-/tmp}).
+  행위 검증: 신호파일 생성 시 allow JSON, 없으면 통과 확인.
 
-### H4. `rm -rf /workspace` 패턴 — 이 개발 컨테이너 전용 매직 경로
+### H4. `rm -rf /workspace` 패턴 — ✅ 260611 처리
 
-- [ ] `plugins/project-init/hooks/dangerous_bash_check.py:27`
-- `/workspace` 는 이 저장소가 사는 환경의 경로일 뿐. 배포된 다른 머신에선 아무것도 못 막음.
-- **처리**: `CLAUDE_PROJECT_DIR` 값과 동적 비교로 일반화 ("작업 디렉토리 전체 삭제" 의도 복원).
+- [x] `dangerous_bash_check.py` — 정적 `/workspace` 줄 제거 + `_deletes_project_root()` 추가
+- **처리 완료**: `CLAUDE_PROJECT_DIR` 와 동적 비교로 일반화. smoke 신규 테스트
+  "CLAUDE_PROJECT_DIR 전체 삭제 → 차단" 통과.
 
-### H5. 템플릿에 남은 이전 프로젝트(DAIR-YOLO 계열 추정)의 실제 도메인 값
+### H5. 템플릿에 남은 이전 프로젝트(DAIR-YOLO 계열) 도메인 값 — ✅ 260611 처리
 
-- [ ] `templates/agents/verifier.md:58` — `train → export_onnx → onnx2novaonnx → compile →
-  validate` (특정 NPU 툴체인 단계명이 본문 지시문에)
-- [ ] `templates/docs/constraints.yaml:31` — 동일 단어 `onnx2novaonnx` (주석 예시)
-- [ ] `templates/.claude/rules/code-style.md:54-55` — `CnnOutput(IntEnum): BOTTLE=0, PHONE=2`,
-  `ActionType.DRINKING` (행동인식 프로젝트 실제 클래스)
-- **처리**: 도메인 중립 예시로 교체 (`step_a → step_b → step_c`, `Color(IntEnum)` 류).
+- [x] `verifier.md:58` — `build → test → package → sign → deploy` 중 `sign` 스킵으로 교체
+- [x] `constraints.yaml` pipeline_steps 주석 — build/test/package/sign/deploy 로 교체
+- [x] `code-style.md` — `SensorId(IntEnum): TEMP=0, PRESSURE=2` / `SENSOR_TO_METRIC` 중립 예시
+- **처리 완료**: 인덱스 매핑·파이프라인 예시의 교육적 의미 유지하며 도메인 색 제거.
 
 ## 🟡 중간 — 특정 케이스 과적합
 
-- [ ] **M1. 위임 에이전트 이름 고정**: `delegation_due_diligence.py:25`
-  (`@(backend|frontend|deeplearning|ai|infra)`), `delegation_prompt_check.py:33-35`
-  (`DELEGATION_SUBAGENTS` frozenset) — 다른 에이전트 구성(`@data`, `@mobile`)에선 미발화.
-  `.claude/agents/` 디렉토리 스캔으로 도출하는 게 범용.
-- [ ] **M2. prompt-log → project-init 결합**: `prompt_log_lib.py:270-272` —
-  `"project-init:"` 네임스페이스 리터럴. "독립·제거 가능 플러그인" 표방과 모순.
-- [ ] **M3. KST 고정**: `time_context.py:43` (루트 + 템플릿 양쪽) — `"TZ": "Asia/Seoul"`.
-  한국어 컨벤션과 별개로 타임존은 설정/시스템값 가능해야 함. ※ 의도된 설계일 수 있음 — 사용자 결정.
-- [ ] **M4. smoke_test PATH 고정**: `tests/smoke_test.py:50` —
-  `PATH="/usr/bin:/bin:/usr/local/bin"`. Apple Silicon Homebrew(`/opt/homebrew/bin`)·nix
-  환경에서 훅 내부 git 호출 실패 가능.
-- [ ] **M5. validate_arch 다언어 모순**: `templates/scripts/validate_arch.py:40` —
-  `--include=*.py` 고정인데 SKILL.md 1단계는 다언어 스택 표방.
-- [ ] **M6. harness-check 결합**: `harness-check/SKILL.md:66` 외 — upstream 리포명
-  `claude_skills` 박힘. project-init 레이아웃 전제는 형제 플러그인 진단 도구라 일부 의도된 결합.
+- [x] **M1. 위임 에이전트 이름 고정** — ✅ 260611 처리. 두 훅 모두 고정 목록 제거,
+  `_UTILITY_SUBAGENTS`(Plan/Explore/verifier/general-purpose/statusline-setup) 화이트리스트
+  외 + `.claude/agents/<name>.md` 존재 시 도메인 위임으로 판정. 어떤 이름(@data 등)에도
+  일반화. smoke: backend/@data 발화, Plan/미정의 통과 — 행위 검증 완료.
+- [x] **M2. prompt-log → project-init 결합** — ✅ 260611 처리.
+  `re.sub(r"^[\w.-]+:", "", t)` 로 임의 플러그인 네임스페이스 prefix 제거.
+  smoke: `/any-plugin:skip → skip` 통과.
+- [x] **M3. KST 고정** — ⏸️ 사용자 결정으로 **무수정 종결**. 한국어 컨벤션의 일부로
+  KST 고정 유지(`time_context.py` 루트+템플릿). "의도된 설계"로 분류.
+- [x] **M4. smoke_test PATH 고정** — ✅ 260611 처리.
+  `env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}` 로 실제 PATH 상속.
+- [x] **M5. validate_arch 다언어** — ✅ 260611 처리. `LANG_RULES` 로 Python/JS·TS/Go/Rust
+  import 문법 검사. 행위 검증: 4개 언어 banned 탐지 + clean 통과.
+- [x] **M6. harness-check 결합** — ⏸️ 사용자 결정으로 **무수정 종결**. `claude_skills`
+  리포명·project-init 레이아웃 전제는 형제 플러그인 진단 도구의 의도된 결합으로 분류.
 
 ## ⚪ 낮음 (참고 — 수정 선택)
 
@@ -104,9 +108,17 @@
   sanitize 정규식(일반 패턴), lessons.md 시드 교훈(도메인 중립) — 전부 정상.
 - 이메일·`/Users/...`·`/home/...` 절대경로 하드코딩 — **전 파일에서 미발견**.
 
-## 처리 시 주의
+## 처리 결과 (260611 종결)
 
-- H3/H4/H5/M1~M3 은 플러그인 파일 변경 → 해당 `plugin.json` 버전 번프 +
-  marketplace.json 동기화 + `python3 tests/smoke_test.py` + 태그 푸시 의례 준수.
-- H1 은 데이터 삭제라 버전 번프 무관하지만 히스토리 정리 결정이 선행돼야 함.
-- M3(KST)·M6(harness-check 결합)은 "의도된 설계" 가능성 — 수정 전 사용자 확인.
+- **수정 완료**: H1(데이터 유출+히스토리), H2(install), H3(/tmp), H4(/workspace),
+  H5(DAIR-YOLO 잔재), M1(위임 가드 일반화), M2(네임스페이스), M4(PATH), M5(다언어).
+- **무수정 종결(의도된 설계)**: M3(KST 고정), M6(harness-check 결합) — 사용자 결정.
+- **검증**: `python3 tests/smoke_test.py` 161통과 0실패 + H2/H3/M5 별도 행위 검증.
+- **릴리스**: project-init v1.32.0 → v1.33.0, prompt-log v1.1.0 → v1.1.1
+  (harness-check 무변경). marketplace.json description 동기화.
+
+## 잔여 (별도 처리 — 저장소 외/로컬)
+
+- 🔒 `.claude/settings.local.json` PAT(폐기 확인됨) + 일회성 세션 경로 권한 규칙 누적 →
+  로컬 파일 정리. git 미추적이라 릴리스와 무관.
+- ⚪ 낮음 항목들(`harness-inspector.md` model 버전 핀 등)은 수정 선택 — 미처리.

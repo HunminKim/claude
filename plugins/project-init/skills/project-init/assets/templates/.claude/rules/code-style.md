@@ -51,8 +51,8 @@ paths:
 
 ```python
 from enum import IntEnum
-class CnnOutput(IntEnum): BOTTLE=0, PHONE=2
-CNN_TO_ACTION = {CnnOutput.BOTTLE: ActionType.DRINKING, ...}
+class SensorId(IntEnum): TEMP=0, PRESSURE=2  # 외부 인덱스는 비연속일 수 있다
+SENSOR_TO_METRIC = {SensorId.TEMP: Metric.CELSIUS, ...}
 ```
 
 ## ML 도메인

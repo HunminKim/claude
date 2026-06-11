@@ -2,12 +2,26 @@
 """아키텍처 검증 스크립트 — .githooks/pre-push 에서 호출된다.
 docs/constraints.yaml 의 banned/arch_rules를 읽어 위반 여부를 검사한다.
 PyYAML 없으면 검증을 스킵하고 성공으로 종료한다.
+
+다언어 지원: banned 의존성을 언어별 import 문법(Python/JS·TS/Go/Rust)으로 검사한다.
+해당 언어 소스가 없으면 그 패턴은 자연히 매치되지 않는다.
 """
 import sys
 import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
+
+# 언어별 (대상 확장자들, import 패턴 템플릿). {name} 에 banned 의존성명이 들어간다.
+LANG_RULES: list[tuple[tuple[str, ...], list[str]]] = [
+    (("*.py",), ["import {name}", "from {name} import", "from {name}."]),
+    (
+        ("*.js", "*.jsx", "*.ts", "*.tsx", "*.mjs", "*.cjs"),
+        ["require('{name}')", 'require("{name}")', "from '{name}'", 'from "{name}"'],
+    ),
+    (("*.go",), ['"{name}"', '"{name}/']),
+    (("*.rs",), ["use {name}", "extern crate {name}"]),
+]
 
 def load_constraints() -> dict:
     constraints_path = PROJECT_ROOT / "docs" / "constraints.yaml"
@@ -25,25 +39,32 @@ def load_constraints() -> dict:
         print(f"[validate_arch] constraints.yaml 파싱 오류: {e} — 검증 스킵")
         return {}
 
+def _imports_dependency(name: str) -> bool:
+    """name 의존성이 어떤 언어 소스에든 import/use 되면 True (언어별 문법 검사)."""
+    for includes, templates in LANG_RULES:
+        include_args = []
+        for inc in includes:
+            include_args += ["--include", inc]
+        for template in templates:
+            pattern = template.format(name=name)
+            result = subprocess.run(
+                ["grep", "-r", *include_args, "--exclude-dir=scripts", pattern, str(PROJECT_ROOT)],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return True
+    return False
+
+
 def check_banned(banned: list) -> list:
-    """금지된 의존성이 소스 코드에 import 되는지 grep으로 확인한다."""
+    """금지된 의존성이 소스 코드에 import 되는지 grep으로 확인한다 (다언어)."""
     violations = []
     for entry in banned:
         name = entry.get("name") if isinstance(entry, dict) else str(entry)
         if not name:
             continue
         try:
-            patterns = [f"import {name}", f"from {name} import", f"from {name}."]
-            found = False
-            for pattern in patterns:
-                result = subprocess.run(
-                    ["grep", "-r", "--include=*.py", "--exclude-dir=scripts", pattern, str(PROJECT_ROOT)],
-                    capture_output=True, text=True
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    found = True
-                    break
-            if found:
+            if _imports_dependency(name):
                 reason = entry.get("reason", "") if isinstance(entry, dict) else ""
                 violations.append(f"금지된 의존성 '{name}' 발견 — {reason}")
         except Exception:

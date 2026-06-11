@@ -24,13 +24,13 @@ arch_rules: []
 # 파이프라인 단계 순서 (verifier가 순서 준수 여부를 검증한다)
 # 단계 누락 시 verifier가 ❌ 처리. 프로젝트에 맞게 수정하거나 비워두면 검사 생략.
 pipeline_steps: []
-# 예시 (ML 파이프라인):
+# 예시 (빌드·배포 파이프라인):
 # pipeline_steps:
-#   - train
-#   - export_onnx
-#   - onnx2novaonnx
-#   - compile
-#   - validate
+#   - build
+#   - test
+#   - package
+#   - sign
+#   - deploy
 
 # verifier-sandbox hook 이 쓰기 시도를 감지할 production 경로
 # 기본값: runs/, outputs/, data/ — 프로젝트에 맞게 수정

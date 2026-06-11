@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -47,7 +48,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def run_hook(hook: Path, payload: dict, project: Path) -> subprocess.CompletedProcess[str]:
-    env = {"CLAUDE_PROJECT_DIR": str(project), "PATH": "/usr/bin:/bin:/usr/local/bin"}
+    # 실제 환경 PATH 를 상속해 git 등이 비표준 경로(Homebrew/nix)에 있어도 찾는다
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}
     return subprocess.run(
         [sys.executable, str(hook)],
         input=json.dumps(payload),
@@ -185,6 +187,9 @@ def t_dangerous_bash(base: Path) -> None:
     for cmd, expect in cases:
         r = run_hook(hook, {"tool_name": "Bash", "tool_input": {"command": cmd}}, p)
         check(f"{cmd!r} → rc={expect}", r.returncode == expect, f"rc={r.returncode}")
+    # 작업 디렉토리 루트 전체 삭제 — 특정 경로(/workspace) 하드코딩 대신 CLAUDE_PROJECT_DIR 동적 비교
+    r = run_hook(hook, {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {p}"}}, p)
+    check("CLAUDE_PROJECT_DIR 전체 삭제 → 차단", r.returncode == 2, f"rc={r.returncode}")
 
 
 def t_secret_read_guard() -> None:
@@ -345,6 +350,36 @@ def t_secret_commit_guard(base: Path) -> None:
     check("일반 파일 커밋 허용", try_commit("app.py") == 0)
 
 
+def t_delegation_guard(base: Path) -> None:
+    """위임 가드 일반화(M1) — .claude/agents/ 의 커스텀 에이전트면 발화, 유틸/미정의는 통과.
+
+    특정 에이전트 이름(backend 등) 하드코딩을 제거하고 프로젝트 정의 에이전트에
+    일반화한 변경의 회귀 방지. 어떤 이름(@data 등)이든 .claude/agents 에 있으면 검사한다.
+    """
+    print("[12] 위임 가드 일반화")
+    hook = HOOKS / "delegation_prompt_check.py"
+    proj = make_project(base, "deleg")
+    (proj / ".claude" / "agents").mkdir(parents=True)
+    (proj / ".claude" / "agents" / "backend.md").write_text("# backend")
+    (proj / ".claude" / "agents" / "data.md").write_text("# data")
+
+    def run(subagent: str, prompt: str) -> subprocess.CompletedProcess[str]:
+        payload = {"tool_name": "Agent", "tool_input": {"subagent_type": subagent, "prompt": prompt}}
+        return run_hook(hook, payload, proj)
+
+    full = "TASK: x\nUSER_DECISIONS: 없음\nCONSTRAINTS: y\nGATE: approved"
+    check("커스텀 backend + 4블록 누락 → 차단", run("backend", "x").returncode == 2)
+    r = run("backend", full)
+    check(
+        "커스텀 backend + 4블록 완비 → allow JSON",
+        r.returncode == 0 and "hookSpecificOutput" in r.stdout,
+        f"rc={r.returncode}",
+    )
+    check("커스텀 @data 에이전트도 가드 발화 (일반화)", run("data", "x").returncode == 2)
+    check("유틸 Plan 에이전트는 통과", run("Plan", "x").returncode == 0)
+    check("미정의 에이전트는 통과", run("nonexistent", "x").returncode == 0)
+
+
 def t_platform_compat() -> None:
     """현행 Claude Code 호환성 — 플랫폼 드리프트 회귀 방지.
 
@@ -356,23 +391,6 @@ def t_platform_compat() -> None:
     check("위임 가드 matcher에 Agent 포함", '"Agent|Task"' in hooks_json)
     pl_hooks = (REPO / "plugins" / "prompt-log" / "hooks" / "hooks.json").read_text()
     check("prompt-log matcher에 Agent 포함", "Agent" in pl_hooks)
-
-    # delegation_prompt_check 행위: Agent 이름으로 차단/허용 (프로젝트 불필요 — 순수 입력 판정)
-    hook = HOOKS / "delegation_prompt_check.py"
-    r = subprocess.run(
-        [sys.executable, str(hook)],
-        input=json.dumps({"tool_name": "Agent", "tool_input": {"subagent_type": "backend", "prompt": "x"}}),
-        capture_output=True, text=True,
-    )
-    check("Agent 위임 + 4블록 누락 → 차단", r.returncode == 2, f"rc={r.returncode}")
-    full = "TASK: x\nUSER_DECISIONS: 없음\nCONSTRAINTS: y\nGATE: approved"
-    r = subprocess.run(
-        [sys.executable, str(hook)],
-        input=json.dumps({"tool_name": "Agent", "tool_input": {"subagent_type": "backend", "prompt": full}}),
-        capture_output=True, text=True,
-    )
-    ok = r.returncode == 0 and "hookSpecificOutput" in r.stdout
-    check("Agent 위임 + 4블록 완비 → allow JSON", ok, f"rc={r.returncode}")
 
     # prompt-log 토큰 정규화 ↔ plan_approval._ACTION_TOKENS 동기
     sys.path.insert(0, str(HOOKS))
@@ -386,7 +404,13 @@ def t_platform_compat() -> None:
         set(plan_approval._ACTION_TOKENS) == pl.PL_TOKEN_VALUES,
         f"차이: {set(plan_approval._ACTION_TOKENS) ^ pl.PL_TOKEN_VALUES}",
     )
-    for text, want in [("done", "done"), ("/done", "done"), ("/project-init:done", "done"), ("오늘 뭐했지", None)]:
+    for text, want in [
+        ("done", "done"),
+        ("/done", "done"),
+        ("/project-init:done", "done"),
+        ("/any-plugin:skip", "skip"),  # 임의 네임스페이스 일반화 (M2)
+        ("오늘 뭐했지", None),
+    ]:
         check(f"토큰 정규화 {text!r} → {want!r}", pl.pl_normalize_token(text) == want)
     check("Agent → agent 버킷", pl.pl_tool_bucket("Agent") == "agent")
     check("TaskCreate 는 other (오탐 방지)", pl.pl_tool_bucket("TaskCreate") == "other")
@@ -431,6 +455,7 @@ def main() -> int:
         t_secret_read_guard()
         t_channel_shapes(base)
         t_secret_commit_guard(base)
+        t_delegation_guard(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

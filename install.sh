@@ -8,6 +8,9 @@
 
 set -u
 
+# 스크립트 자신의 위치 — 로컬 클론을 마켓플레이스 소스로 우선 사용 (fork·오프라인 대응)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 FAIL=0
 
 run_step() {
@@ -30,8 +33,16 @@ echo "=== Claude Code 플러그인 설치 ==="
 # 1. 마켓플레이스 등록
 #    이름은 .claude-plugin/marketplace.json 의 name(hunminkim)에서 자동 파생된다.
 #    (claude-plugins-official 은 CLI 내장 마켓플레이스라 등록 불필요)
+#    소스: 스크립트 옆에 marketplace.json 이 있으면 로컬 클론을 등록한다
+#    (fork·미러·오프라인·로컬 수정본 대응). 없으면 GitHub 원격으로 fallback.
 echo "[1/3] 마켓플레이스 등록 중..."
-run_step "marketplace hunminkim" claude plugin marketplace add HunminKim/claude
+if [ -f "$SCRIPT_DIR/.claude-plugin/marketplace.json" ]; then
+  MARKET_SOURCE="$SCRIPT_DIR"
+else
+  MARKET_SOURCE="HunminKim/claude"
+fi
+run_step "marketplace hunminkim (${MARKET_SOURCE})" \
+  claude plugin marketplace add "$MARKET_SOURCE"
 
 # 2. 플러그인 설치
 echo "[2/3] 플러그인 설치 중..."

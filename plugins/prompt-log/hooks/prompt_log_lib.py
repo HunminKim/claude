@@ -267,8 +267,8 @@ def pl_normalize_token(text: str) -> str | None:
     - 플러그인 네임스페이스: "/project-init:done"
     """
     t = text.strip().lstrip("/")
-    if t.startswith("project-init:"):
-        t = t[len("project-init:"):]
+    # 플러그인 네임스페이스 prefix 제거 (예: project-init:done → done) — 임의 플러그인 호환
+    t = re.sub(r"^[\w.-]+:", "", t)
     return t if t in PL_TOKEN_VALUES else None
 
 

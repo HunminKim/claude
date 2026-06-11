@@ -6,7 +6,8 @@ matcher 의 letter-only 토큰은 tool_name 정확일치라 "Task" 단독이면 
 
 동작 단계:
 1. tool_name 이 Agent/Task 가 아니면 silent exit 0
-2. subagent_type 이 도메인/일반 에이전트가 아니면 silent exit 0 (verifier/Plan/Explore 등은 통과)
+2. subagent_type 이 .claude/agents/ 의 커스텀 도메인 에이전트가 아니면 silent exit 0
+   (verifier/Plan/Explore 등 유틸·미정의 에이전트는 통과)
 3. tool_input.prompt 에서 TASK / USER_DECISIONS / CONSTRAINTS / GATE 4블록 존재 확인
 4. 누락 시 stderr + exit 2 — Claude context 에 blocking error 주입, 보강 후 재호출 유도
 5. 통과 시 hookSpecificOutput JSON 출력 (permissionDecision=allow + additionalContext) + exit 0
@@ -22,7 +23,9 @@ CLAUDE.md 의 "위임 전 due diligence" 자연어 절차에 의존한다.
 from __future__ import annotations
 
 import json
+import os
 import sys
+from pathlib import Path
 
 REQUIRED_BLOCKS: tuple[str, ...] = (
     "TASK:",
@@ -30,9 +33,25 @@ REQUIRED_BLOCKS: tuple[str, ...] = (
     "CONSTRAINTS:",
     "GATE:",
 )
-DELEGATION_SUBAGENTS: frozenset[str] = frozenset(
-    {"backend", "frontend", "deeplearning", "ai", "infra", "general-purpose"}
+# 내장·유틸 에이전트 — 도메인 위임이 아니므로 표준 블록 검사에서 제외한다.
+_UTILITY_SUBAGENTS: frozenset[str] = frozenset(
+    {"Plan", "Explore", "verifier", "general-purpose", "statusline-setup"}
 )
+
+
+def _is_domain_delegation(subagent_type: str) -> bool:
+    """subagent_type 이 프로젝트의 커스텀 도메인 에이전트면 True.
+
+    특정 이름(backend 등)을 박는 대신 .claude/agents/<name>.md 존재로 판정한다 —
+    프로젝트가 정의한 어떤 에이전트(@data, @mobile 등)에도 일반화된다.
+    유틸 에이전트(Plan/Explore/verifier 등)와 미정의 에이전트는 제외한다.
+    """
+    if not subagent_type or subagent_type in _UTILITY_SUBAGENTS:
+        return False
+    root = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not root:
+        return False
+    return (Path(root) / ".claude" / "agents" / f"{subagent_type}.md").exists()
 
 
 def main() -> int:
@@ -46,7 +65,7 @@ def main() -> int:
 
     tool_input = data.get("tool_input") or {}
     subagent_type = tool_input.get("subagent_type") or ""
-    if subagent_type not in DELEGATION_SUBAGENTS:
+    if not _is_domain_delegation(subagent_type):
         return 0
 
     prompt = tool_input.get("prompt") or ""

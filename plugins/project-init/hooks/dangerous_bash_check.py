@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 
@@ -24,7 +25,6 @@ DIVIDER = "━" * 55
 HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
     (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\s|$)", "rm -rf / (루트 전체 삭제)"),
     (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\s|$)", "rm -rf / (루트 전체 삭제)"),
-    (r"rm\s+-rf\s+/workspace\b", "rm -rf /workspace (작업 디렉토리 전체 삭제)"),
     (r"rm\s+-rf\s+~/", "rm -rf ~/ (홈 디렉토리 전체 삭제)"),
     (r"find\s+/\s+.*-delete\b", "find / -delete (루트 전체 탐색 삭제)"),
     (r"find\s+/\s+.*-exec\s+rm\b", "find / -exec rm (루트 전체 삭제 실행)"),
@@ -129,11 +129,26 @@ INLINE_TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+def _deletes_project_root(command: str) -> bool:
+    """rm -rf 가 작업 디렉토리 루트(CLAUDE_PROJECT_DIR) 전체를 지우면 True.
+
+    특정 환경 경로(/workspace 등)를 박는 대신 런타임 작업 디렉토리와 동적 비교한다 —
+    어떤 머신에 배포돼도 그 환경의 프로젝트 루트 통째 삭제를 막는다.
+    """
+    root = os.environ.get("CLAUDE_PROJECT_DIR", "").rstrip("/")
+    if not root:
+        return False
+    pat = rf"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+{re.escape(root)}(?:/+)?(?:\s|$)"
+    return bool(re.search(pat, command))
+
+
 def _check(command: str) -> tuple[bool, str]:
     """(차단여부, 사유) 반환."""
     for pattern, reason in HARD_BLOCK_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
             return True, reason
+    if _deletes_project_root(command):
+        return True, "작업 디렉토리(CLAUDE_PROJECT_DIR) 전체 삭제 감지"
     if _PROTECTED_RE.search(command):
         return True, "핵심 운영 파일 직접 삭제 감지"
     if _reads_secret(command):

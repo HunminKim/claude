@@ -4,7 +4,7 @@
 matcher: 전역 (UserPromptSubmit)
 
 동작 단계:
-1. 사용자 prompt 에서 위임 키워드 정규식 매칭 (@backend, @frontend, @deeplearning, @ai, 위임, 맡겨)
+1. 위임 의도 감지 (위임/맡겨 키워드 또는 .claude/agents/ 의 도메인 에이전트 @멘션)
 2. 미매칭이면 silent exit 0 (일반 대화 통과)
 3. tasks/todo.md 가 없으면 stderr + exit 2 (메인이 보강하도록 유도)
 4. todo.md 에 5섹션(영향 파일/USER_DECISIONS/CONSTRAINTS/기술 충돌 점검/fallback) 헤더 존재 확인
@@ -22,7 +22,13 @@ import re
 import sys
 from pathlib import Path
 
-DELEGATION_PATTERN = re.compile(r"@(backend|frontend|deeplearning|ai|infra)\b|위임|맡겨")
+# 위임 의도 감지: 한국어 키워드(에이전트 무관) + .claude/agents/ 에 정의된 도메인 에이전트 @멘션.
+# 특정 이름(backend 등)을 박지 않고 프로젝트가 정의한 어떤 에이전트에도 일반화한다.
+_DELEGATION_KEYWORD = re.compile(r"위임|맡겨")
+_MENTION = re.compile(r"@(?:agent-)?([A-Za-z][\w-]*)")
+_UTILITY_SUBAGENTS = frozenset(
+    {"Plan", "Explore", "verifier", "general-purpose", "statusline-setup"}
+)
 REQUIRED_SECTIONS: tuple[str, ...] = (
     "영향 파일",
     "USER_DECISIONS",
@@ -30,6 +36,24 @@ REQUIRED_SECTIONS: tuple[str, ...] = (
     "기술 충돌 점검",
     "fallback",
 )
+
+
+def _mentions_domain_agent(prompt: str) -> bool:
+    """@멘션 중 .claude/agents/ 에 정의된 커스텀 도메인 에이전트가 있으면 True.
+
+    유틸 에이전트(Plan/Explore/verifier 등) 멘션은 위임으로 보지 않는다.
+    """
+    root = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not root:
+        return False
+    agents = Path(root) / ".claude" / "agents"
+    for m in _MENTION.finditer(prompt):
+        name = m.group(1)
+        if name in _UTILITY_SUBAGENTS:
+            continue
+        if (agents / f"{name}.md").exists():
+            return True
+    return False
 
 
 def find_todo() -> Path | None:
@@ -51,7 +75,7 @@ def main() -> int:
         return 0
 
     prompt = data.get("prompt") or ""
-    if not DELEGATION_PATTERN.search(prompt):
+    if not (_DELEGATION_KEYWORD.search(prompt) or _mentions_domain_agent(prompt)):
         return 0
 
     todo = find_todo()
