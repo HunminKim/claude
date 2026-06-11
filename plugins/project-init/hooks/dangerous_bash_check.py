@@ -47,10 +47,14 @@ _PROTECTED_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ── Layer: 비밀 파일 내용 출력 명령 ──────────────────────
+# ── Layer: 비밀 파일 내용 노출 명령 (fail-closed 다중 경로 탐지) ──────────
+#
+# 블랙리스트(cat/head/tail)만으로는 grep·awk·sed·source·redirect·interpreter·
+# cp 등 수십 가지 우회가 뚫린다. "읽기로 의심되면 차단"으로 설계한다.
+# 정적 검사로 100% 막을 수는 없다(예: cp .env x 후 별도 명령으로 cat x —
+# rename/copy 후 읽기는 본질적으로 사후 탐지 불가) → .gitignore + OS 권한이
+# 최종 방어선. 이 훅은 "한 명령 안에서의 직접 노출"을 광범위하게 막는다.
 
-# cat/head/tail/less/more + 비밀 파일 패턴 (grep 제외 — 코드 검색 오탐 방지)
-_READ_CMDS = r"(?:cat|head|tail|less|more|bat|batcat)"
 _SECRET_FILES = (
     # .env 계열 — 단, 안전 템플릿(.example/.sample/.template/.dist)은 허용
     # (secret_read_guard 의 _ALLOW_ENV_RE 와 동일 정책)
@@ -62,10 +66,52 @@ _SECRET_FILES = (
     r"|(?:service_account[\w.-]*\.json)"
     r"|(?:[\w.-]*\.(?:pem|key|p12|pfx|jks|keystore))"
 )
+_SECRET_FILE_PAT = rf"(?:{_SECRET_FILES})\b"
+
+# 1) 내용을 stdout 으로 흘리는 리더 명령 (대폭 확장)
+_READ_CMDS = (
+    r"(?:cat|tac|nl|head|tail|less|more|bat|batcat|grep|egrep|fgrep|zgrep|rg|ag|"
+    r"awk|gawk|sed|cut|sort|uniq|rev|xxd|od|hexdump|hd|strings|base64|base32|"
+    r"column|fold|fmt|paste|comm|join|diff|look|pr|expand|unexpand|"
+    r"view|vi|vim|nano|emacs|pico|ex)"
+)
 _SECRET_READ_RE = re.compile(
-    rf"(?:^|&&|\||;|\s){_READ_CMDS}\s+[^;|&\n]*(?:{_SECRET_FILES})\b",
+    rf"(?:^|&&|\|\||\||;|\s){_READ_CMDS}\s+[^;|&\n]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
+# 2) 셸 sourcing: `source .env`, `. .env` (env 변수로 로드 후 echo 노출 가능)
+_SECRET_SOURCE_RE = re.compile(
+    rf"(?:^|&&|\|\||\||;|\s)(?:source|\.)\s+[^;|&\n]*{_SECRET_FILE_PAT}",
+    re.IGNORECASE,
+)
+# 3) 입력 리다이렉트: `cmd < .env`, `$(< .env)`
+_SECRET_REDIR_RE = re.compile(rf"<\s*[^\s;|&<>]*{_SECRET_FILE_PAT}", re.IGNORECASE)
+# 4) 복사/이동/전송 시 비밀 파일이 첫 인자(소스)로 — exfil 경로
+_SECRET_COPY_RE = re.compile(
+    rf"(?:^|&&|\|\||\||;|\s)(?:cp|mv|scp|rsync|install|dd\s+if=)\s*"
+    rf"(?:-\S+\s+)*[^\s;|&]*{_SECRET_FILE_PAT}",
+    re.IGNORECASE,
+)
+# 5) 인터프리터 인라인 코드(-c/-e)가 비밀 파일을 언급 — open()/File.read 노출
+_INTERP_EVAL_RE = re.compile(
+    r"(?:python3?|node|deno|bun|ruby|perl|php)\b[^\n]*\s-(?:c|e)\b", re.IGNORECASE
+)
+_SECRET_ANY_RE = re.compile(_SECRET_FILE_PAT, re.IGNORECASE)
+
+
+def _reads_secret(command: str) -> bool:
+    """명령이 비밀 파일 내용을 노출할 가능성이 있으면 True (fail-closed)."""
+    if _SECRET_READ_RE.search(command):
+        return True
+    if _SECRET_SOURCE_RE.search(command):
+        return True
+    if _SECRET_REDIR_RE.search(command):
+        return True
+    if _SECRET_COPY_RE.search(command):
+        return True
+    if _INTERP_EVAL_RE.search(command) and _SECRET_ANY_RE.search(command):
+        return True
+    return False
 
 # ── Layer: 인라인 토큰/시크릿 감지 ──────────────────────
 
@@ -90,8 +136,8 @@ def _check(command: str) -> tuple[bool, str]:
             return True, reason
     if _PROTECTED_RE.search(command):
         return True, "핵심 운영 파일 직접 삭제 감지"
-    if _SECRET_READ_RE.search(command):
-        return True, "비밀 파일 내용 출력 명령 감지"
+    if _reads_secret(command):
+        return True, "비밀 파일 내용 노출 가능 명령 감지"
     for pat, label in INLINE_TOKEN_PATTERNS:
         if pat.search(command):
             return True, f"인라인 시크릿 감지 ({label})"

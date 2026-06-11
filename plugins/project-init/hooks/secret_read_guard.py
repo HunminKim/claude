@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (Read) — 비밀 파일 읽기 차단.
+"""PreToolUse hook (Read|Grep) — 비밀 파일 읽기 차단.
 
-역할: Claude가 Read 도구로 시크릿/인증 파일을 직접 읽는 것을 방지한다.
+역할: Claude가 Read·Grep 도구로 시크릿/인증 파일 내용을 노출하는 것을 방지한다.
+      Grep 의 content 출력 모드는 Read 와 동등한 노출 경로이므로 함께 막는다.
 동작:
-  1. stdin JSON에서 tool_input.file_path 추출
+  1. stdin JSON 에서 대상 경로 추출 (Read.file_path / Grep.path)
   2. 파일명/확장자를 비밀 파일 패턴과 대조
   3. 허용 예외(.env.example 등) 확인
   4. 위험 파일이면 exit 2 + stderr (차단)
@@ -111,10 +112,13 @@ def main() -> int:
         return 0
 
     tool_name = data.get("tool_name", "")
-    if tool_name != "Read":
+    if tool_name not in ("Read", "Grep"):
         return 0
 
-    file_path: str = (data.get("tool_input") or {}).get("file_path", "") or ""
+    tool_input = data.get("tool_input") or {}
+    # Read 는 file_path, Grep 은 path 로 대상을 받는다. Grep 의 path 가
+    # 비밀 파일을 직접 가리키면 content 모드에서 내용이 그대로 노출된다.
+    file_path: str = tool_input.get("file_path") or tool_input.get("path") or ""
     if not file_path:
         return 0
 
