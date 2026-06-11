@@ -4,6 +4,9 @@ HunminKim의 개인 Claude Code 플러그인 저장소.
 
 ## 새 환경에서 사용하기
 
+> **요구 사항: Python 3.10+** — 모든 훅이 `python3` 로 실행된다.
+> 3.6 이하에서는 훅이 SyntaxError 로 전부 무력화된다 (install.sh 가 설치 전에 검사).
+
 ```bash
 git clone https://github.com/HunminKim/claude.git ~/claude-config
 cd ~/claude-config

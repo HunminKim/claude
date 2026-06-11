@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 THRESHOLD = 2
@@ -31,7 +31,7 @@ def load_log(log_path: Path) -> dict:
             pass
     return {
         "consecutive_failures": 0,
-        "last_reset": datetime.utcnow().isoformat(),
+        "last_reset": datetime.now(timezone.utc).isoformat(),
         "working_dir": "",
         "entries": [],
     }
@@ -45,7 +45,9 @@ def save_log(log_path: Path, log: dict) -> None:
 def is_expired(log: dict) -> bool:
     try:
         last_reset = datetime.fromisoformat(log.get("last_reset", ""))
-        return datetime.utcnow() - last_reset > timedelta(minutes=EXPIRY_MINUTES)
+        if last_reset.tzinfo is None:  # 구버전(naive utcnow) 상태 파일 호환
+            last_reset = last_reset.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) - last_reset > timedelta(minutes=EXPIRY_MINUTES)
     except Exception:
         return True
 
@@ -119,7 +121,7 @@ def main():
     if is_expired(log) or (log.get("working_dir") and log["working_dir"] != working_dir):
         log["consecutive_failures"] = 0
         log["entries"] = []
-        log["last_reset"] = datetime.utcnow().isoformat()
+        log["last_reset"] = datetime.now(timezone.utc).isoformat()
 
     log["working_dir"] = working_dir
 
@@ -127,13 +129,13 @@ def main():
     if exit_code == 0:
         log["consecutive_failures"] = 0
         log["entries"] = []
-        log["last_reset"] = datetime.utcnow().isoformat()
+        log["last_reset"] = datetime.now(timezone.utc).isoformat()
         save_log(log_path, log)
         sys.exit(0)
 
     # 실패 누적
     entry = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "command": command[:120],
         "exit_code": exit_code,
         "error_tail": output[-ERROR_TAIL_LENGTH:],
@@ -141,7 +143,7 @@ def main():
     log["entries"].append(entry)
     log["entries"] = log["entries"][-MAX_ENTRIES:]
     log["consecutive_failures"] += 1
-    log["last_reset"] = datetime.utcnow().isoformat()
+    log["last_reset"] = datetime.now(timezone.utc).isoformat()
     save_log(log_path, log)
 
     # 1회 실패: 소프트 힌트 (advisory, 카운터 유지)
@@ -160,7 +162,7 @@ def main():
         sys.stderr.write(format_warning(log["entries"]) + "\n")
         log["consecutive_failures"] = 0
         log["entries"] = []
-        log["last_reset"] = datetime.utcnow().isoformat()
+        log["last_reset"] = datetime.now(timezone.utc).isoformat()
         save_log(log_path, log)
         sys.exit(2)
 

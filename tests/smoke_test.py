@@ -380,6 +380,35 @@ def t_delegation_guard(base: Path) -> None:
     check("미정의 에이전트는 통과", run("nonexistent", "x").returncode == 0)
 
 
+def t_install_python_gate(base: Path) -> None:
+    """install.sh 0단계 — 구버전 python3 에서 설치 차단 (PR #4 버전 게이트 회귀 방지).
+
+    가짜 python3(3.6 흉내) stub 을 PATH 앞에 두고 install.sh 를 실행한다.
+    0단계에서 exit 1 로 끝나므로 claude(마켓플레이스 등록)는 호출되지 않아 부작용이 없다.
+    """
+    print("[13] install.sh Python 버전 게이트")
+    bindir = base / "fakebin"
+    bindir.mkdir()
+    stub = bindir / "python3"
+    # install.sh 의 `python3 -c '...'` 호출에서 print 는 "3.6" 출력, sys.exit 비교는 전부 미달(1)
+    stub.write_text(
+        "#!/bin/sh\n"
+        'case "$2" in\n'
+        "  *print*) echo '3.6' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n"
+    )
+    stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ.get('PATH', '')}"}
+    r = subprocess.run(
+        ["bash", str(REPO / "install.sh")],
+        capture_output=True, text=True, env=env, cwd=str(REPO),
+    )
+    out = r.stdout + r.stderr
+    check("3.6 환경에서 설치 차단 (exit 1)", r.returncode == 1, f"rc={r.returncode}")
+    check("차단 메시지에 버전 안내 포함", "3.6" in out, f"out={out[-120:]!r}")
+
+
 def t_platform_compat() -> None:
     """현행 Claude Code 호환성 — 플랫폼 드리프트 회귀 방지.
 
@@ -456,6 +485,7 @@ def main() -> int:
         t_channel_shapes(base)
         t_secret_commit_guard(base)
         t_delegation_guard(base)
+        t_install_python_gate(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

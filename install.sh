@@ -30,6 +30,26 @@ run_step() {
 
 echo "=== Claude Code 플러그인 설치 ==="
 
+# 0. Python 버전 확인 — 모든 훅이 python3 로 실행된다.
+#    3.6 이하: `from __future__ import annotations` (3.7+) 가 SyntaxError
+#    → 모든 훅이 파싱 단계에서 무력화되므로 설치를 중단한다.
+#    3.7~3.9: 현재는 동작하지만 훅 컨벤션이 3.10+ 라 향후 깨질 수 있다 → 경고만.
+echo "[0/3] Python 버전 확인 중..."
+PY_VER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)
+if [ -z "$PY_VER" ]; then
+  echo "      ✘ python3 를 찾을 수 없습니다 — 훅 실행에 Python 3.10+ 가 필요합니다."
+  exit 1
+fi
+if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "      ✔ python3 ${PY_VER}"
+elif python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)'; then
+  echo "      ⚠ python3 ${PY_VER} — 권장 버전은 3.10+ 입니다 (현재 훅은 동작하지만 지원 보장 없음)"
+else
+  echo "      ✘ python3 ${PY_VER} — Python 3.6 이하에서는 모든 훅이 SyntaxError 로 동작하지 않습니다."
+  echo "        Python 3.10+ 설치 후 PATH 의 python3 가 새 버전을 가리키게 한 뒤 재실행하세요."
+  exit 1
+fi
+
 # 1. 마켓플레이스 등록
 #    이름은 .claude-plugin/marketplace.json 의 name(hunminkim)에서 자동 파생된다.
 #    (claude-plugins-official 은 CLI 내장 마켓플레이스라 등록 불필요)
