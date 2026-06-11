@@ -20,8 +20,13 @@
   - `git rm -r prompt-log/` + `.gitignore` 에 `/prompt-log/` 추가
     (루트 고정 — `plugins/prompt-log/` 는 제외)
   - 데이터 유입 경로: v1.29.0 커밋(cd41072)에 분석용 사본이 휩쓸려 들어간 것
-- [ ] **잔여**: git 히스토리 정리(cd41072~HEAD 7개 커밋 + v1.29.0 이후 태그에 데이터 잔존)
-  — filter-repo + force push 여부 사용자 결정
+- [x] **히스토리 정리 완료 (260611)**: `git filter-repo --path prompt-log --invert-paths`
+  → main + 태그 48개 force push. 원격 검증: `prompt-log/` 콘텐츠 404,
+  경로 커밋 0건. 사전 백업: `/root/claude-repo-backup-260611.bundle`
+  ※ GitHub 캐시에 고아 커밋이 한동안 남을 수 있음 — 완전 소거가 필요하면
+  GitHub Support 에 reachability 정리 요청 (사실상 접근은 이미 차단됨)
+  ※ settings.local.json 의 PAT 는 push 시도에서 **무효 확인됨** (이미 폐기 상태)
+  — 죽은 allowlist 줄이므로 로컬 정리만 남음
 
 ### H2. install.sh 원격 저장소 하드코딩 — 로컬 클론이 무의미
 
