@@ -46,8 +46,14 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
   - 예: `plan_gate`, `dangerous_bash_check`, `detect_failure_loop`(2회 분기), `delegation_due_diligence`
 - **비차단 환기** (Claude 행동 환기·정보 주입·advisory): `exit 0 + stdout` 으로 `hookSpecificOutput.additionalContext` JSON 출력
   - 차단 없이 Claude context 에 메시지 주입 → Claude 가 자기 응답에 반영
-  - Stop 훅도 이 채널 지원 (턴 끝에 주입, 대화 계속) — `systemMessage` 는 사용자 전용이라 환기 불가
-  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `verifier_remind`, `plan_gate_stop_alert`(Stop), `plan_gate_session_start`(SessionStart)
+  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `verifier_remind`, `plan_gate_session_start`(SessionStart)
+  - ⚠️ **Stop 훅 예외 — additionalContext 는 비차단이 아니다**: Stop 이벤트에서
+    `additionalContext`/`decision:block` 은 **대화를 강제로 잇는다**(공식 문서: decision:block 과
+    동일한 "대화 계속" 효과, transcript 표기만 hook feedback). 매 종료마다 무조건 주입하면
+    해소되지 않는 조건에서 stdin `stop_hook_active` 미체크 시 **최대 8회**(Claude Code 하드캡)까지
+    턴이 연장된다 — 자리 비운 사용자에게 토큰·시간 낭비 + 의도치 않은 행동. 따라서 **Stop 훅은
+    반드시 `stop_hook_active == true` 면 아무 JSON 없이 `exit 0` 으로 억제**하고, 조건 충족 시에만
+    주입한다. (`plan_gate_stop_alert`·`cleanup_suggest` 가 이 가드를 가진 참조 구현.)
 - **사용자 터미널 전용** (Claude 행동 영향 없음, 사용자 정보 알림): `exit 0 + stderr`
   - 사용자 터미널에만 보임 — Claude 는 못 봄
   - 예: `plan_gate_gc` (SessionEnd 시점 정보 — Claude 주입 불가 이벤트)

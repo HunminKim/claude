@@ -544,6 +544,25 @@ def t_done_from_created(base: Path) -> None:
     check("gate done 처리됨", get_gate(p)["state"] == "done", get_gate(p)["state"])
 
 
+def t_stop_hook_active_guard(base: Path) -> None:
+    """Stop 훅이 stop_hook_active=true 면 재주입 억제 (무한 연장 방지).
+
+    Stop 의 additionalContext 는 decision:block 과 동일하게 대화를 강제로 잇는다.
+    가드 없으면 해소되지 않는 조건(verifier 미호출 등)에서 매 종료마다 최대 8회
+    (Claude Code 하드캡) 턴이 연장된다.
+    """
+    print("[17] Stop 훅 stop_hook_active 가드")
+    p = make_project(base, "stopguard")
+    (p / "docs").mkdir()
+    (p / "docs" / "constraints.yaml").write_text("temp_patterns: {}\n")
+    (p / "tmp_x.json").write_text("{}\n")  # cleanup 이 잡을 untracked 임시 산출물
+    cs = TEMPLATES / ".claude" / "hooks" / "cleanup_suggest.py"
+    check("cleanup active=false → 감지 출력", "tmp_x.json" in run_hook(cs, {"stop_hook_active": False}, p).stdout)
+    check("cleanup active=true → 억제(빈 출력)", run_hook(cs, {"stop_hook_active": True}, p).stdout.strip() == "")
+    psa = HOOKS / "plan_gate_stop_alert.py"
+    check("stop_alert active=true → 억제(빈 출력)", run_hook(psa, {"stop_hook_active": True}, p).stdout.strip() == "")
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -592,6 +611,7 @@ def main() -> int:
         t_install_python_gate(base)
         t_cleanup_untracked_only(base)
         t_done_from_created(base)
+        t_stop_hook_active_guard(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

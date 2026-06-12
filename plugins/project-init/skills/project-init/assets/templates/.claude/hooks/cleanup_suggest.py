@@ -145,9 +145,15 @@ def fmt_mtime(t: float) -> str:
 
 def main():
     try:
-        json.load(sys.stdin)
+        data = json.load(sys.stdin)
     except Exception:
-        pass
+        data = {}
+
+    # stop_hook_active=true → 이미 Stop 훅으로 대화가 이어지는 중. Stop 의
+    # additionalContext 는 대화를 강제로 잇기 때문에(decision:block 과 동등),
+    # 재주입하면 최대 8회까지 턴이 불필요하게 연장된다 → 억제한다 (무한 연장 방지).
+    if data.get("stop_hook_active"):
+        sys.exit(0)
 
     root = find_project_root()
     if root is None:

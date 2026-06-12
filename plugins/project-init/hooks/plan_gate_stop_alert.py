@@ -48,8 +48,15 @@ def _emit_advisories(items: list[str]) -> None:
 
 def main() -> int:
     try:
-        json.load(sys.stdin)
+        data = json.load(sys.stdin)
     except Exception:
+        return 0
+
+    # stop_hook_active=true → 이미 직전 Stop 훅 때문에 대화가 이어지는 중이다.
+    # Stop 의 additionalContext 는 decision:block 과 동일하게 "대화 계속"을 유발하므로,
+    # 여기서 또 주입하면 해소되지 않는 조건으로 최대 8회(Claude Code 하드캡)까지
+    # 불필요하게 턴이 연장된다 → 재주입을 억제한다 (무한 연장 방지).
+    if data.get("stop_hook_active"):
         return 0
 
     advisories: list[str] = []
