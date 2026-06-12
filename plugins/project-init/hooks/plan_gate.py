@@ -78,10 +78,12 @@ def main() -> int:
     # ── 첫 Edit 직전 clean tag (D7) ──────────────────────────────────────
     if gate is None or gate["state"] in ("done", "rolled_back"):
         gate = lib.make_gate()
-        existing = lib.existing_clean_tag_for_head(root)
+        # git 체크포인트는 git repo + opt-out 안 함일 때만 (아니면 cp 스냅샷이 담당)
+        git_cp = lib.git_checkpoints_enabled(root)
+        existing = lib.existing_clean_tag_for_head(root) if git_cp else None
         if existing:
             gate["checkpoint_clean_tag"] = existing
-        elif lib.has_git(root) and lib.working_tree_clean(root):
+        elif git_cp and lib.working_tree_clean(root):
             tag = lib.create_clean_tag(root, gate["id"])
             if tag:
                 gate["checkpoint_clean_tag"] = tag
@@ -172,9 +174,10 @@ def main() -> int:
             lib.save_state(root, state)
             return 0
 
-    # ── 비-git 루트: 편집 직전 cp 스냅샷 (git 체크포인트 불가 환경의 /rollback 대안) ──
-    # git 루트는 tag/stash 가 담당하므로 관여하지 않는다 (git 사용자 동작 불변).
-    if target and not lib.has_git(root):
+    # ── cp 스냅샷: 편집 직전 원본 백업 (git 체크포인트가 꺼진 경우의 /rollback 대안) ──
+    # git repo 가 아니거나 사용자가 plan_gate_no_git 으로 opt-out 했을 때만 동작.
+    # git 백엔드(tag/stash)가 켜져 있으면 관여하지 않는다 (git 사용자 동작 불변).
+    if target and not lib.git_checkpoints_enabled(root):
         lib.cp_snapshot_file(root, gate, target)
 
     # ── hot-file 경고 (세션 간 패치 누적 감지) ───────────────────────────
@@ -228,14 +231,14 @@ def main() -> int:
                       edit_count=gate["edit_count"],
                       unique_files=len(gate["unique_files"]))
 
-        # dirty 보존: stash (D4)
-        if lib.has_git(root) and not lib.working_tree_clean(root):
+        # dirty 보존: stash (D4) — git 체크포인트 백엔드일 때만
+        if lib.git_checkpoints_enabled(root) and not lib.working_tree_clean(root):
             ref = lib.stash_dirty(root, gate["id"])
             if ref:
                 gate["checkpoint_dirty_stash_ref"] = ref
 
         # stash 후 working tree clean이면 HEAD에 tag (없을 때만)
-        if not gate.get("checkpoint_clean_tag") and lib.has_git(root):
+        if not gate.get("checkpoint_clean_tag") and lib.git_checkpoints_enabled(root):
             tag = lib.create_clean_tag(root, gate["id"])
             if tag:
                 gate["checkpoint_clean_tag"] = tag

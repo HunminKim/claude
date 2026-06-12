@@ -666,6 +666,45 @@ def t_cp_rollback_nongit(base: Path) -> None:
     )
 
 
+def t_plan_gate_no_git_optout(base: Path) -> None:
+    """git repo 라도 plan_gate_no_git opt-out 시 cp 백엔드 사용 (git tag 미생성).
+
+    git 이 있어도 git 추적을 원치 않는 사용자가 /plan-gate-no-git 으로 켜면,
+    체크포인트가 git tag/stash 대신 cp 스냅샷으로 만들어지고 /rollback 도 cp 로 동작.
+    """
+    print("[21] git repo + no-git opt-out → cp 백엔드")
+    p = make_project(base, "optout")  # 정상 git repo
+    (p / ".claude" / "agents").mkdir(parents=True)
+    (p / ".claude" / "agents" / "verifier.md").write_text("# verifier")
+    (p / ".claude" / "plan_gate_no_git").touch()  # opt-out 플래그
+    gate_hook = HOOKS / "plan_gate.py"
+    keep = p / "keep.py"
+    keep.write_text("ORIG\n")
+    run_hook(gate_hook, edit_payload("Edit", keep), p)
+    keep.write_text("MODIFIED\n")
+    g = get_gate(p)
+    check("opt-out → git tag 미생성", g.get("checkpoint_clean_tag") is None, f"tag={g.get('checkpoint_clean_tag')}")
+    check("opt-out → cp 스냅샷 기록", (g.get("cp_snapshot") or {}).get("keep.py") is True, f"cp={g.get('cp_snapshot')}")
+    tags = subprocess.run(
+        ["git", "-C", str(p), "tag", "--list", ".claude/gate/*"], capture_output=True, text=True
+    ).stdout.strip()
+    check("git 저장소에 plan-gate tag 실제 없음", tags == "", f"tags={tags!r}")
+    cli = HOOKS / "plan_gate_cli.py"
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(p)}
+    r = subprocess.run([sys.executable, str(cli), "rollback"], capture_output=True, text=True, cwd=str(p), env=env)
+    check(
+        "opt-out 롤백 exit 0 + 원본 복원",
+        r.returncode == 0 and keep.read_text() == "ORIG\n",
+        f"rc={r.returncode} keep={keep.read_text()!r}",
+    )
+    r2 = subprocess.run([sys.executable, str(cli), "use-git"], capture_output=True, text=True, cwd=str(p), env=env)
+    check(
+        "use-git → 플래그 삭제(git 모드 복귀)",
+        r2.returncode == 0 and not (p / ".claude" / "plan_gate_no_git").exists(),
+        f"rc={r2.returncode}",
+    )
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -718,6 +757,7 @@ def main() -> int:
         t_verifier_advisory_dedup(base)
         t_gate_edit_overrides(base)
         t_cp_rollback_nongit(base)
+        t_plan_gate_no_git_optout(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

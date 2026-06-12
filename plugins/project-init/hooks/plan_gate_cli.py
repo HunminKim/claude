@@ -427,6 +427,28 @@ def cmd_off(root, state) -> int:
     return 0
 
 
+def cmd_no_git(root, state) -> int:
+    if lib.prefers_no_git(root):
+        _info("[plan-gate no-git] 이미 cp 스냅샷 모드입니다.")
+    else:
+        lib.set_prefer_no_git(root)
+        _info(
+            "[plan-gate no-git] git 체크포인트를 끄고 cp 스냅샷 모드로 전환했습니다.\n"
+            "  (.claude/plan_gate_no_git 생성) 이후 체크포인트는 .claude/state/checkpoints/ 에\n"
+            "  파일 복사로 만들어지며 git tag/stash 를 쓰지 않습니다. 되돌리려면 /plan-gate-use-git."
+        )
+    return 0
+
+
+def cmd_use_git(root, state) -> int:
+    if not lib.prefers_no_git(root):
+        _info("[plan-gate use-git] 이미 git 체크포인트 모드입니다 (git repo 인 경우).")
+    else:
+        lib.unset_prefer_no_git(root)
+        _info("[plan-gate use-git] git 체크포인트 모드로 복귀했습니다. (.claude/plan_gate_no_git 삭제)")
+    return 0
+
+
 _NEXT_ACTION = {
     "created": "→ 다음 액션: tasks/todo.md 작성 → /approve-plan",
     "approved": "→ 다음 액션: 작업 진행 → @verifier 호출 → /done | /rollback",
@@ -478,6 +500,8 @@ COMMANDS = {
     "status": cmd_status,
     "on": cmd_on,
     "off": cmd_off,
+    "no-git": cmd_no_git,
+    "use-git": cmd_use_git,
 }
 
 

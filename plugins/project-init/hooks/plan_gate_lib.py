@@ -106,6 +106,39 @@ def disable_plan_gate(root: Path) -> None:
         p.unlink()
 
 
+PREFER_NO_GIT_FLAG = ".claude/plan_gate_no_git"
+
+
+def prefers_no_git(root: Path) -> bool:
+    """.claude/plan_gate_no_git 존재 시 git 체크포인트를 끄고 cp 스냅샷을 강제한다.
+
+    git repo 이면서도 plan-gate 가 git tag/stash 를 만들지 않기를 원하는 사용자용
+    명시적 opt-out. (예: 별도 VCS 워크플로우와 충돌 회피, git 추적 비선호)
+    """
+    return (root / PREFER_NO_GIT_FLAG).exists()
+
+
+def set_prefer_no_git(root: Path) -> None:
+    p = root / PREFER_NO_GIT_FLAG
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(now_iso() + "\n")
+
+
+def unset_prefer_no_git(root: Path) -> None:
+    p = root / PREFER_NO_GIT_FLAG
+    if p.exists():
+        p.unlink()
+
+
+def git_checkpoints_enabled(root: Path) -> bool:
+    """plan-gate 체크포인트를 git(tag/stash) 백엔드로 할지 결정.
+
+    git repo 이고 + 사용자가 opt-out(plan_gate_no_git) 하지 않았을 때만 True.
+    False 면 cp 스냅샷 백엔드(.claude/state/checkpoints/)가 대신 동작한다.
+    """
+    return has_git(root) and not prefers_no_git(root)
+
+
 # ── 상태 파일 입출력 ─────────────────────────────────────────────────────
 def state_path(root: Path) -> Path:
     return root / ".claude" / "state" / "plan_gate.json"
@@ -229,12 +262,12 @@ def stash_pop(root: Path, ref: str) -> bool:
     return r.returncode == 0
 
 
-# ── cp 스냅샷 체크포인트 (비-git 루트 전용 백엔드) ───────────────────────
-# git tag/stash 체크포인트는 루트가 git repo 일 때만 동작한다. 루트가 git 이
-# 아닌 환경(예: 워크스페이스 디렉토리에 하위 repo 들만 있는 경우)에서는
-# /rollback 이 복원할 소스가 없어 항상 거부됐다. 이를 보완해, git 이 없을 때만
-# 편집 직전 파일 원본을 .claude/state/checkpoints/<gate_id>/ 에 1회 복사해 둔다.
-# git 경로에는 일절 관여하지 않는다 — git 사용자 동작 변화 없음.
+# ── cp 스냅샷 체크포인트 (git 체크포인트 대체 백엔드) ────────────────────
+# git tag/stash 체크포인트는 git repo 에서만 동작한다. git_checkpoints_enabled()
+# 가 False 일 때 — 루트가 git repo 가 아니거나(예: 워크스페이스에 하위 repo 만
+# 있는 경우) 사용자가 plan_gate_no_git 으로 명시적 opt-out 했을 때 — 이 백엔드가
+# 대신 작동해 편집 직전 파일 원본을 .claude/state/checkpoints/<gate_id>/ 에 1회
+# 복사해 둔다. git 백엔드와 cp 백엔드는 git_checkpoints_enabled() 하나로 배타 선택.
 def cp_checkpoint_dir(root: Path, gate_id: str) -> Path:
     return root / ".claude" / "state" / "checkpoints" / gate_id
 
