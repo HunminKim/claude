@@ -563,6 +563,33 @@ def t_stop_hook_active_guard(base: Path) -> None:
     check("stop_alert active=true → 억제(빈 출력)", run_hook(psa, {"stop_hook_active": True}, p).stdout.strip() == "")
 
 
+def t_gate_edit_overrides(base: Path) -> None:
+    """B-1: todo.md 마커로 파일별 편집 임계 오버라이드 (승인 후 scope creep 한도 상향).
+
+    단일 C 파일 다회편집(함수 여러 개 추가)이 기본 5회 임계에 오탐 차단되던 문제.
+    마커는 approve 시점 1회 파싱(latency 0), MAX_EDIT_OVERRIDE 로 상한 클램프.
+    """
+    print("[19] 파일별 임계 오버라이드")
+    sys.path.insert(0, str(HOOKS))
+    import plan_gate_lib as lib
+
+    p = make_project(base, "overrides")
+    (p / "tasks").mkdir()
+    (p / "tasks" / "todo.md").write_text("# DMS\n<!-- plan-gate: max-edits-per-file=8 file=*.c -->\n")
+    ov = lib.parse_gate_overrides(p)
+    check("마커 파싱 *.c → 8", ov.get("*.c") == 8, f"ov={ov}")
+    check("_threshold_for vcap.c → 8(상향)", lib._threshold_for("src/vcap.c", ov) == 8)
+    check("_threshold_for main.py → 5(기본)", lib._threshold_for("main.py", ov) == lib.TRIGGER_REPEAT_RATIO)
+    (p / "tasks" / "todo.md").write_text("<!-- plan-gate: max-edits-per-file=999 -->\n")
+    check("상한 클램프 999 → MAX", lib.parse_gate_overrides(p).get("*") == lib.MAX_EDIT_OVERRIDE)
+    g_ok = {"file_edit_counts_post_approval": {"src/vcap.c": 7}, "edit_overrides": {"*.c": 8}}
+    check("vcap.c 7<8 → 미차단", not lib.post_approval_limit_exceeded(g_ok))
+    g_hit = {"file_edit_counts_post_approval": {"src/vcap.c": 8}, "edit_overrides": {"*.c": 8}}
+    check("vcap.c 8>=8 → 차단", lib.post_approval_limit_exceeded(g_hit))
+    g_py = {"file_edit_counts_post_approval": {"app.py": 5}, "edit_overrides": {"*.c": 8}}
+    check("app.py 5>=5(기본) → 차단(오버라이드 무관)", lib.post_approval_limit_exceeded(g_py))
+
+
 def t_verifier_advisory_dedup(base: Path) -> None:
     """Stop verifier 경고가 같은 편집 배치에서 1회만 (B-3 dedup — 매 턴 반복 제거).
 
@@ -635,6 +662,7 @@ def main() -> int:
         t_done_from_created(base)
         t_stop_hook_active_guard(base)
         t_verifier_advisory_dedup(base)
+        t_gate_edit_overrides(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

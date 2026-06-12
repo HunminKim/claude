@@ -65,6 +65,7 @@ def cmd_approve(root, state) -> int:
         gate["edit_count_post_approval"] = 0
         gate["file_edit_counts_post_approval"] = {}
         gate["unique_files_post_approval"] = []
+        gate["edit_overrides"] = lib.parse_gate_overrides(root)
         lib.set_current_gate(state, gate)
         lib.save_state(root, state)
         _info(
@@ -106,6 +107,7 @@ def cmd_approve(root, state) -> int:
     gate["edit_count_post_approval"] = 0
     gate["file_edit_counts_post_approval"] = {}
     gate["unique_files_post_approval"] = []
+    gate["edit_overrides"] = lib.parse_gate_overrides(root)
     if gate.get("initial_edit_count") is None:
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])

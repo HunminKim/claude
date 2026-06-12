@@ -84,3 +84,61 @@ grep -L 'from __future__ import annotations' <hooks>/*.py \
 - [ ] `/workspace/.claude/hooks/post-compact.py` — 동일
 - [ ] 수정 후 3개 훅을 `python3`(3.8)로 더미 stdin 실행해 exit 0 확인
 - [ ] (참고) `git_hooks_setup.py`의 git config 실패는 `/workspace`가 git repo 아님이 원인 — 치명적 아님, 인지만
+
+---
+---
+
+# 하네스 수정 레포트 — 2차 (plan-gate 정밀)
+
+- **프로젝트**: adas-workspace
+- **점검일**: 2026-06-12 (KST)
+- **판정**: ❌ (Critical)
+- **점검 방식**: harness-check — harness-inspector(opus) + claude-code-guide·general-purpose(opus) 정밀 분석
+- **활성 플러그인**: project-init **1.35.2** (settings.local.json:67은 1.33.0 stale 경로)
+- **상황**: vcap_iputest.c 단일 파일에 DMS 출력(함수 3~4개+callback+json+jpg+콘솔, 본질적 5회+ 편집) 추가 중 발생
+
+## 발견된 문제 요약
+
+| # | 문제 | 심각도 | 유형 |
+|---|------|--------|------|
+| B-1 | 5회 임계값이 단일파일 정당 다회편집(C 함수 추가)을 scope-creep 오탐·차단. 작업단위 예외 수단 없음 | ❌ | 템플릿 |
+| B-2 | 체크포인트(tag/stash)가 **`/workspace` 루트 비-git**이라 전면 무력화 → `/rollback` 항상 거부 | ❌ | 환경(루트 비-git) |
+| B-3 | Stop 훅 verifier 경고에 dedup 플래그 없어 매 턴 반복 (훅이 state save도 안 함) | ⚠️ | 템플릿 |
+| B-4 | "시작 SHA + diff <SHA>..HEAD" 본문 지침이 패치로 덮인 tree에서 패치 코드를 에이전트 신규로 오인 → 폐기·checkout 사고 | ❌ | 문서/교훈 불일치 |
+| C | "5회+ 편집 명확한 작업" 사전 선언 메커니즘 부재 | ❌ | 템플릿 |
+| 메타 | settings.local.json:67 = 1.33.0 stale 경로 (활성 1.35.2) | ⚠️ | 이 프로젝트 |
+| D-004 | "byte-identical 재현" 주장 ↔ `__TIMESTAMP__`(vcap_iputest.c:4355)/UBIFS 비결정론 모순 | ⚠️ | 이 프로젝트 |
+
+> **핵심**: B-2/B-4는 같은 뿌리 — `/workspace`가 git repo가 아니고(실제 코드는 하위 fmf repo, uncommitted 패치로 상시 dirty) plan-gate(clean tree 가정)·워크플로우(커밋 SHA 기준)가 이를 못 따라감. B-1/C는 C 소스 단일파일 다회편집의 정당성을 임계값이 모름.
+
+---
+
+## Upstream 수정 대상 (hunminkim/project-init 플러그인)
+
+### [B-1 / C] 파일별 임계 오버라이드 — todo.md 마커
+**영향 파일**: `hooks/plan_gate_lib.py`, `hooks/plan_gate.py`
+- `plan_gate_lib.py:28` `TRIGGER_REPEAT_RATIO=5`는 하드코딩 상수, gate별 오버라이드 경로 없음.
+- **수정**: `parse_gate_overrides(root)` 추가 — `tasks/todo.md`의 `<!-- plan-gate: max-edits-per-file=N file=glob -->` 마커 파싱. `_threshold_for(fp, overrides)`로 파일별 임계 산출(기본 `TRIGGER_REPEAT_RATIO`, 마커가 상향). `trigger_threshold_exceeded()`(`:317`)·`post_approval_limit_exceeded()`(`:329`)가 overrides 인자 받도록. 호출부 `plan_gate.py:217,253`에서 `lib.parse_gate_overrides(root)` 주입.
+- **주의(claude-code-guide)**: PreToolUse는 매 Edit마다 발화 → todo.md 재파싱은 latency. 가능하면 gate state 필드로 승격해 읽기. 파싱 실패 시 `permissionDecision:"defer"`로 fail-open(`exit 2` 금지). 하드코딩 상수를 **상한**으로 유지해 무한 budget 자기부여 방지.
+
+### [B-2] dirty/비-git tree 체크포인트 — `git stash create`
+**영향 파일**: `hooks/plan_gate_lib.py`, `hooks/plan_gate.py`
+- `plan_gate.py:84`가 `working_tree_clean()` 전제라 dirty면 tag 스킵. `git reset --hard <tag>` 롤백(`lib.py:210`)은 dirty 공용 tree에서 **패치 파괴 위험**.
+- **수정**: `snapshot_tree(root)` = `git stash create`(commit/ref 미생성, 공용 git 안전) 트리 SHA를 `gate["checkpoint_tree_snapshot"]`에 저장. clean 전제 제거. 롤백은 `reset --hard` 대신 `git stash apply <sha>`/`checkout-index`(apply-not-reset) + dirty였으면 사용자 확인 필수.
+- **단 이 프로젝트엔 무효**: 루트(`/workspace`) 비-git이라 `has_git`=False → 어떤 git 체크포인트도 불가. 이 환경 해결책은 **cp 파일 스냅샷**(B-4와 동일).
+
+### [B-3] Stop 훅 verifier 경고 dedup
+**영향 파일**: `hooks/plan_gate_stop_alert.py`
+- `:69-78` 경고가 매 턴 발화(편집 윈도 `:80-96`이 못 막음). dedup 플래그 부재 + 훅이 state save 안 함.
+- **수정**: gate에 `verifier_advisory_seen` 추가 — 1회 emit 후 set + `save_state`. 리셋은 `edit_count` 전진 시(새 편집 배치) 또는 `cmd_retry`/`cmd_replan`에서 pop. `intro_seen`(`lib:442-449`) 패턴 재사용. blocking 아님 유지(`additionalContext`), `stop_hook_active` 확인.
+
+---
+
+## 이 프로젝트 즉시 조치 (사용자 승인 후 적용 — 본 점검은 읽기 전용)
+
+- [ ] **B-4** `CLAUDE.md:118-119`, `workflow.md:96-97/102`, `lessons.md:38/41` 본문을 "시작 SHA + diff <SHA>..HEAD" → **"작업 직전 파일 스냅샷(`cp file file.preagent`) 대비 diff"** 로 정정. 베이스 커밋 대비 diff 금지 명시 (lessons.md:17 교훈과 일치).
+- [ ] **메타** `settings.local.json:67` 의 `1.33.0` → `1.35.2`(또는 `*` 와일드카드).
+- [ ] **D-004** decisions.md 새 D-번호 append — "byte-identical은 빌드시각(`__TIMESTAMP__`)·UBIFS 고정 시에만. 일반 펌웨어는 byte 비결정론, 동일성 검증은 md5 아니라 소스/심볼 diff로" (append-only).
+- [ ] **B-1/C 우회(즉시)**: 코드 수정 전까지는 DMS 같은 다회편집 작업 시 `/plan-gate-off` 후 작업 → `@verifier` → `/plan-gate-on`.
+
+> claude_skills(project-init) 레포에 반영하려면 위 Upstream 섹션을 가져가 수정. 제보 채널: `/feedback` 또는 플러그인 이슈.

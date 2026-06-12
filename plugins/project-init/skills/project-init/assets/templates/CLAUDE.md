@@ -105,9 +105,14 @@ USER_DECISIONS 블록은 누락 금지. 사용자가 한 번이라도 명시 선
 
 도메인 에이전트가 보고를 올려도 working tree는 메인과 공유되므로 보고가 부정확할 수 있다. 메인은:
 
-- 보고에 "변경 증거" 섹션이 있는지 확인 (시작 SHA + git status + git diff --stat 원문)
-- 없으면 보고를 ⚠️ 신뢰성 격하 → 메인이 직접 `git diff --stat <시작SHA>..HEAD` 실행
-- 자연어 파일 목록이 git diff --stat 출력과 어긋나면 에이전트에 재확인 요청
+- 보고에 "변경 증거" 섹션이 있는지 확인 (위임 직전 기준점 + git status + diff 원문)
+- 기준점은 **에이전트 위임 직전 working tree 상태**다 (베이스 커밋이 아님):
+  - git + clean tree → 시작 SHA: `git diff <시작SHA>..HEAD`
+  - dirty 또는 비-git (uncommitted 패치가 상시 존재하는 등) → 위임 직전 스냅샷:
+    `git stash create` 트리 SHA, 또는 `cp <file> <file>.preagent` 대비 diff
+  - ⚠️ 베이스 커밋 대비 diff 금지 — 기존 패치를 에이전트 신규 변경으로 오인해 폐기·checkout 사고
+- 없으면 보고를 ⚠️ 신뢰성 격하 → 메인이 직접 위 기준점으로 diff 실행
+- 자연어 파일 목록이 diff 출력과 어긋나면 에이전트에 재확인 요청
 - 메인의 직접 확인 결과가 우선 — 자연어 자기보고는 보조 자료다
 
 ### 제약

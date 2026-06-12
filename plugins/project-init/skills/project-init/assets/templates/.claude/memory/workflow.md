@@ -93,9 +93,13 @@ Agent(subagent_type="Plan", prompt="""
 
 도메인 에이전트(@frontend/@backend/@deeplearning) 보고를 받으면:
 
-- 보고에 "변경 증거" 섹션이 있는지 확인 (시작 SHA + git status + git diff --stat 원문)
-- 없으면 보고를 ⚠️ 신뢰성 격하 → 메인이 직접 `git diff --stat <시작SHA>..HEAD` 실행 후 비교
-- 자연어 파일 목록이 git diff --stat 출력과 어긋나면 에이전트에 재확인 요청
+- 보고에 "변경 증거" 섹션이 있는지 확인 (위임 직전 기준점 + git status + diff 원문)
+- 기준점 = **위임 직전 working tree 상태** (베이스 커밋 아님):
+  clean git → 시작 SHA `git diff <시작SHA>..HEAD`;
+  dirty/비-git → `git stash create` 트리 SHA 또는 `cp file file.preagent` 대비 diff.
+  ⚠️ 베이스 커밋 대비 diff 금지 — 기존 패치를 에이전트 신규로 오인해 폐기 사고
+- 없으면 ⚠️ 신뢰성 격하 → 메인이 직접 위 기준점으로 diff 실행 후 비교
+- 자연어 파일 목록이 diff 출력과 어긋나면 에이전트에 재확인 요청
 - 메인의 직접 확인 결과가 우선 — 자연어 자기보고는 보조 자료다
 
 자기 변경을 "이미 있었다 / 이전 세션 변경이다"라고 오인 보고하는 사고를 막기 위한 게이트다.

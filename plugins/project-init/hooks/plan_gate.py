@@ -114,6 +114,7 @@ def main() -> int:
                         gate["edit_count_post_approval"] = 0
                         gate["file_edit_counts_post_approval"] = {}
                         gate["unique_files_post_approval"] = []
+                        gate["edit_overrides"] = lib.parse_gate_overrides(root)
                         gate["initial_edit_count"] = 0
                         gate["initial_unique_files"] = 0
                         gate["todo_md_sha256"] = current_sha

@@ -26,6 +26,12 @@ from typing import Any
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
 # 누더기 감지: 동일 파일 반복 패치 (파일별 편집 횟수 기준)
 TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
+# 파일별 편집 임계 오버라이드 상한 — todo.md 마커가 이보다 커도 클램프(무한 budget 자가부여 방지)
+MAX_EDIT_OVERRIDE = 20
+# tasks/todo.md 마커: <!-- plan-gate: max-edits-per-file=N file=glob -->  (file 생략 시 전체)
+_OVERRIDE_RE = re.compile(
+    r"<!--\s*plan-gate:\s*max-edits-per-file\s*=\s*(\d+)(?:\s+file\s*=\s*(\S+?))?\s*-->"
+)
 GC_MAX_AGE_DAYS = 30
 
 # 자동으로 .plan-gateignore에 추가할 후보 패턴 (파일명 기준, fnmatch)
@@ -326,10 +332,45 @@ def post_approval_stats(gate: dict[str, Any]) -> tuple[int, int]:
     return max_repeat, unique
 
 
+def parse_gate_overrides(root: Path) -> dict[str, int]:
+    """tasks/todo.md 의 plan-gate 마커에서 파일별 편집 임계 오버라이드를 읽는다 (B-1).
+
+    형식: <!-- plan-gate: max-edits-per-file=N file=glob -->  (file 생략 시 전체 '*')
+    값은 MAX_EDIT_OVERRIDE 로 클램프. approve 시점에 1회 호출해 gate 에 저장하므로
+    PreToolUse 매 편집 재파싱(latency)을 피한다. 승인 전 trigger 에는 적용되지 않는다
+    (계획 강제 취지 유지) — 승인 후 scope creep 한도만 파일별로 상향한다.
+    """
+    p = todo_md_path(root)
+    if not p.exists():
+        return {}
+    overrides: dict[str, int] = {}
+    for m in _OVERRIDE_RE.finditer(p.read_text(errors="ignore")):
+        n = min(int(m.group(1)), MAX_EDIT_OVERRIDE)
+        pat = m.group(2) or "*"
+        overrides[pat] = max(overrides.get(pat, 0), n)
+    return overrides
+
+
+def _threshold_for(fp: str, overrides: dict[str, int]) -> int:
+    """파일 fp 의 편집 임계. 매칭되는 마커 오버라이드가 있으면 상향(기본 TRIGGER_REPEAT_RATIO)."""
+    threshold = TRIGGER_REPEAT_RATIO
+    name = os.path.basename(fp)
+    for pat, n in overrides.items():
+        if fnmatch.fnmatch(fp, pat) or fnmatch.fnmatch(name, pat):
+            threshold = max(threshold, n)
+    return threshold
+
+
 def post_approval_limit_exceeded(gate: dict[str, Any]) -> bool:
-    """초기 트리거와 동일한 파일별 기준으로 승인 후 재차단."""
-    max_repeat, _ = post_approval_stats(gate)
-    return max_repeat >= TRIGGER_REPEAT_RATIO
+    """승인 후 파일별 편집 임계 초과 시 재차단. todo.md 마커로 파일별 상향 가능(B-1)."""
+    counts = gate.get("file_edit_counts_post_approval", {})
+    overrides = gate.get("edit_overrides", {})
+    for fp, c in counts.items():
+        if is_doc_path(fp):
+            continue
+        if c >= _threshold_for(fp, overrides):
+            return True
+    return False
 
 
 # ── doc 경로 판별 ───────────────────────────────────────────────────────
