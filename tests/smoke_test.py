@@ -563,6 +563,28 @@ def t_stop_hook_active_guard(base: Path) -> None:
     check("stop_alert active=true → 억제(빈 출력)", run_hook(psa, {"stop_hook_active": True}, p).stdout.strip() == "")
 
 
+def t_verifier_advisory_dedup(base: Path) -> None:
+    """Stop verifier 경고가 같은 편집 배치에서 1회만 (B-3 dedup — 매 턴 반복 제거).
+
+    리포트 260612 B-3: gate 고착 시 verifier 경고가 매 턴 반복되던 노이즈.
+    edit_count 기반 dedup — 1회 emit 후 새 편집 전까지 억제.
+    """
+    print("[18] verifier 경고 dedup")
+    p = make_project(base, "vdedup")
+    gate_hook = HOOKS / "plan_gate.py"
+    for _ in range(6):
+        run_hook(gate_hook, edit_payload("Edit", p / "x.py"), p)
+    set_gate(p, state="approved", edit_count=3, verifier_status=None, approved_auto=False)
+    psa = HOOKS / "plan_gate_stop_alert.py"
+    out1 = run_hook(psa, {}, p).stdout
+    check("1회차 verifier 경고 emit", "@verifier 미호출" in out1, f"out={out1[:120]!r}")
+    out2 = run_hook(psa, {}, p).stdout
+    check("2회차 같은 편집 → dedup(억제)", "@verifier 미호출" not in out2, f"out={out2[:120]!r}")
+    set_gate(p, edit_count=4)  # 새 편집 배치
+    out3 = run_hook(psa, {}, p).stdout
+    check("새 편집 후 → 경고 재emit", "@verifier 미호출" in out3, f"out={out3[:120]!r}")
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -612,6 +634,7 @@ def main() -> int:
         t_cleanup_untracked_only(base)
         t_done_from_created(base)
         t_stop_hook_active_guard(base)
+        t_verifier_advisory_dedup(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

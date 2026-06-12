@@ -46,6 +46,32 @@ def _emit_advisories(items: list[str]) -> None:
     sys.stdout.flush()
 
 
+def _verifier_advisory(root, state, gate) -> str | None:
+    """verifier 미호출 경고 — 같은 편집 배치에서 1회만 (edit_count 기반 dedup).
+
+    매 턴 같은 경고가 반복되던 문제(리포트 260612 B-3) 해소: 1회 emit 후 현재
+    edit_count 를 gate 에 기록하고, 새 편집(edit_count 전진) 전까지 억제한다.
+    /retry·/replan 은 edit_count 를 유지/리셋하므로 자연히 다음 편집에서 재발화한다.
+    auto-approved 게이트(스캐폴딩)는 verifier 대상이 아니므로 제외.
+    """
+    if not (
+        gate.get("edit_count", 0) > 0
+        and gate.get("verifier_status") is None
+        and not gate.get("approved_auto")
+    ):
+        return None
+    edit_count = gate.get("edit_count", 0)
+    if gate.get("verifier_advisory_seen_at_edit") == edit_count:
+        return None  # 이 편집 배치에서 이미 경고함 — 중복 억제
+    gate["verifier_advisory_seen_at_edit"] = edit_count
+    lib.save_state(root, state)
+    return (
+        "[plan-gate] ⚠️  @verifier 미호출\n"
+        "  편집이 있었지만 검증이 없습니다. /done 전 @verifier 호출 필수.\n"
+        "  건너뛰려면 /skip-verify 를 명시적으로 입력."
+    )
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
@@ -71,18 +97,10 @@ def main() -> int:
     if gate is None or gate["state"] != "approved":
         return 0
 
-    # verifier 미호출 경고 — 편집이 있는데 verifier 를 한 번도 안 불렀으면 리마인드
-    # auto-approved 게이트(project-init 등 스캐폴딩)는 verifier 대상 아님
-    if (
-        gate.get("edit_count", 0) > 0
-        and gate.get("verifier_status") is None
-        and not gate.get("approved_auto")
-    ):
-        advisories.append(
-            "[plan-gate] ⚠️  @verifier 미호출\n"
-            "  편집이 있었지만 검증이 없습니다. /done 전 @verifier 호출 필수.\n"
-            "  건너뛰려면 /skip-verify 를 명시적으로 입력."
-        )
+    # verifier 미호출 경고 (편집 배치당 1회 — dedup)
+    verifier_msg = _verifier_advisory(root, state, gate)
+    if verifier_msg:
+        advisories.append(verifier_msg)
 
     # 이번 응답 중 편집이 있었는지 확인 (last_edit_ts 기준)
     last_edit_str = gate.get("last_edit_ts")
