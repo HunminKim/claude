@@ -43,16 +43,16 @@ pipeline_steps: []
 # .claude/hooks/cleanup_suggest.py (Stop 훅) 가 세션 종료 시 이 패턴으로 스캔한다.
 # .githooks/pre-commit 도 이 패턴으로 임시 파일 커밋을 차단한다.
 temp_patterns:
-  # 파일명 접두사 (예: tmp_analysis.py, scratch_test.csv, debug_output.json)
+  # 주의: debug_/_debug 는 기본 제외 — 임베디드 C/C++ 등에서 *_debug.h 정식 소스와
+  #       광범위하게 충돌(오탐)한다. 디버그 산출물을 잡으려면 아래에 명시 추가(opt-in).
+  # 파일명 접두사 (예: tmp_analysis.py, scratch_test.csv)
   prefixes:
     - "tmp_"
     - "scratch_"
-    - "debug_"
-  # 파일명 줄기 접미사 — 확장자 제외 (예: result_tmp.csv, weights_debug.pt)
+  # 파일명 줄기 접미사 — 확장자 제외 (예: result_tmp.csv)
   suffixes:
     - "_tmp"
     - "_scratch"
-    - "_debug"
   # 임시 디렉토리 — 하위 파일 전체 감지 (예: tmp/output.png)
   dirs:
     - "tmp/"

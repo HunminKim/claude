@@ -23,9 +23,12 @@ SKIP_DIRS = {
 
 SCAN_BUDGET_SEC = 5.0
 
+# debug_/_debug 는 기본값에서 제외한다 — 임베디드 C/C++ 등에서 *_debug.h/.c 같은
+# 정식 소스와 광범위하게 충돌(오탐)하기 때문. 디버그 산출물(debug_output.json 등)을
+# 잡으려면 프로젝트가 docs/constraints.yaml 의 temp_patterns 에 명시 추가한다(opt-in).
 DEFAULT_PATTERNS = {
-    "prefixes": ["tmp_", "scratch_", "debug_"],
-    "suffixes": ["_tmp", "_scratch", "_debug"],
+    "prefixes": ["tmp_", "scratch_"],
+    "suffixes": ["_tmp", "_scratch"],
     "dirs": ["tmp/", "scratch/", ".experiments/"],
     "exclude_dirs": [],
 }
@@ -44,17 +47,32 @@ def find_project_root() -> Path | None:
     return None
 
 
+def _warn_missing_yaml(constraints: Path) -> None:
+    """PyYAML 없을 때 temp_patterns 커스텀이 무시됨을 1줄 안내한다 (silent 폴백 사고 방지).
+
+    이 silent 폴백이 "constraints.yaml 을 고쳐도 안 먹힘" 사고의 원인이었다.
+    커스텀이 실제로 있는 경우만 경고한다 (Stop 훅 stderr — 사용자전용 채널).
+    """
+    if constraints.exists() and "temp_patterns:" in constraints.read_text(errors="ignore"):
+        sys.stderr.write(
+            "[cleanup-suggest] PyYAML 미설치 — docs/constraints.yaml 의 temp_patterns 를 "
+            "읽지 못해 기본 패턴으로 폴백합니다. `pip install pyyaml` 후 커스텀이 적용됩니다.\n"
+        )
+
+
 def load_patterns(root: Path) -> dict:
+    constraints = root / "docs" / "constraints.yaml"
     try:
         import yaml
-        with open(root / "docs" / "constraints.yaml") as f:
+    except ImportError:
+        _warn_missing_yaml(constraints)
+        return DEFAULT_PATTERNS
+    try:
+        with open(constraints) as f:
             data = yaml.safe_load(f) or {}
-        patterns = data.get("temp_patterns", {})
-        if patterns:
-            return patterns
+        return data.get("temp_patterns") or DEFAULT_PATTERNS
     except Exception:
-        pass
-    return DEFAULT_PATTERNS
+        return DEFAULT_PATTERNS
 
 
 def _git_untracked(root: Path) -> list[Path] | None:

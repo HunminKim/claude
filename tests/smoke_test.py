@@ -501,20 +501,21 @@ def t_cleanup_untracked_only(base: Path) -> None:
     리포트 260612: tracked 인 *_debug.h 가 _debug suffix 패턴에 오탐되던 문제.
     git ls-files -o(untracked only) 로 좁혀 tracked 정식 소스를 제외한다.
     """
-    print("[15] cleanup_suggest untracked-only")
+    print("[15] cleanup_suggest 오탐 방지")
     hook = TEMPLATES / ".claude" / "hooks" / "cleanup_suggest.py"
     p = make_project(base, "cleanup")
     (p / "docs").mkdir()
-    (p / "docs" / "constraints.yaml").write_text("temp_patterns: {}\n")
+    (p / "docs" / "constraints.yaml").write_text("temp_patterns: {}\n")  # 빈값 → DEFAULT_PATTERNS
     (p / "src").mkdir()
-    (p / "src" / "fcws_debug.h").write_text("int x;\n")  # tracked
-    subprocess.run(["git", "-C", str(p), "add", "src/fcws_debug.h"], check=True)
+    (p / "src" / "isp_debug.h").write_text("int x;\n")  # tracked 정식 소스
+    subprocess.run(["git", "-C", str(p), "add", "src/isp_debug.h"], check=True)
     subprocess.run(["git", "-C", str(p), "commit", "-qm", "src"], check=True)
-    (p / "debug_output.json").write_text("{}\n")  # untracked 산출물
-    r = run_hook(hook, {}, p)
-    out = r.stdout
-    check("tracked fcws_debug.h 미감지 (오탐 제거)", "fcws_debug.h" not in out, f"out={out[:200]!r}")
-    check("untracked debug_output.json 감지", "debug_output.json" in out, f"out={out[:200]!r}")
+    (p / "fcws_debug.h").write_text("int y;\n")  # untracked 이지만 debug — 기본패턴서 제외돼야
+    (p / "tmp_scratch.json").write_text("{}\n")  # untracked 임시 산출물 (tmp_ prefix)
+    out = run_hook(hook, {}, p).stdout
+    check("tracked isp_debug.h 미감지 (untracked-only)", "isp_debug.h" not in out, f"out={out[:200]!r}")
+    check("untracked *_debug.h 미감지 (DEFAULT 에서 debug 제거)", "fcws_debug.h" not in out, f"out={out[:200]!r}")
+    check("untracked tmp_ 산출물 감지", "tmp_scratch.json" in out, f"out={out[:200]!r}")
 
 
 def t_done_from_created(base: Path) -> None:
