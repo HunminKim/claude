@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import uuid
@@ -228,6 +229,81 @@ def stash_pop(root: Path, ref: str) -> bool:
     return r.returncode == 0
 
 
+# ── cp 스냅샷 체크포인트 (비-git 루트 전용 백엔드) ───────────────────────
+# git tag/stash 체크포인트는 루트가 git repo 일 때만 동작한다. 루트가 git 이
+# 아닌 환경(예: 워크스페이스 디렉토리에 하위 repo 들만 있는 경우)에서는
+# /rollback 이 복원할 소스가 없어 항상 거부됐다. 이를 보완해, git 이 없을 때만
+# 편집 직전 파일 원본을 .claude/state/checkpoints/<gate_id>/ 에 1회 복사해 둔다.
+# git 경로에는 일절 관여하지 않는다 — git 사용자 동작 변화 없음.
+def cp_checkpoint_dir(root: Path, gate_id: str) -> Path:
+    return root / ".claude" / "state" / "checkpoints" / gate_id
+
+
+def cp_snapshot_file(root: Path, gate: dict[str, Any], target: str) -> None:
+    """비-git 루트 전용: 편집 직전 파일 원본을 체크포인트 디렉토리에 1회 복사.
+
+    gate['cp_snapshot'] 매니페스트에 파일별 '편집 전 존재 여부'를 기록한다 —
+    롤백 시 존재했던 파일은 원본으로 되돌리고, 신규 생성 파일은 삭제한다.
+    이미 스냅샷한 파일은 다시 건드리지 않아 첫 편집 상태가 보존된다.
+    """
+    p = Path(target)
+    if not p.is_absolute():
+        p = root / p
+    try:
+        rel = str(p.resolve().relative_to(root.resolve()))
+    except (ValueError, OSError):
+        return  # 루트 밖 파일은 스냅샷 대상 아님
+
+    manifest = gate.get("cp_snapshot")
+    if manifest is None:
+        manifest = {}
+        gate["cp_snapshot"] = manifest
+    if rel in manifest:
+        return  # 첫 편집 시점은 이미 캡처됨
+
+    if p.exists():
+        dest = cp_checkpoint_dir(root, gate["id"]) / rel
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, dest)
+        except OSError:
+            return  # 복사 실패 시 매니페스트에 남기지 않음 (잘못된 복원 방지)
+        manifest[rel] = True
+    else:
+        manifest[rel] = False  # 편집 전 부재 → 신규 파일, 롤백 시 삭제 대상
+
+
+def _cp_restore_file(src: Path, dst: Path, existed: bool) -> None:
+    """한 파일을 스냅샷 상태로 되돌린다. 존재했으면 원본 복사, 신규였으면 삭제."""
+    try:
+        if existed:
+            if src.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+        elif dst.exists():
+            dst.unlink()
+    except OSError:
+        pass
+
+
+def cp_rollback(root: Path, gate: dict[str, Any]) -> bool:
+    """cp 스냅샷에서 편집 전 상태로 복원. 성공 시 True, 스냅샷 없으면 False."""
+    manifest = gate.get("cp_snapshot")
+    if not manifest:
+        return False
+    cpdir = cp_checkpoint_dir(root, gate["id"])
+    for rel, existed in manifest.items():
+        _cp_restore_file(cpdir / rel, root / rel, existed)
+    cp_cleanup(root, gate["id"])
+    log_audit(root, "cp_rollback", gate_id=gate["id"], files=len(manifest))
+    return True
+
+
+def cp_cleanup(root: Path, gate_id: str) -> None:
+    """gate 의 cp 스냅샷 디렉토리를 제거 (best-effort)."""
+    shutil.rmtree(cp_checkpoint_dir(root, gate_id), ignore_errors=True)
+
+
 # ── todo.md 해시 ────────────────────────────────────────────────────────
 def todo_md_path(root: Path) -> Path:
     return root / "tasks" / "todo.md"
@@ -288,6 +364,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "todo_md_mtime": None,
         "checkpoint_clean_tag": None,
         "checkpoint_dirty_stash_ref": None,
+        "cp_snapshot": None,                   # 비-git 루트 롤백용 파일 스냅샷 매니페스트 {relpath: 편집전존재여부}
         "verifier_status": None,
     }
 
@@ -726,6 +803,7 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> Non
                       gate_id=gate["id"])
             if not ok:
                 stash_drop(root, actual)
+    cp_cleanup(root, gate["id"])  # 비-git cp 스냅샷 정리 (git 경로엔 영향 없음)
     gate["state"] = "done"
     gate["closed_at"] = now_iso()
     # 완료 시점의 todo.md 해시를 보관 → 다음 사이클 자동 승인 가드에 활용

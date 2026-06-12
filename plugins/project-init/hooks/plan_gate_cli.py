@@ -302,15 +302,28 @@ def cmd_rollback(root, state) -> int:
 
     tag = gate.get("checkpoint_clean_tag")
     if not tag:
+        # git tag 없음 — 비-git 루트면 cp 스냅샷 백엔드로 복원 시도
+        if lib.cp_rollback(root, gate):
+            gate["state"] = "rolled_back"
+            lib.clear_current_gate(state)
+            lib.save_state(root, state)
+            _info(
+                "[plan-gate rollback] cp 스냅샷으로 복원 완료 (git 미사용 환경).\n"
+                f"  gate {gate['id']} → rolled_back. 편집 전 파일 상태로 되돌렸습니다."
+            )
+            return 0
         _err(
-            "[plan-gate rollback] 체크포인트 tag가 없다 (git 미사용 또는 tag 생성 실패).\n"
-            "  git reset --hard 으로 복원할 수 없습니다.\n"
+            "[plan-gate rollback] 복원할 체크포인트가 없습니다.\n"
+            "  git 루트면 tag 생성 실패, 비-git 루트면 스냅샷된 편집이 없습니다.\n"
             "\n"
             "  대안:\n"
             "    /skip  — 현재 변경사항 보존하며 gate 마감 (문제 인지 후 유지)\n"
             "    /done  — 동일 효과 (/skip 과 같음)\n"
-            "\n"
-            "  수동 복원이 필요하면: git reflog 로 직전 커밋을 찾아 체크아웃하세요."
+            + (
+                "\n  수동 복원이 필요하면: git reflog 로 직전 커밋을 찾아 체크아웃하세요."
+                if lib.has_git(root)
+                else ""
+            )
         )
         return 1
 

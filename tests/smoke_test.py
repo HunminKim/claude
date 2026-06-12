@@ -612,6 +612,60 @@ def t_verifier_advisory_dedup(base: Path) -> None:
     check("새 편집 후 → 경고 재emit", "@verifier 미호출" in out3, f"out={out3[:120]!r}")
 
 
+def t_cp_rollback_nongit(base: Path) -> None:
+    """비-git 루트: cp 스냅샷 백엔드로 /rollback 복원 (B-2 비-git 대안).
+
+    루트가 git repo 가 아니라 tag/stash 체크포인트 불가한 환경에서, 편집 직전
+    파일 원본을 스냅샷해 두고 /rollback 시 원본 복원·신규 파일 삭제로 되돌린다.
+    git 루트는 이 백엔드를 쓰지 않아 동작 불변(함께 검증).
+    """
+    print("[20] 비-git cp 스냅샷 롤백")
+    p = base / "cp_nongit"  # git init 하지 않음 → 비-git 루트
+    (p / ".claude" / "agents").mkdir(parents=True)
+    (p / ".claude" / "agents" / "verifier.md").write_text("# verifier")
+    (p / ".claude" / "plan_gate_enabled").touch()
+    gate_hook = HOOKS / "plan_gate.py"
+    keep = p / "keep.py"
+    keep.write_text("ORIG\n")
+    new = p / "sub" / "new.py"
+    # 기존 파일: 편집 직전 스냅샷(ORIG) → 에이전트 편집 시뮬레이트
+    run_hook(gate_hook, edit_payload("Edit", keep), p)
+    keep.write_text("MODIFIED\n")
+    # 신규 파일: 편집 직전 부재 기록 → 에이전트 생성 시뮬레이트
+    run_hook(gate_hook, edit_payload("Write", new), p)
+    new.parent.mkdir(parents=True, exist_ok=True)
+    new.write_text("NEW\n")
+    g = get_gate(p)
+    man = g.get("cp_snapshot") or {}
+    check(
+        "비-git 스냅샷 매니페스트 기록(기존=True, 신규=False)",
+        man.get("keep.py") is True and man.get("sub/new.py") is False,
+        f"man={man}",
+    )
+    cpdir = p / ".claude" / "state" / "checkpoints" / g["id"]
+    check("스냅샷 디렉토리에 원본 보존", (cpdir / "keep.py").read_text() == "ORIG\n")
+    cli = HOOKS / "plan_gate_cli.py"
+    r = subprocess.run(
+        [sys.executable, str(cli), "rollback"],
+        capture_output=True, text=True, cwd=str(p),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(p)},
+    )
+    check("rollback exit 0", r.returncode == 0, f"rc={r.returncode} err={r.stderr[:150]!r}")
+    check("기존 파일 원본 복원", keep.read_text() == "ORIG\n", f"keep={keep.read_text()!r}")
+    check("신규 파일 삭제", not new.exists(), "new.py 잔존")
+    check("gate rolled_back", get_gate(p)["state"] == "rolled_back", get_gate(p)["state"])
+    check("스냅샷 디렉토리 정리됨", not cpdir.exists())
+
+    # git 루트는 cp 백엔드 미사용 → cp_snapshot None 유지 (회귀 0 검증)
+    gp = make_project(base, "cp_git_noop")
+    run_hook(gate_hook, edit_payload("Edit", gp / "a.py"), gp)
+    check(
+        "git 루트는 cp_snapshot 미생성(None)",
+        get_gate(gp).get("cp_snapshot") is None,
+        f"cp={get_gate(gp).get('cp_snapshot')}",
+    )
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -663,6 +717,7 @@ def main() -> int:
         t_stop_hook_active_guard(base)
         t_verifier_advisory_dedup(base)
         t_gate_edit_overrides(base)
+        t_cp_rollback_nongit(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

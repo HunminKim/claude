@@ -3,7 +3,19 @@
 > 출처: harness-check 260612 2차 리포트 B-2. 위험도 높은 대수술이라 즉흥 처리하지
 > 않고 별도 정밀 세션으로 분리. 이 문서는 그 세션의 입력(설계 입력 + 위험 + 검증 계획).
 >
-> **상태**: 미착수. B-1(파일별 임계 오버라이드)·B-4(diff 기준점)는 v1.37.0 에서 처리됨.
+> **상태**: 부분 해소(v1.38.0). B-1(파일별 임계 오버라이드)·B-4(diff 기준점)는 v1.37.0.
+>
+> ### v1.38.0 처리 — 비-git 루트 cp 스냅샷 백엔드 (접근 B만 채택)
+> - **한 것**: 루트가 git repo 가 아닐 때만(`not has_git`) 편집 직전 파일 원본을
+>   `.claude/state/checkpoints/<gate_id>/` 에 1회 복사(`cp_snapshot_file`). `/rollback` 이
+>   `cp_rollback` 으로 원본 복원·신규 파일 삭제. `/done` 시 `cp_cleanup` 으로 정리.
+>   매니페스트는 `gate["cp_snapshot"]={relpath: 편집전존재여부}`. 비-git 환경의 "롤백 불가"
+>   기능 부재를 메움. 행위 검증: `smoke_test.py` `t_cp_rollback_nongit`(복원+신규삭제+회귀가드).
+> - **의도적으로 안 한 것 (접근 A — dirty git stash-create)**: git 경로의 `reset --hard`→
+>   `stash apply` 시맨틱 변경은 **전 사용자 회귀 위험** 대비 이득이 작아 보류. 현재 git 경로는
+>   dirty 면 tag 스킵(안전 측 실패) + `stash_dirty` 로 tracked 변경 보존 중이라 데이터 손상
+>   없음. git 경로는 이번 변경에서 **일절 미수정**(회귀 0, smoke 로 cp_snapshot None 유지 확인).
+> - **남은 것**: dirty *git* tree 에서 체크포인트 생성(접근 A)은 여전히 미해소. 실제 통증 발생 시 재검토.
 
 ## 문제 (실재)
 

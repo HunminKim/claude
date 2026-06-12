@@ -172,6 +172,11 @@ def main() -> int:
             lib.save_state(root, state)
             return 0
 
+    # ── 비-git 루트: 편집 직전 cp 스냅샷 (git 체크포인트 불가 환경의 /rollback 대안) ──
+    # git 루트는 tag/stash 가 담당하므로 관여하지 않는다 (git 사용자 동작 불변).
+    if target and not lib.has_git(root):
+        lib.cp_snapshot_file(root, gate, target)
+
     # ── hot-file 경고 (세션 간 패치 누적 감지) ───────────────────────────
     hot_level, hot_count = lib.hot_file_check(root, target)
     if hot_level:

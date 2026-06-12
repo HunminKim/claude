@@ -105,6 +105,7 @@ update_docs 훅: gate.state = "verified", verifier_status 기록
 
 **상태 파일**: `.claude/state/plan_gate.json`
 **체크포인트**: `git tag .claude/gate/<id>/clean` + `[plan-gate] <id>` stash entry
+　└ **루트가 git repo 가 아닐 때**: 편집 직전 파일 원본을 `.claude/state/checkpoints/<id>/` 에 복사하는 cp 스냅샷 백엔드로 자동 전환 → `/rollback` 이 원본 복원·신규 파일 삭제로 동작 (git 루트 동작 불변)
 **GC**: SessionEnd 훅이 30일 이상된 tag·stash·gate 기록 정리
 
 **활성화 스위치**: `.claude/plan_gate_enabled` 파일 존재 여부로 판정한다 (`/plan-gate-on` · `/plan-gate-off` 로 토글). `verifier.md` 존재 여부와는 독립이다.
