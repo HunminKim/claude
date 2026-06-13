@@ -151,7 +151,7 @@
   - (a) 기각 — 사용자 명시 가치("이상한 길 방지") + 코드 증거(`_max_code_repeat` 은 단일 파일 thrash 감지기, 스코프가 못 잡는 §0(b)).
   - (b) 기각 — v1 의 오탐(정상 다회편집 차단)은 "1차 게이트 겸직" 때문. 스코프가 게이트를 맡은 지금 thrash 신호는 *더 관대·더 정밀*해질 수 있다.
 - **사양**:
-  - **신호**: 게이트 내 파일별 반복 횟수(`file_edit_counts`, 게이트별). 스코프 통과 파일에만 적용(스코프 위반은 D3 가 선처리). `is_doc_path` 제외 안 함 — 제외는 `.plan-gateignore` 가 담당(config/doc 반복 루프도 포착).
+  - **신호**: 게이트 내 파일별 반복 횟수(`file_edit_counts`, 게이트별). 스코프 통과 파일에만 적용(스코프 위반은 D3 가 선처리). v1 의 `is_doc_path` 광역 제외는 폐기 — 제외는 `.plan-gateignore` 가 담당(config/doc 반복 루프도 포착). **단 예외: `tasks/todo.md`(계획 파일)는 thrash 카운트 제외**(사용자 결정 — 계획 반복 수정은 정상, §3.1).
   - **임계(실측 보정 대상)**: soft ~6, hard ~7–9 (v1 의 5 는 게이트 겸직 탓에 낮았음 — 스코프 분리 후 상향).
   - **★결정적 오탐 가드 — green-Bash 리셋**: 마지막 편집 이후 Bash 가 성공(exit 0)하면 해당 파일 반복 카운터 리셋. 정상 hard work 는 중간에 테스트가 통과(수렴)하므로 hard 미도달; flailing 은 계속 실패라 도달. `detect_failure_loop`(detect_failure_loop.py:129-134)의 성공-리셋과 `last_successful_bash_ts` 공유. 보조 가드: 편집 velocity(120초 내 군집만 후보).
   - **★채널·강제 — 스코프 위반과 다르다**: thrash 는 *데이터 안전*이 아니라 *품질/루프* 문제다(파일은 정상 스코프 내). 따라서 D3 의 airtight 2층 롤백을 **쓰지 않는다**. soft = `additionalContext` 환기, hard = 강한 차단성 컨텍스트("회로차단기: 멈추고 /replan 또는 사용자 보고") + Stop 재강조(`stop_hook_active` 가드 필수). **thrash 자동 롤백 금지** — 정상 진행분 파괴 + 루프 유발(서브에이전트 B 의 PostToolUse 롤백 제안은 이 점에서 기각). thrash 는 advisory 강도면 충분(루프 신호일 뿐, 안전 경계가 아님).
@@ -178,7 +178,9 @@ src/payment/**
 - 매칭은 **루트 상대경로 정규화** 기준 `fnmatch`(절대경로 미스매치 버그 반복 금지 — 기존 `is_doc_path`/`verifier_remind` 가 이 실수).
 - `do-not-touch` > `scope`(deny-first). do-not-touch 는 detour 로도 못 품.
 - `.plan-gateignore`(생성물·락파일)는 스코프 검사 우회.
-- 매니페스트(`tasks/todo.md`)·`.claude/state/`·훅 디렉토리도 스코프 검사 대상(자기 변조 부분 차단, #11226). **단 한계 명시**: 매니페스트가 `todo.md` 안에 있어 그 파일은 편집 가능해야 함 → 이 보호는 완전하지 않음(레드팀 M-B). 매니페스트 수정은 재승인을 유발(sha 변경)하도록 처리.
+- 매니페스트(`tasks/todo.md`)·`.claude/state/`·훅 디렉토리도 스코프 검사 대상(자기 변조 부분 차단, #11226). **단 한계 명시**: 매니페스트가 `todo.md` 안에 있어 그 파일은 편집 가능해야 함 → 이 보호는 완전하지 않음(레드팀 M-B).
+- **★todo.md(계획 파일)는 thrash/재편집 횟수 제한에서 제외**(사용자 결정). 계획을 여러 번 고치는 것(replan·detour 기록)은 정상 행위이므로 flailing 신호(D9)로 세지 않는다. `.plan-gateignore` 기본 포함 또는 D9 카운터의 명시적 예외로 처리.
+- **detour 의 스코프 확장 경로 = gate state(CLI), todo.md 재편집 아님**: §3.4 의 `subplan` CLI 가 `gate["scope"]`·`gate["expansions"]` 를 갱신한다(자율). 따라서 detour 가 todo.md sha 를 바꾸지 않아 재승인을 유발하지 않는다. **sha 는 "승인 시점 선언" 의 기록일 뿐 하드 재승인 게이트가 아니다** — 런 중 실행 scope(state) = 선언(todo.md) + CLI 확장 으로 의도적으로 갈렸다가 `/done` 에서 사람이 일괄 화해(비준)한다. (이로써 rev.2 에서 지적된 §3.4↔§3.1 모순 해소.)
 - **넓은 글롭 가드(D6)**: 스코프 블록의 글롭 넓이가 임계 초과면 자동승인 비활성 → 사람 `/approve-plan` 필요.
 
 ### 3.2 강제 3층 (상세, rev.2)
@@ -221,7 +223,7 @@ state = {
 ```
 
 - 합법 전이는 `plan_gate_lib.transition(gate, to_state)` **단일 함수**로 강제(필드 리셋 일괄, 불법 전이 거부). 5곳 분산 조작 폐기.
-- **상태기계 갭 처리(레드팀 M-A)**: ①verifier ❌ 시 — 전체 게이트 락 vs 파일 단위? → **명시: /done 단계의 ❌는 v1 처럼 사용자 토큰(/retry·/skip·/done) 대기**(detour 마다가 아님 — detour 엔 verifier 없음). ②매니페스트 sha 순환 — todo.md 수정 시 재승인 필요(의도된 동작). ③세션 횡단 잔류 — 기존 advisory 유지. ④GC된 체크포인트 — /rollback 시 "체크포인트 없음" 명시 거부 + cp 폴백 시도(조용한 no-op 금지).
+- **상태기계 갭 처리(레드팀 M-A)**: ①verifier ❌ 시 — 전체 게이트 락 vs 파일 단위? → **명시: /done 단계의 ❌는 v1 처럼 사용자 토큰(/retry·/skip·/done) 대기**(detour 마다가 아님 — detour 엔 verifier 없음). ②매니페스트 sha — todo.md 는 자유 편집(재편집 제한 없음, 사용자 결정), detour scope 는 CLI→state 로 가므로 sha 가 재승인을 강제하지 않음. sha 는 승인 기록·/done diff 기준일 뿐(§3.1). ③세션 횡단 잔류 — 기존 advisory 유지. ④GC된 체크포인트 — /rollback 시 "체크포인트 없음" 명시 거부 + cp 폴백 시도(조용한 no-op 금지).
 
 ### 3.4 detour 흐름 (rev.2 — verifier 없는 자율 경로)
 
