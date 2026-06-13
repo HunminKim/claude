@@ -112,20 +112,8 @@ def cmd_approve(root, state) -> int:
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])
 
-    # dirty stash 자동 복원: rollback 포인트는 clean_tag가 담당하므로
-    # approve 후 stash는 불필요 → pop 하여 작업 파일 즉시 복원
-    if gate.get("checkpoint_dirty_stash_ref"):
-        actual = lib.find_stash_for_gate(root, gate["id"])
-        if actual:
-            ok = lib.stash_pop(root, actual)
-            if ok:
-                _info(
-                    "[plan-gate approve] dirty stash 자동 복원 완료 — 파일이 working tree에 돌아왔습니다."
-                )
-                lib.log_audit(root, "stash_popped_on_approve", gate_id=gate["id"])
-            else:
-                _err("[plan-gate approve] stash pop 실패 — 수동 복원 필요: git stash pop")
-
+    # 스냅샷 백엔드는 working tree 를 건드리지 않으므로(stash 안 함)
+    # approve 후 복원할 것이 없다 — 작업 파일은 그대로 유지된다.
     lib.save_state(root, state)
     _info(
         f"[plan-gate approve] 승인 완료: {gate['id']}\n"
@@ -161,9 +149,7 @@ def _done_from_created(root, state, gate) -> int:
     cp·문서 위주 작업이 승인 절차를 건드리지 않고 끝났을 때 /done 이 거부되던
     갭(리포트 260612 #2) 해소. working tree 는 건드리지 않는다(변경 보존).
     """
-    has_cp = bool(
-        gate.get("checkpoint_clean_tag") or gate.get("checkpoint_dirty_stash_ref")
-    )
+    has_cp = bool(gate.get("checkpoint_commit") or gate.get("cp_snapshot"))
     lib.do_gate_done(root, state, gate)
     tail = (
         "  체크포인트를 정리했습니다."
@@ -300,51 +286,27 @@ def cmd_rollback(root, state) -> int:
     if gate is None:
         return 0
 
-    tag = gate.get("checkpoint_clean_tag")
-    if not tag:
-        # git tag 없음 — 비-git 루트면 cp 스냅샷 백엔드로 복원 시도
-        if lib.cp_rollback(root, gate):
-            gate["state"] = "rolled_back"
-            lib.clear_current_gate(state)
-            lib.save_state(root, state)
-            _info(
-                "[plan-gate rollback] cp 스냅샷으로 복원 완료 (git 미사용 환경).\n"
-                f"  gate {gate['id']} → rolled_back. 편집 전 파일 상태로 되돌렸습니다."
-            )
-            return 0
+    if not lib.rollback_checkpoint(root, gate):
         _err(
             "[plan-gate rollback] 복원할 체크포인트가 없습니다.\n"
-            "  git 루트면 tag 생성 실패, 비-git 루트면 스냅샷된 편집이 없습니다.\n"
+            "  편집 전 스냅샷이 없어 되돌릴 수 없습니다.\n"
             "\n"
             "  대안:\n"
             "    /skip  — 현재 변경사항 보존하며 gate 마감 (문제 인지 후 유지)\n"
-            "    /done  — 동일 효과 (/skip 과 같음)\n"
+            "    /done  — 동일 효과 (/skip 과 같음)"
             + (
-                "\n  수동 복원이 필요하면: git reflog 로 직전 커밋을 찾아 체크아웃하세요."
+                "\n  수동 복원이 필요하면: git reflog 로 직전 상태를 찾아 복구하세요."
                 if lib.has_git(root)
                 else ""
             )
         )
         return 1
 
-    if not lib.reset_to_tag(root, tag):
-        _err(f"[plan-gate rollback] git reset --hard {tag} 실패.")
-        return 1
-
-    # 잃은 dirty 변경 stash는 유지 (사용자가 수동 git stash pop 가능)
-    stash_ref = lib.find_stash_for_gate(root, gate["id"])
-    stash_msg = ""
-    if stash_ref:
-        stash_msg = f"\n  잃은 변경은 {stash_ref} stash에 보존됨 (git stash list 로 확인)."
-
-    # tag 삭제 (이미 reset 했으니 더 이상 필요 없음)
-    lib.delete_tag(root, tag)
-
     gate["state"] = "rolled_back"
     lib.clear_current_gate(state)
     lib.save_state(root, state)
     _info(
-        f"[plan-gate rollback] 체크포인트로 복원 완료: {tag}{stash_msg}\n"
+        "[plan-gate rollback] 체크포인트로 복원 완료 — 편집 전 상태로 되돌렸습니다.\n"
         f"  gate {gate['id']} → rolled_back."
     )
     return 0
@@ -481,8 +443,7 @@ def cmd_status(root, state) -> int:
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"
         f"  approved_auto   = {'yes (보수적 limit)' if gate.get('approved_auto') else 'no (명시 승인)'}\n"
         f"  verifier_status = {verifier or '-'}\n"
-        f"  clean_tag       = {gate.get('checkpoint_clean_tag') or '-'}\n"
-        f"  dirty_stash     = {gate.get('checkpoint_dirty_stash_ref') or '-'}\n"
+        f"  checkpoint      = {(gate.get('checkpoint_commit') or '')[:12] or ('cp' if gate.get('cp_snapshot') else '-')}\n"
         f"\n"
         f"  {next_action}"
     )

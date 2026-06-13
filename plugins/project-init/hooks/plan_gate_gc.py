@@ -3,15 +3,18 @@
 
 출력 채널: 사용자전용 (exit 0 + stderr — SessionEnd 는 Claude 주입 불가 이벤트)
 
-정책 (D7): 30일 이상 경과한 .claude/gate/*/clean tag와 [plan-gate] stash를 삭제.
-state 파일의 done/rolled_back gate 기록은 닫힌 시각(closed_at,
-없으면 created_at) 기준 30일 후 정리.
+정책 (D7/v2): 현재 게이트가 아닌 모든 체크포인트(프라이빗 ref refs/plan-gate/* +
+cp 디렉토리)를 정리한다 — 닫힌 게이트 ref 는 cleanup_checkpoint 가 이미 지우므로
+남은 것은 세션 중도 종료로 생긴 고아이고, 현재 게이트가 아니면 되돌릴 수 없으니 안전.
+state 파일의 done/rolled_back gate 기록은 닫힌 시각(closed_at, 없으면 created_at)
+기준 30일 후 정리.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -48,73 +51,45 @@ def gc_state(state: dict, cutoff: datetime) -> int:
     return removed
 
 
-def gc_git_tags(root, cutoff: datetime) -> int:
-    """`.claude/gate/*/clean` tag 중 30일 이상된 것 삭제."""
+def _gc_refs(root, current: str | None) -> int:
+    """현재 게이트가 아닌 프라이빗 ref(refs/plan-gate/<gid>/checkpoint) 삭제."""
     if not lib.has_git(root):
         return 0
-    r = lib._git(
-        root,
-        "tag",
-        "--list",
-        f"{lib.TAG_PREFIX}*/clean",
-        "--format=%(refname:short)|%(creatordate:iso-strict)",
-    )
+    r = lib._git(root, "for-each-ref", "--format=%(refname)", lib.PLAN_GATE_REF_PREFIX)
     if r.returncode != 0:
         return 0
     removed = 0
-    for line in r.stdout.splitlines():
-        if "|" not in line:
+    for ref in r.stdout.splitlines():
+        ref = ref.strip()
+        parts = ref.split("/")  # refs/plan-gate/<gid>/checkpoint
+        gid = parts[2] if len(parts) >= 4 else None
+        if not gid or gid == current:
             continue
-        tag, created = line.split("|", 1)
-        try:
-            ts = datetime.fromisoformat(created.strip())
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-        except Exception:
-            continue
-        if ts < cutoff:
-            if lib.delete_tag(root, tag.strip()):
-                removed += 1
-    return removed
-
-
-def gc_stashes(root, cutoff: datetime) -> int:
-    """[plan-gate] 마커가 붙은 stash 중 30일 이상된 것 drop.
-    stash 시간은 git stash list --date=iso로 확인.
-    """
-    if not lib.has_git(root):
-        return 0
-    r = lib._git(
-        root,
-        "stash",
-        "list",
-        "--date=iso",
-        "--format=%gd|%ci|%s",
-    )
-    if r.returncode != 0:
-        return 0
-    drops: list[str] = []
-    for line in r.stdout.splitlines():
-        parts = line.split("|", 2)
-        if len(parts) < 3:
-            continue
-        ref, ci, msg = parts[0].strip(), parts[1].strip(), parts[2].strip()
-        if lib.STASH_PREFIX.strip() not in msg:
-            continue
-        try:
-            ts = datetime.fromisoformat(ci)
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-        except Exception:
-            continue
-        if ts < cutoff:
-            drops.append(ref)
-    # 뒤에서부터 drop (인덱스 안정성)
-    removed = 0
-    for ref in reversed(drops):
-        if lib.stash_drop(root, ref):
+        if lib._git(root, "update-ref", "-d", ref).returncode == 0:
             removed += 1
     return removed
+
+
+def _gc_cpdirs(root, current: str | None) -> int:
+    """현재 게이트가 아닌 cp 디렉토리(.claude/state/checkpoints/<gid>) 삭제."""
+    cpbase = root / ".claude" / "state" / "checkpoints"
+    if not cpbase.is_dir():
+        return 0
+    removed = 0
+    for d in cpbase.iterdir():
+        if d.is_dir() and d.name != current:
+            shutil.rmtree(d, ignore_errors=True)
+            removed += 1
+    return removed
+
+
+def gc_checkpoints(root, current: str | None) -> int:
+    """현재 게이트가 아닌 체크포인트(프라이빗 ref + cp 디렉토리)를 정리.
+
+    체크포인트는 현재 게이트의 /rollback 에만 필요하다. 비-현재 게이트의 ref/디렉토리는
+    닫혔거나(이미 정리됨) 세션 중도 종료로 생긴 고아 — 되돌릴 수 없으므로 안전히 삭제.
+    """
+    return _gc_refs(root, current) + _gc_cpdirs(root, current)
 
 
 def main() -> int:
@@ -134,13 +109,11 @@ def main() -> int:
     if removed_state:
         lib.save_state(root, state)
 
-    removed_tags = gc_git_tags(root, cutoff)
-    removed_stashes = gc_stashes(root, cutoff)
+    removed_ckpt = gc_checkpoints(root, state.get("current_gate_id"))
 
-    if removed_state or removed_tags or removed_stashes:
+    if removed_state or removed_ckpt:
         sys.stderr.write(
-            f"[plan-gate gc] 정리 완료: state={removed_state} "
-            f"tags={removed_tags} stashes={removed_stashes}\n"
+            f"[plan-gate gc] 정리 완료: state={removed_state} checkpoints={removed_ckpt}\n"
         )
     return 0
 

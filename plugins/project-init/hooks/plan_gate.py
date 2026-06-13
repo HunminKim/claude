@@ -75,18 +75,15 @@ def main() -> int:
     state = lib.load_state(root)
     gate = lib.current_gate(state)
 
-    # ── 첫 Edit 직전 clean tag (D7) ──────────────────────────────────────
+    # ── 첫 Edit 직전 체크포인트 스냅샷 (D7) ──────────────────────────────
     if gate is None or gate["state"] in ("done", "rolled_back"):
         gate = lib.make_gate()
-        # git 체크포인트는 git repo + opt-out 안 함일 때만 (아니면 cp 스냅샷이 담당)
-        git_cp = lib.git_checkpoints_enabled(root)
-        existing = lib.existing_clean_tag_for_head(root) if git_cp else None
-        if existing:
-            gate["checkpoint_clean_tag"] = existing
-        elif git_cp and lib.working_tree_clean(root):
-            tag = lib.create_clean_tag(root, gate["id"])
-            if tag:
-                gate["checkpoint_clean_tag"] = tag
+        # git repo + opt-out 안 함이면 프라이빗 ref 스냅샷, 아니면 cp 디렉토리 백엔드.
+        # clean/dirty 무관하게 캡처(C1 의 dirty-skip 한계 제거).
+        if not lib.prefers_no_git(root):
+            commit = lib.create_snapshot(root, gate)
+            if commit:
+                gate["checkpoint_commit"] = commit
         lib.set_current_gate(state, gate)
 
         # ── Plan Mode 자동 승인: tasks/todo.md 존재 + 품질 통과 시 즉시 approved (D8) ──
@@ -174,11 +171,10 @@ def main() -> int:
             lib.save_state(root, state)
             return 0
 
-    # ── cp 스냅샷: 편집 직전 원본 백업 (git 체크포인트가 꺼진 경우의 /rollback 대안) ──
-    # git repo 가 아니거나 사용자가 plan_gate_no_git 으로 opt-out 했을 때만 동작.
-    # git 백엔드(tag/stash)가 켜져 있으면 관여하지 않는다 (git 사용자 동작 불변).
-    if target and not lib.git_checkpoints_enabled(root):
-        lib.cp_snapshot_file(root, gate, target)
+    # ── 편집 직전 touched 기록 (롤백 매니페스트) ─────────────────────────
+    # git: 스냅샷 커밋이 내용 출처라 존재 비트만 / 비-git: cp 디렉토리에 복사.
+    if target:
+        lib.record_touched(root, gate, target)
 
     # ── hot-file 경고 (세션 간 패치 누적 감지) ───────────────────────────
     hot_level, hot_count = lib.hot_file_check(root, target)
@@ -231,17 +227,8 @@ def main() -> int:
                       edit_count=gate["edit_count"],
                       unique_files=len(gate["unique_files"]))
 
-        # dirty 보존: stash (D4) — git 체크포인트 백엔드일 때만
-        if lib.git_checkpoints_enabled(root) and not lib.working_tree_clean(root):
-            ref = lib.stash_dirty(root, gate["id"])
-            if ref:
-                gate["checkpoint_dirty_stash_ref"] = ref
-
-        # stash 후 working tree clean이면 HEAD에 tag (없을 때만)
-        if not gate.get("checkpoint_clean_tag") and lib.git_checkpoints_enabled(root):
-            tag = lib.create_clean_tag(root, gate["id"])
-            if tag:
-                gate["checkpoint_clean_tag"] = tag
+        # 체크포인트는 게이트 열 때 create_snapshot 으로 이미 캡처됨(C1/C2 해소).
+        # 트리거 시점에 별도 stash/tag 생성하지 않는다.
 
         sha, mtime = lib.hash_todo_md(root)
         gate["todo_md_sha256"] = sha

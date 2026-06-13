@@ -668,13 +668,19 @@ def t_cp_rollback_nongit(base: Path) -> None:
     check("gate rolled_back", get_gate(p)["state"] == "rolled_back", get_gate(p)["state"])
     check("스냅샷 디렉토리 정리됨", not cpdir.exists())
 
-    # git 루트는 cp 백엔드 미사용 → cp_snapshot None 유지 (회귀 0 검증)
-    gp = make_project(base, "cp_git_noop")
+    # git 루트: 프라이빗 ref 스냅샷 + 통합 touched 매니페스트 사용
+    gp = make_project(base, "cp_git")
     run_hook(gate_hook, edit_payload("Edit", gp / "a.py"), gp)
+    _g = get_gate(gp)
     check(
-        "git 루트는 cp_snapshot 미생성(None)",
-        get_gate(gp).get("cp_snapshot") is None,
-        f"cp={get_gate(gp).get('cp_snapshot')}",
+        "git 루트 → 프라이빗 ref 스냅샷(checkpoint_commit 설정)",
+        bool(_g.get("checkpoint_commit")),
+        f"commit={_g.get('checkpoint_commit')}",
+    )
+    check(
+        "git 루트도 touched 매니페스트 기록(통합 모델, 신규 a.py=False)",
+        (_g.get("cp_snapshot") or {}).get("a.py") is False,
+        f"cp={_g.get('cp_snapshot')}",
     )
 
 
@@ -695,7 +701,7 @@ def t_plan_gate_no_git_optout(base: Path) -> None:
     run_hook(gate_hook, edit_payload("Edit", keep), p)
     keep.write_text("MODIFIED\n")
     g = get_gate(p)
-    check("opt-out → git tag 미생성", g.get("checkpoint_clean_tag") is None, f"tag={g.get('checkpoint_clean_tag')}")
+    check("opt-out → git 스냅샷 미생성", g.get("checkpoint_commit") is None, f"commit={g.get('checkpoint_commit')}")
     check("opt-out → cp 스냅샷 기록", (g.get("cp_snapshot") or {}).get("keep.py") is True, f"cp={g.get('cp_snapshot')}")
     tags = subprocess.run(
         ["git", "-C", str(p), "tag", "--list", ".claude/gate/*"], capture_output=True, text=True

@@ -280,7 +280,7 @@ def main() -> int:
                     _issues_text = (
                         "\n".join(f"  • {i}" for i in issues) if issues else "  (상세 사유 없음)"
                     )
-                    _has_ckpt = bool(_gate.get("checkpoint_clean_tag"))
+                    _has_ckpt = bool(_gate.get("checkpoint_commit") or _gate.get("cp_snapshot"))
                     _rollback_line = (
                         "  /rollback  변경을 모두 되돌리고 처음부터 다시\n"
                         if _has_ckpt

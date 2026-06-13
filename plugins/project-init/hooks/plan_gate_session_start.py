@@ -46,7 +46,7 @@ def main() -> int:
     max_repeat, post_unique = lib.post_approval_stats(gate)
     auto_label = "자동" if gate.get("approved_auto") else "명시"
     approved_at = gate.get("approved_at") or "-"
-    clean_tag = gate.get("checkpoint_clean_tag") or "(없음)"
+    ckpt = (gate.get("checkpoint_commit") or "")[:12] or ("cp" if gate.get("cp_snapshot") else "(없음)")
 
     # 경과 시간 계산
     ts_str = gate.get("last_edit_ts") or gate.get("approved_at") or gate.get("created_at")
@@ -73,7 +73,7 @@ def main() -> int:
         f"  edits   : {gate['edit_count']}회 (승인 후 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}회)",
         f"  승인    : {auto_label} ({approved_at})",
         f"  마지막  : {elapsed_str}",
-        f"  tag     : {clean_tag}",
+        f"  ckpt    : {ckpt}",
     ]
 
     if g_state == "verified" and gate.get("verifier_status") == "❌":

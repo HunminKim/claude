@@ -62,9 +62,6 @@ PATCH_MAX_ENTRIES_PER_FILE = 50
 
 GATE_STATES = {"created", "approved", "verified", "rolled_back", "done"}
 
-TAG_PREFIX = ".claude/gate/"
-STASH_PREFIX = "[plan-gate] "
-
 
 # ── 프로젝트 감지 ────────────────────────────────────────────────────────
 def find_project_root() -> Path | None:
@@ -130,15 +127,6 @@ def unset_prefer_no_git(root: Path) -> None:
         p.unlink()
 
 
-def git_checkpoints_enabled(root: Path) -> bool:
-    """plan-gate 체크포인트를 git(tag/stash) 백엔드로 할지 결정.
-
-    git repo 이고 + 사용자가 opt-out(plan_gate_no_git) 하지 않았을 때만 True.
-    False 면 cp 스냅샷 백엔드(.claude/state/checkpoints/)가 대신 동작한다.
-    """
-    return has_git(root) and not prefers_no_git(root)
-
-
 # ── 상태 파일 입출력 ─────────────────────────────────────────────────────
 def state_path(root: Path) -> Path:
     return root / ".claude" / "state" / "plan_gate.json"
@@ -188,122 +176,11 @@ def working_tree_clean(root: Path) -> bool:
     return r.returncode == 0 and r.stdout.strip() == ""
 
 
-def existing_clean_tag_for_head(root: Path) -> str | None:
-    """현재 HEAD를 가리키는 .claude/gate/*/clean tag가 이미 있으면 반환."""
-    sha = head_sha(root)
-    if not sha:
-        return None
-    r = _git(root, "tag", "--points-at", sha, "--list", f"{TAG_PREFIX}*/clean")
-    if r.returncode != 0:
-        return None
-    tags = [t.strip() for t in r.stdout.splitlines() if t.strip()]
-    return tags[0] if tags else None
-
-
-def create_clean_tag(root: Path, gate_id: str) -> str | None:
-    """현재 HEAD에 lightweight tag 생성. 실패 시 None."""
-    if not has_git(root) or not head_sha(root):
-        return None
-    tag = f"{TAG_PREFIX}{gate_id}/clean"
-    r = _git(root, "tag", tag)
-    return tag if r.returncode == 0 else None
-
-
-def delete_tag(root: Path, tag: str) -> bool:
-    r = _git(root, "tag", "-d", tag)
-    return r.returncode == 0
-
-
-def stash_dirty(root: Path, gate_id: str) -> str | None:
-    """tracked 변경만 stash. untracked 파일은 건드리지 않는다.
-
-    -u 플래그를 제거해 untracked 파일을 working tree에 그대로 둔다.
-    체크포인트 롤백은 clean_tag(git reset --hard)가 담당.
-
-    반환: gate_id sentinel 또는 None (tracked 변경 없거나 stash 실패).
-    """
-    if working_tree_clean(root):
-        return None
-
-    msg = f"{STASH_PREFIX}{gate_id}"
-    r = _git(root, "stash", "push", "-m", msg)
-    if r.returncode != 0 or "No local changes to save" in r.stdout:
-        return None
-
-    log_audit(root, "stash_created", gate_id=gate_id)
-    return gate_id
-
-
-def find_stash_for_gate(root: Path, gate_id: str) -> str | None:
-    """gate_id가 message에 포함된 stash entry 찾기."""
-    r = _git(root, "stash", "list")
-    if r.returncode != 0:
-        return None
-    for line in r.stdout.splitlines():
-        # 형식: stash@{N}: On branch: <message>
-        if gate_id in line:
-            ref = line.split(":", 1)[0].strip()
-            return ref
-    return None
-
-
-def reset_to_tag(root: Path, tag: str) -> bool:
-    r = _git(root, "reset", "--hard", tag)
-    return r.returncode == 0
-
-
-def stash_drop(root: Path, ref: str) -> bool:
-    r = _git(root, "stash", "drop", ref)
-    return r.returncode == 0
-
-
-def stash_pop(root: Path, ref: str) -> bool:
-    r = _git(root, "stash", "pop", ref)
-    return r.returncode == 0
-
-
-# ── cp 스냅샷 체크포인트 (git 체크포인트 대체 백엔드) ────────────────────
-# git tag/stash 체크포인트는 git repo 에서만 동작한다. git_checkpoints_enabled()
-# 가 False 일 때 — 루트가 git repo 가 아니거나(예: 워크스페이스에 하위 repo 만
-# 있는 경우) 사용자가 plan_gate_no_git 으로 명시적 opt-out 했을 때 — 이 백엔드가
-# 대신 작동해 편집 직전 파일 원본을 .claude/state/checkpoints/<gate_id>/ 에 1회
-# 복사해 둔다. git 백엔드와 cp 백엔드는 git_checkpoints_enabled() 하나로 배타 선택.
+# ── cp 디렉토리 헬퍼 (비-git 백엔드 내용 저장소) ──────────────────────────
+# 비-git/opt-out 시 record_touched 가 편집 전 원본을 여기 복사하고
+# rollback_checkpoint 가 복원에 쓴다 (git 은 프라이빗 ref 커밋이 내용 출처).
 def cp_checkpoint_dir(root: Path, gate_id: str) -> Path:
     return root / ".claude" / "state" / "checkpoints" / gate_id
-
-
-def cp_snapshot_file(root: Path, gate: dict[str, Any], target: str) -> None:
-    """비-git 루트 전용: 편집 직전 파일 원본을 체크포인트 디렉토리에 1회 복사.
-
-    gate['cp_snapshot'] 매니페스트에 파일별 '편집 전 존재 여부'를 기록한다 —
-    롤백 시 존재했던 파일은 원본으로 되돌리고, 신규 생성 파일은 삭제한다.
-    이미 스냅샷한 파일은 다시 건드리지 않아 첫 편집 상태가 보존된다.
-    """
-    p = Path(target)
-    if not p.is_absolute():
-        p = root / p
-    try:
-        rel = str(p.resolve().relative_to(root.resolve()))
-    except (ValueError, OSError):
-        return  # 루트 밖 파일은 스냅샷 대상 아님
-
-    manifest = gate.get("cp_snapshot")
-    if manifest is None:
-        manifest = {}
-        gate["cp_snapshot"] = manifest
-    if rel in manifest:
-        return  # 첫 편집 시점은 이미 캡처됨
-
-    if p.exists():
-        dest = cp_checkpoint_dir(root, gate["id"]) / rel
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(p, dest)
-        except OSError:
-            return  # 복사 실패 시 매니페스트에 남기지 않음 (잘못된 복원 방지)
-        manifest[rel] = True
-    else:
-        manifest[rel] = False  # 편집 전 부재 → 신규 파일, 롤백 시 삭제 대상
 
 
 def _cp_restore_file(src: Path, dst: Path, existed: bool) -> None:
@@ -317,24 +194,6 @@ def _cp_restore_file(src: Path, dst: Path, existed: bool) -> None:
             dst.unlink()
     except OSError:
         pass
-
-
-def cp_rollback(root: Path, gate: dict[str, Any]) -> bool:
-    """cp 스냅샷에서 편집 전 상태로 복원. 성공 시 True, 스냅샷 없으면 False."""
-    manifest = gate.get("cp_snapshot")
-    if not manifest:
-        return False
-    cpdir = cp_checkpoint_dir(root, gate["id"])
-    for rel, existed in manifest.items():
-        _cp_restore_file(cpdir / rel, root / rel, existed)
-    cp_cleanup(root, gate["id"])
-    log_audit(root, "cp_rollback", gate_id=gate["id"], files=len(manifest))
-    return True
-
-
-def cp_cleanup(root: Path, gate_id: str) -> None:
-    """gate 의 cp 스냅샷 디렉토리를 제거 (best-effort)."""
-    shutil.rmtree(cp_checkpoint_dir(root, gate_id), ignore_errors=True)
 
 
 # ── v2 체크포인트: 프라이빗 ref 스냅샷(git 내용) + touched 매니페스트(롤백 대상) ──
@@ -556,9 +415,8 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "last_edit_ts": None,
         "todo_md_sha256": None,
         "todo_md_mtime": None,
-        "checkpoint_clean_tag": None,
-        "checkpoint_dirty_stash_ref": None,
-        "cp_snapshot": None,                   # 비-git 루트 롤백용 파일 스냅샷 매니페스트 {relpath: 편집전존재여부}
+        "checkpoint_commit": None,             # git 프라이빗 ref 스냅샷 커밋 SHA (비-git 이면 None)
+        "cp_snapshot": None,                   # touched 매니페스트 {relpath: 편집전존재여부} (롤백 구동)
         "verifier_status": None,
     }
 
@@ -865,16 +723,12 @@ def format_trigger_message(
         "  • 영향 파일 목록:",
         _files_list(gate),
     ]
+    _ckpt = gate.get("checkpoint_commit")
     parts += [
         "",
         "▌ 자동으로 생성된 체크포인트",
-        f"  • clean tag : {gate.get('checkpoint_clean_tag') or '(없음 — git 미사용)'}",
-        f"  • dirty stash: {gate.get('checkpoint_dirty_stash_ref') or '(working tree clean)'}",
-        *([
-            "",
-            "ℹ️  tracked 변경이 stash에 보존됐습니다. untracked 파일은 그대로 있습니다.",
-            "   → /approve-plan 시 자동 복원. 수동 복원: git stash pop",
-        ] if gate.get("checkpoint_dirty_stash_ref") else []),
+        f"  • 스냅샷: {(_ckpt[:12] + ' (프라이빗 ref)') if _ckpt else 'cp 디렉토리 (git 미사용/opt-out)'}",
+        "  ℹ️  편집 전 상태가 보존됐습니다. /rollback 으로 안전하게 되돌립니다.",
         "",
         "▌ 사용자에게 다음 토큰 중 하나 입력 요청",
         "  /approve-plan  계획을 승인하고 작업 재개",
@@ -923,7 +777,7 @@ def format_multi_edit_hint(file_path: str) -> str:
 
 def format_d1_lock_message(gate: dict[str, Any]) -> str:
     """verifier ❌ 미해결 상태에서 새 Edit 시도 시."""
-    has_ckpt = bool(gate.get("checkpoint_clean_tag"))
+    has_ckpt = bool(gate.get("checkpoint_commit") or gate.get("cp_snapshot"))
     rollback_line = (
         "  /rollback  체크포인트로 복원 (이번 시도 폐기)\n"
         if has_ckpt
@@ -985,19 +839,7 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> Non
     """gate를 done 상태로 닫고 체크포인트를 정리한다.
     plan_gate_cli.cmd_done 과 detect_task_boundary 에서 공유.
     """
-    tag = gate.get("checkpoint_clean_tag")
-    if tag:
-        delete_tag(root, tag)
-    if gate.get("checkpoint_dirty_stash_ref"):
-        actual = find_stash_for_gate(root, gate["id"])
-        if actual:
-            # pop 우선: approve 없이 done/skip 경로에서도 파일 유실 방지
-            ok = stash_pop(root, actual)
-            log_audit(root, "stash_popped_on_done" if ok else "stash_dropped_on_done",
-                      gate_id=gate["id"])
-            if not ok:
-                stash_drop(root, actual)
-    cp_cleanup(root, gate["id"])  # 비-git cp 스냅샷 정리 (git 경로엔 영향 없음)
+    cleanup_checkpoint(root, gate)  # 프라이빗 ref 삭제 + cp 디렉토리 정리
     gate["state"] = "done"
     gate["closed_at"] = now_iso()
     # 완료 시점의 todo.md 해시를 보관 → 다음 사이클 자동 승인 가드에 활용
