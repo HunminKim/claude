@@ -32,6 +32,8 @@
 
 근본 원인은 **트리거 축이 잘못 선택된 것**이다. 현행 plan-gate 는 편집 *양*(같은 파일 5회 반복, `TRIGGER_REPEAT_RATIO`)으로 작동한다 — "계획되지 않은 파일 수정"이라는 실제 통증을 간접 프록시로만 잡아 오탐·dead 분기·카운터 오염을 양산했다.
 
+**단 정밀 보정(2차 리뷰)**: v1 의 "5회 제한"은 *두 가지 일*을 겸하고 있었다 — (a) 스코프 비슷한 1차 게이트(오탐의 원천), (b) **같은 파일을 수렴 없이 반복 패치하는 flailing 감지**(`_max_code_repeat`(lib:422-434)이 "가장 많이 편집된 *단일 파일*의 반복 횟수"를 보므로). v2 의 스코프 모델은 (a)만 대체하고 **(b)는 대체하지 못한다** — 계획 *안* 파일을 15× 헛돌아도 스코프는 통과시킨다. 사용자가 가치 본 "이상한 길로 안 빠지게"가 정확히 (b)다. 따라서 (b)는 삭제가 아니라 **재설계(D9)** 한다.
+
 **v2 의 전환**: 트리거 축을 *편집량* → *편집범위*로. 계획이 건드릴 파일 집합(매니페스트)을 선언하고, 그 밖의 변경을 기계적으로 차단·탐지·되돌린다.
 
 ---
@@ -141,6 +143,20 @@
   - fcntl 은 **NFS/SMB 에서 무효/위험**(flock↔fcntl 변환, SMB 미지원) — 추가 함정.
   - 레드팀 M-C: "단일 에이전트 thesis 의 설계에 다중사용자 락 추가는 복잡도 낭비." → 보류, 멀티세션 lost-update 가 실제 관측되면 재도입.
 
+### D9. flailing 회로차단기: v1 "5회 제한"을 thrash 감지기로 재설계 (스코프와 직교)
+
+- **결정**: v1 의 같은-파일 반복 트리거를 *삭제하지 않고* 재설계해 보존한다. "같은 파일을 수렴 없이 반복 패치 = flailing" 신호로, 스코프(어느 파일)와 별개로 동작.
+- **대안**: (a) v2 §3.5 원안대로 삭제, (b) v1 그대로 유지.
+- **선정 이유**:
+  - (a) 기각 — 사용자 명시 가치("이상한 길 방지") + 코드 증거(`_max_code_repeat` 은 단일 파일 thrash 감지기, 스코프가 못 잡는 §0(b)).
+  - (b) 기각 — v1 의 오탐(정상 다회편집 차단)은 "1차 게이트 겸직" 때문. 스코프가 게이트를 맡은 지금 thrash 신호는 *더 관대·더 정밀*해질 수 있다.
+- **사양**:
+  - **신호**: 게이트 내 파일별 반복 횟수(`file_edit_counts`, 게이트별). 스코프 통과 파일에만 적용(스코프 위반은 D3 가 선처리). `is_doc_path` 제외 안 함 — 제외는 `.plan-gateignore` 가 담당(config/doc 반복 루프도 포착).
+  - **임계(실측 보정 대상)**: soft ~6, hard ~7–9 (v1 의 5 는 게이트 겸직 탓에 낮았음 — 스코프 분리 후 상향).
+  - **★결정적 오탐 가드 — green-Bash 리셋**: 마지막 편집 이후 Bash 가 성공(exit 0)하면 해당 파일 반복 카운터 리셋. 정상 hard work 는 중간에 테스트가 통과(수렴)하므로 hard 미도달; flailing 은 계속 실패라 도달. `detect_failure_loop`(detect_failure_loop.py:129-134)의 성공-리셋과 `last_successful_bash_ts` 공유. 보조 가드: 편집 velocity(120초 내 군집만 후보).
+  - **★채널·강제 — 스코프 위반과 다르다**: thrash 는 *데이터 안전*이 아니라 *품질/루프* 문제다(파일은 정상 스코프 내). 따라서 D3 의 airtight 2층 롤백을 **쓰지 않는다**. soft = `additionalContext` 환기, hard = 강한 차단성 컨텍스트("회로차단기: 멈추고 /replan 또는 사용자 보고") + Stop 재강조(`stop_hook_active` 가드 필수). **thrash 자동 롤백 금지** — 정상 진행분 파괴 + 루프 유발(서브에이전트 B 의 PostToolUse 롤백 제안은 이 점에서 기각). thrash 는 advisory 강도면 충분(루프 신호일 뿐, 안전 경계가 아님).
+  - **detect_failure_loop 와의 관계**: 같은 "너 막혔다" 차단기의 두 센서(Edit 창 / Bash 창). v2.0 은 **카운터·강제 분리 유지**(상태 도메인·리셋 규칙 상이 — 서브에이전트 B), **단 green-Bash 리셋 신호만 공유**(서브에이전트 A 의 핵심 가드). 단일 hook·통합 메시지는 v2.1 선택지.
+
 ---
 
 ## 3. 아키텍처 상세
@@ -230,8 +246,12 @@ state = {
 
 ### 3.5 삭제 대상 (Subtraction-First)
 
-제거: `TRIGGER_REPEAT_RATIO`·`MAX_EDIT_OVERRIDE`·`_OVERRIDE_RE`·`parse_gate_overrides`·`_threshold_for`·`post_approval_limit_exceeded`·`post_approval_stats`·`_max_code_repeat`·`_unique_code_files`·`trigger_threshold_exceeded`·`format_soft_hint`·`format_scope_creep_message`·`is_doc_path`+`_DOC_*`·오버라이드 마커 안내. 관련 스모크 → 스코프 멤버십 테스트로 교체.
-유지: hot-file 패치이력(범위와 직교) — 단 절대경로 버그 수정.
+**제거(확정 — scope-creep 볼륨 산식, 매니페스트가 대체)**: `MAX_EDIT_OVERRIDE`·`_OVERRIDE_RE`·`parse_gate_overrides`·`_threshold_for`·`post_approval_limit_exceeded`·`post_approval_stats`·`_unique_code_files`·`format_scope_creep_message`·`is_doc_path`+`_DOC_*`·오버라이드 마커 안내. 관련 스모크 → 스코프 멤버십 테스트로 교체.
+
+**재설계 보존(D9 — 삭제 금지)**: `TRIGGER_REPEAT_RATIO`→`THRASH_REPEAT_SOFT/HARD`(6/9), `_max_code_repeat`(단, `is_doc_path` 필터 제거 — `.plan-gateignore` 로 대체), `trigger_threshold_exceeded`→`thrash_hard_exceeded`, `format_soft_hint`(반복 횟수 기준으로 수정). clamp 상한 아이디어만 부활(high-churn 파일 임계 상향 시 무한 budget 방지) — 단 마커 파서는 부활 안 함.
+> ⚠️ 구현 주의: rev.1 의 §3.5 가 `_max_code_repeat`/`TRIGGER_REPEAT_RATIO` 를 통째 삭제 목록에 넣었던 것은 **오류**다. §0(b) 의 flailing 감지를 잃는다.
+
+**유지(범위와 직교)**: hot-file 패치이력 — 절대경로 버그 수정 + `block` 티어를 hard-advisory 로 강등(D3 deny 불안정). thrash 의 *cross-gate 장기 horizon* 팔. todo 품질 게이트(`validate_todo_quality`), 생명주기 토큰, 감사 로그, dismissable intro(문구는 private-ref 로 수정), 24h/stale 경고, `.plan-gateignore` 자동추가, `git_diff_summary` 주입, compact 권고, detect_bug_report/detect_user_correction, detect_task_boundary(L1 타임아웃 유지, L2 는 manifest 기준 재작성 — 현재 `post_approval_stats` 의존), verifier_remind.
 
 ---
 
@@ -249,9 +269,9 @@ state = {
 2. 강제 3층(3.2) — 1층 deny + **2층 PostToolUse(Bash) 스윕·롤백(실제 강제)**.
 3. detour = 매니페스트 수정(3.4), /done 시 v1식 verifier 리뷰(**Opus + 테스트 실행 강제**, `agents/verifier.md` model 상향) + 사람 일괄 비준.
 4. 상태 전이 중앙화(`transition`) + 상태기계 갭 처리(3.3).
-5. 편집량 휴리스틱 일괄 삭제(3.5).
+5. scope-creep 볼륨 산식만 삭제, **thrash 회로차단기(D9)는 재설계 보존**(green-Bash 리셋 포함).
 6. **빌드 게이트: 타깃 CLI 버전에서 1층 deny 효능 실측.**
-7. 행위 검증: 스코프 밖 차단/2층 롤백(Bash 우회 포함)/넓은 글롭 자동승인 차단/매니페스트 sha 가드/verifier ❌ /done 차단.
+7. 행위 검증: 스코프 밖 차단/2층 롤백(Bash 우회 포함)/넓은 글롭 자동승인 차단/매니페스트 sha 가드/verifier ❌ /done 차단/**thrash 4종**(군집 7회→발동, 10분 간격 7회→무발동, 테스트 통과 끼면→무발동, 5파일 분산 refactor→무발동).
 
 ### (보류) 중첩 스택 / fcntl
 - 평면 운영에서 실제 통증이 반복 관측되면 증거 기반으로 재설계(D5/D8).
@@ -267,6 +287,7 @@ state = {
 - **D7 엣지**: rename/symlink/mode 변경/디렉토리↔파일 — touched 매니페스트에 타입 기록 또는 git rename 탐지 병용.
 - **verifier 한계**: Opus(동족) — fresh 컨텍스트라 in-context 자기리뷰보단 낫지만 능력 천장·자기선호는 잔존. **실행 grounding(테스트/재현 실행)으로 메우는 게 모델 등급보다 결정적.** 완성품 리뷰에만 쓰고 사람 비준 병행. diff 판독만 한 ✅ 는 신뢰성 격하.
 - **fcntl NFS/SMB**: 보류했으나 재도입 시 네트워크 FS 함정 주의.
+- **thrash 임계 실측**: soft 6/hard 7–9 는 가설값 — 빌드 시 shadow(advisory-only)로 실세션 오탐율 측정 후 hard 활성. green-Bash 리셋·velocity 가드가 정상 반복을 안 막는지 행위 검증(§4 v2.0 #7). 관측 가능 신호 한계: 편집 timestamp·last_successful_bash_ts 는 stdin 으로 얻음, "같은 hunk 재편집"은 훅 stdin 으로 신뢰성 있게 못 얻음(가드에서 제외).
 
 ---
 
