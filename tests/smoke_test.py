@@ -717,6 +717,62 @@ def t_plan_gate_no_git_optout(base: Path) -> None:
     )
 
 
+def t_checkpoint_backend(base: Path) -> None:
+    """v2 체크포인트 프리미티브 단위검증 (C1/C2 해소): 프라이빗 ref 스냅샷 +
+    touched 매니페스트 구동 롤백. git 백엔드 직접 호출로 검증.
+
+    - create_snapshot: 사용자 인덱스(staging) 무간섭, 프라이빗 ref 생성
+    - rollback: 수정 복원 / 삭제 복원 / 신규 삭제 / 무관 파일 보존 / HEAD 무이동
+    """
+    print("[22] v2 체크포인트 백엔드 (프라이빗 ref + touched 매니페스트)")
+    sys.path.insert(0, str(HOOKS))
+    import plan_gate_lib as lib
+
+    def g(p, *a):
+        return subprocess.run(["git", "-C", str(p), *a], capture_output=True, text=True, env=GIT_ENV)
+
+    p = make_project(base, "ckpt_git")
+    (p / "tracked.py").write_text("orig\n")
+    (p / "del.py").write_text("todelete\n")
+    g(p, "add", "-A")
+    g(p, "commit", "-q", "-m", "base")
+    (p / "userstaged.py").write_text("us\n")
+    g(p, "add", "userstaged.py")  # 사용자 staging
+    head0 = g(p, "rev-parse", "HEAD").stdout.strip()
+
+    gate = lib.make_gate()
+    commit = lib.create_snapshot(p, gate)
+    gate["checkpoint_commit"] = commit
+    check("create_snapshot 커밋 반환", bool(commit), f"commit={commit}")
+    check("프라이빗 ref 생성", g(p, "rev-parse", "--verify", lib.snapshot_ref(gate["id"])).returncode == 0)
+    check(
+        "사용자 인덱스(staging) 무간섭",
+        g(p, "diff", "--cached", "--name-only").stdout.strip() == "userstaged.py",
+        f"staged={g(p, 'diff', '--cached', '--name-only').stdout!r}",
+    )
+    # PreToolUse-before-edit: 기록 후 편집
+    for f in ("tracked.py", "new.py", "del.py"):
+        lib.record_touched(p, gate, str(p / f))
+    man = gate["cp_snapshot"]
+    check(
+        "touched 매니페스트(기존=True, 신규=False)",
+        man.get("tracked.py") is True and man.get("new.py") is False and man.get("del.py") is True,
+        f"man={man}",
+    )
+    (p / "tracked.py").write_text("MODIFIED\n")
+    (p / "new.py").write_text("halluc\n")
+    (p / "del.py").unlink()
+    (p / "scratch.tmp").write_text("user-scratch\n")  # 무관, 미기록
+
+    check("rollback_checkpoint True", lib.rollback_checkpoint(p, gate) is True)
+    check("수정 파일 복원", (p / "tracked.py").read_text() == "orig\n", (p / "tracked.py").read_text())
+    check("삭제 파일 복원", (p / "del.py").exists() and (p / "del.py").read_text() == "todelete\n")
+    check("신규 파일 삭제", not (p / "new.py").exists(), "new.py 잔존")
+    check("무관 untracked 보존", (p / "scratch.tmp").exists(), "scratch.tmp 유실")
+    check("HEAD 무이동", g(p, "rev-parse", "HEAD").stdout.strip() == head0)
+    check("ref 정리됨", g(p, "rev-parse", "--verify", lib.snapshot_ref(gate["id"])).returncode != 0)
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -770,6 +826,7 @@ def main() -> int:
         t_gate_edit_overrides(base)
         t_cp_rollback_nongit(base)
         t_plan_gate_no_git_optout(base)
+        t_checkpoint_backend(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

@@ -337,6 +337,167 @@ def cp_cleanup(root: Path, gate_id: str) -> None:
     shutil.rmtree(cp_checkpoint_dir(root, gate_id), ignore_errors=True)
 
 
+# ── v2 체크포인트: 프라이빗 ref 스냅샷(git 내용) + touched 매니페스트(롤백 대상) ──
+# v1 tag/stash 백엔드 폐기 사유: tag 는 refname 규칙 위반(`.claude/...` — 컴포넌트가
+# `.` 으로 시작 불가)으로 생성 자체가 불가했고(C1), stash pop 실패 시 drop 으로
+# 데이터를 유실했다(C2). v2 는 게이트 열 때 working tree 를 프라이빗
+# ref(refs/plan-gate/<id>/checkpoint) 커밋으로 1회 스냅샷하고(사용자 인덱스·stash·
+# 브랜치 무간섭), 편집된 파일만 touched 매니페스트(gate['cp_snapshot']=
+# {relpath: 편집전존재여부})에 기록한다. 롤백은 매니페스트 구동: 존재했던 파일은
+# 내용 복원(git=스냅샷 커밋 checkout / 비-git=cp 디렉토리), 신규 파일은 삭제,
+# 매니페스트 밖 무관 파일은 보존. git/비-git 이 동일 매니페스트 모델을 공유한다.
+PLAN_GATE_REF_PREFIX = "refs/plan-gate/"
+
+
+def snapshot_ref(gate_id: str) -> str:
+    return f"{PLAN_GATE_REF_PREFIX}{gate_id}/checkpoint"
+
+
+def _worktree_tree_sha(root: Path, gate_id: str) -> str | None:
+    """임시 인덱스(GIT_INDEX_FILE)로 working tree 전체의 tree 객체 SHA 생성.
+
+    사용자의 실제 인덱스(staging)를 건드리지 않는다. 실패 시 None.
+    """
+    tmp_index = state_path(root).parent / f".cpindex_{gate_id}"
+    env = {**os.environ, "GIT_INDEX_FILE": str(tmp_index)}
+
+    def _g(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args], cwd=str(root), env=env, capture_output=True, text=True
+        )
+
+    try:
+        tmp_index.parent.mkdir(parents=True, exist_ok=True)
+        if head_sha(root) and _g("read-tree", "HEAD").returncode != 0:
+            return None
+        if _g("add", "-A").returncode != 0:
+            return None
+        wt = _g("write-tree")
+        return wt.stdout.strip() if wt.returncode == 0 else None
+    finally:
+        try:
+            tmp_index.unlink()
+        except OSError:
+            pass
+
+
+def create_snapshot(root: Path, gate: dict[str, Any]) -> str | None:
+    """게이트 열 때 1회: working tree 전체를 프라이빗 ref 커밋으로 캡처.
+
+    clean/dirty 무관하게 캡처(C1 의 'dirty 면 tag 스킵' 한계 제거).
+    반환: 스냅샷 commit SHA. 비-git 이거나 실패 시 None (→ cp 디렉토리 백엔드).
+    """
+    if not has_git(root):
+        return None
+    tree = _worktree_tree_sha(root, gate["id"])
+    if not tree:
+        return None
+    head = head_sha(root)
+    args = [
+        "-c", "user.name=plan-gate", "-c", "user.email=plan-gate@localhost",
+        "commit-tree", tree, "-m", f"plan-gate checkpoint {gate['id']}",
+    ]
+    if head:
+        args += ["-p", head]
+    ct = _git(root, *args)
+    if ct.returncode != 0:
+        return None
+    commit = ct.stdout.strip()
+    _git(root, "update-ref", snapshot_ref(gate["id"]), commit)
+    log_audit(root, "snapshot_created", gate_id=gate["id"], commit=commit[:12])
+    return commit
+
+
+def _rel_to_root(root: Path, target: str) -> str | None:
+    """target(상대/절대)을 루트 상대경로로 정규화. 루트 밖이면 None."""
+    p = Path(target)
+    if not p.is_absolute():
+        p = root / p
+    try:
+        return str(p.resolve().relative_to(root.resolve()))
+    except (ValueError, OSError):
+        return None
+
+
+def _cp_backup(root: Path, gate_id: str, rel: str, src: Path) -> bool:
+    """비-git 백엔드용: 원본을 cp 디렉토리에 복사. 성공 시 True."""
+    dest = cp_checkpoint_dir(root, gate_id) / rel
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        return True
+    except OSError:
+        return False
+
+
+def record_touched(root: Path, gate: dict[str, Any], target: str) -> None:
+    """편집 직전 1회: gate['cp_snapshot'] 에 {relpath: 편집전존재여부} 기록.
+
+    비-git(checkpoint_commit 없음)이면 원본을 cp 디렉토리에 복사해 내용도 보존한다.
+    git 이면 내용은 스냅샷 커밋이 출처이므로 존재 비트만 기록한다.
+    이미 기록된 파일은 건드리지 않아 게이트 열림 시점 상태가 보존된다.
+    """
+    rel = _rel_to_root(root, target)
+    if rel is None:
+        return
+    manifest = gate.get("cp_snapshot")
+    if manifest is None:
+        manifest = {}
+        gate["cp_snapshot"] = manifest
+    if rel in manifest:
+        return
+    src = root / rel
+    existed = src.exists()
+    if existed and not gate.get("checkpoint_commit"):
+        # 비-git: 내용 백업 실패 시 기록 안 함(잘못된 복원 방지)
+        if not _cp_backup(root, gate["id"], rel, src):
+            return
+    manifest[rel] = existed
+
+
+def _rollback_one(
+    root: Path, rel: str, existed: bool, commit: str | None, cpdir: Path
+) -> None:
+    """한 파일을 체크포인트 상태로 되돌린다. git=커밋 checkout / 비-git=cp 디렉토리."""
+    if not commit:
+        _cp_restore_file(cpdir / rel, root / rel, existed)  # 기존 3-arg 헬퍼 재사용
+        return
+    if existed:
+        _git(root, "checkout", commit, "--", rel)
+        return
+    dst = root / rel
+    if dst.exists():
+        try:
+            dst.unlink()
+        except OSError:
+            pass
+
+
+def rollback_checkpoint(root: Path, gate: dict[str, Any]) -> bool:
+    """체크포인트로 편집 전 상태 복원. touched 매니페스트 구동.
+
+    존재했던 파일은 내용 복원(git=스냅샷 커밋 checkout / 비-git=cp 디렉토리),
+    신규 파일은 삭제, 매니페스트 밖 무관 파일은 보존. 성공 시 True.
+    """
+    manifest = gate.get("cp_snapshot") or {}
+    commit = gate.get("checkpoint_commit")
+    if not manifest and not commit:
+        return False
+    cpdir = cp_checkpoint_dir(root, gate["id"])
+    for rel, existed in manifest.items():
+        _rollback_one(root, rel, existed, commit, cpdir)
+    cleanup_checkpoint(root, gate)
+    log_audit(root, "rollback", gate_id=gate["id"], files=len(manifest))
+    return True
+
+
+def cleanup_checkpoint(root: Path, gate: dict[str, Any]) -> None:
+    """체크포인트 정리: git 프라이빗 ref 삭제 + cp 디렉토리 제거(best-effort)."""
+    if gate.get("checkpoint_commit"):
+        _git(root, "update-ref", "-d", snapshot_ref(gate["id"]))
+    shutil.rmtree(cp_checkpoint_dir(root, gate["id"]), ignore_errors=True)
+
+
 # ── todo.md 해시 ────────────────────────────────────────────────────────
 def todo_md_path(root: Path) -> Path:
     return root / "tasks" / "todo.md"
