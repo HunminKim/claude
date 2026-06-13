@@ -791,6 +791,42 @@ def t_checkpoint_backend(base: Path) -> None:
     check("ref 정리됨", g(p, "rev-parse", "--verify", lib.snapshot_ref(gate["id"])).returncode != 0)
 
 
+def t_green_bash_reset(base: Path) -> None:
+    """green Bash(exit 0) → 반복 편집 카운터 리셋 (D9 오탐 가드 배선).
+
+    정상적으로 반복 편집해도 중간에 테스트가 통과하면 반복 트리거가 리셋돼
+    오탐 차단을 피한다. 실패(exit≠0)는 리셋하지 않는다.
+    """
+    print("[23] green-Bash thrash 리셋")
+    gate_hook = HOOKS / "plan_gate.py"
+    bash_hook = HOOKS / "plan_gate_bash.py"
+    p = make_project(base, "greenbash")
+    f = p / "app.py"
+    for _ in range(4):  # 같은 파일 4회 (트리거 5 직전)
+        run_hook(gate_hook, edit_payload("Edit", f), p)
+    g = get_gate(p)
+    check(
+        "4회 편집 후 카운터 누적",
+        (g.get("file_edit_counts") or {}).get(str(f)) == 4,
+        f"counts={g.get('file_edit_counts')}",
+    )
+
+    bash_ok = {"tool_name": "Bash", "tool_response": {"exit_code": 0}, "tool_input": {"command": "pytest"}}
+    run_hook(bash_hook, bash_ok, p)
+    g = get_gate(p)
+    check("green Bash 후 카운터 리셋", not (g.get("file_edit_counts") or {}), f"counts={g.get('file_edit_counts')}")
+    check("last_successful_bash_ts 기록", bool(g.get("last_successful_bash_ts")), "ts 없음")
+
+    rcs = [run_hook(gate_hook, edit_payload("Edit", f), p).returncode for _ in range(4)]
+    check("리셋 후 4회 편집 무차단", all(rc == 0 for rc in rcs), f"rcs={rcs}")
+
+    before = (get_gate(p).get("file_edit_counts") or {}).get(str(f))
+    bash_fail = {"tool_name": "Bash", "tool_response": {"exit_code": 1}, "tool_input": {"command": "pytest"}}
+    run_hook(bash_hook, bash_fail, p)
+    after = (get_gate(p).get("file_edit_counts") or {}).get(str(f))
+    check("실패 Bash는 리셋 안 함", before is not None and before == after, f"before={before} after={after}")
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -845,6 +881,7 @@ def main() -> int:
         t_cp_rollback_nongit(base)
         t_plan_gate_no_git_optout(base)
         t_checkpoint_backend(base)
+        t_green_bash_reset(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

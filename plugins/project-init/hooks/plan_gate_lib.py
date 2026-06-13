@@ -413,6 +413,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "approved_at": None,
         "approved_auto": False,
         "last_edit_ts": None,
+        "last_successful_bash_ts": None,       # green Bash 수렴 신호 — thrash 리셋 기준(D9)
         "todo_md_sha256": None,
         "todo_md_mtime": None,
         "checkpoint_commit": None,             # git 프라이빗 ref 스냅샷 커밋 SHA (비-git 이면 None)

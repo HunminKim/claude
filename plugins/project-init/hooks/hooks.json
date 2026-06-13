@@ -66,6 +66,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/detect_failure_loop.py",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan_gate_bash.py",
+            "timeout": 10
           }
         ]
       },
