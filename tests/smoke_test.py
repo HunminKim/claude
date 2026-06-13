@@ -34,6 +34,16 @@ HOOKS = REPO / "plugins" / "project-init" / "hooks"
 TEMPLATES = REPO / "plugins" / "project-init" / "skills" / "project-init" / "assets" / "templates"
 SKILL_MD = REPO / "plugins" / "project-init" / "skills" / "project-init" / "SKILL.md"
 
+# 테스트용 git 환경 격리: 사용자 글로벌 설정(commit signing·hooks·identity)이
+# 새어 들어오면 make_project 의 git commit 이 서명 실패로 죽어 suite 전체가
+# 0개 검증으로 즉사한다. global/system 설정을 끊고 signing 을 꺼 재현성을 보장.
+GIT_ENV = {
+    **os.environ,
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_SYSTEM": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
+
 PASS = 0
 FAIL = 0
 
@@ -49,8 +59,8 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def run_hook(hook: Path, payload: dict, project: Path) -> subprocess.CompletedProcess[str]:
-    # 실제 환경 PATH 를 상속해 git 등이 비표준 경로(Homebrew/nix)에 있어도 찾는다
-    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}
+    # git 격리 환경 + CLAUDE_PROJECT_DIR. 훅 내부 git 호출도 글로벌 설정을 안 탄다.
+    env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(project)}
     return subprocess.run(
         [sys.executable, str(hook)],
         input=json.dumps(payload),
@@ -65,10 +75,11 @@ def make_project(base: Path, name: str) -> Path:
     p = base / name
     (p / ".claude").mkdir(parents=True)
     (p / ".claude" / "plan_gate_enabled").touch()
-    subprocess.run(["git", "init", "-q", str(p)], check=True)
-    subprocess.run(["git", "-C", str(p), "config", "user.email", "smoke@test"], check=True)
-    subprocess.run(["git", "-C", str(p), "config", "user.name", "smoke"], check=True)
-    subprocess.run(["git", "-C", str(p), "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    subprocess.run(["git", "init", "-q", str(p)], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "config", "user.email", "smoke@test"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "config", "user.name", "smoke"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "config", "commit.gpgsign", "false"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "commit", "-q", "--allow-empty", "-m", "init"], check=True, env=GIT_ENV)
     return p
 
 
@@ -322,9 +333,10 @@ def t_secret_commit_guard(base: Path) -> None:
 
     p = base / "secguard"
     p.mkdir()
-    subprocess.run(["git", "init", "-q", str(p)], check=True)
-    subprocess.run(["git", "-C", str(p), "config", "user.email", "s@t"], check=True)
-    subprocess.run(["git", "-C", str(p), "config", "user.name", "s"], check=True)
+    subprocess.run(["git", "init", "-q", str(p)], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "config", "user.email", "s@t"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "config", "user.name", "s"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "config", "commit.gpgsign", "false"], check=True, env=GIT_ENV)
     hooks = p / ".githooks"
     hooks.mkdir()
     import shutil
@@ -332,16 +344,16 @@ def t_secret_commit_guard(base: Path) -> None:
     hook = hooks / "pre-commit"
     shutil.copy(TEMPLATES / ".githooks" / "pre-commit", hook)
     hook.chmod(0o755)
-    subprocess.run(["git", "-C", str(p), "config", "core.hooksPath", ".githooks"], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "core.hooksPath", ".githooks"], check=True, env=GIT_ENV)
     (p / "CLAUDE.md").write_text("# r")
-    subprocess.run(["git", "-C", str(p), "add", "CLAUDE.md"], check=True)
-    subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "init"], capture_output=True)
+    subprocess.run(["git", "-C", str(p), "add", "CLAUDE.md"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "init"], capture_output=True, env=GIT_ENV)
 
     def try_commit(fname: str) -> int:
         (p / fname).write_text("x")
-        subprocess.run(["git", "-C", str(p), "add", "-f", fname], check=True)
-        r = subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "t"], capture_output=True)
-        subprocess.run(["git", "-C", str(p), "reset", "-q"], capture_output=True)
+        subprocess.run(["git", "-C", str(p), "add", "-f", fname], check=True, env=GIT_ENV)
+        r = subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "t"], capture_output=True, env=GIT_ENV)
+        subprocess.run(["git", "-C", str(p), "reset", "-q"], capture_output=True, env=GIT_ENV)
         return r.returncode
 
     check(".env 커밋 차단", try_commit(".env") != 0)
