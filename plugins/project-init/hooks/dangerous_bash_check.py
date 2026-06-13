@@ -23,9 +23,12 @@ DIVIDER = "━" * 55
 
 # 즉시 차단 — 복구 불가 수준의 파괴적 명령
 HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
-    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\s|$)", "rm -rf / (루트 전체 삭제)"),
-    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\s|$)", "rm -rf / (루트 전체 삭제)"),
-    (r"rm\s+-rf\s+~/", "rm -rf ~/ (홈 디렉토리 전체 삭제)"),
+    # rm -rf / 또는 /* (루트 전체) — 플래그 순서·결합 무관, /* glob 포함
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
+    # rm -rf ~ (홈 전체) — 트레일링 슬래시 유무·플래그 순서 무관
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 디렉토리 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 디렉토리 전체 삭제)"),
     (r"find\s+/\s+.*-delete\b", "find / -delete (루트 전체 탐색 삭제)"),
     (r"find\s+/\s+.*-exec\s+rm\b", "find / -exec rm (루트 전체 삭제 실행)"),
     (r":\s*\(\s*\)\s*\{.*:\|:.*\}", "Fork bomb"),
@@ -68,6 +71,10 @@ _SECRET_FILES = (
 )
 _SECRET_FILE_PAT = rf"(?:{_SECRET_FILES})\b"
 
+# 명령 경계: 줄 시작·연결자·공백뿐 아니라 따옴표·괄호 뒤도 포함한다.
+# `bash -c 'cat .env'` 처럼 인터프리터 인용 안에 든 명령을 놓치지 않기 위함.
+_BND = r"(?:^|&&|\|\||\||;|\s|['\"(])"
+
 # 1) 내용을 stdout 으로 흘리는 리더 명령 (대폭 확장)
 _READ_CMDS = (
     r"(?:cat|tac|nl|head|tail|less|more|bat|batcat|grep|egrep|fgrep|zgrep|rg|ag|"
@@ -76,19 +83,19 @@ _READ_CMDS = (
     r"view|vi|vim|nano|emacs|pico|ex)"
 )
 _SECRET_READ_RE = re.compile(
-    rf"(?:^|&&|\|\||\||;|\s){_READ_CMDS}\s+[^;|&\n]*{_SECRET_FILE_PAT}",
+    rf"{_BND}{_READ_CMDS}\s+[^;|&\n]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
 # 2) 셸 sourcing: `source .env`, `. .env` (env 변수로 로드 후 echo 노출 가능)
 _SECRET_SOURCE_RE = re.compile(
-    rf"(?:^|&&|\|\||\||;|\s)(?:source|\.)\s+[^;|&\n]*{_SECRET_FILE_PAT}",
+    rf"{_BND}(?:source|\.)\s+[^;|&\n]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
 # 3) 입력 리다이렉트: `cmd < .env`, `$(< .env)`
 _SECRET_REDIR_RE = re.compile(rf"<\s*[^\s;|&<>]*{_SECRET_FILE_PAT}", re.IGNORECASE)
 # 4) 복사/이동/전송 시 비밀 파일이 첫 인자(소스)로 — exfil 경로
 _SECRET_COPY_RE = re.compile(
-    rf"(?:^|&&|\|\||\||;|\s)(?:cp|mv|scp|rsync|install|dd\s+if=)\s*"
+    rf"{_BND}(?:cp|mv|scp|rsync|install|dd\s+if=)\s*"
     rf"(?:-\S+\s+)*[^\s;|&]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )

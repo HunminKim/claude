@@ -73,20 +73,25 @@ _ALLOW_ENV_RE = re.compile(
     r"^\.env\.(example|sample|template|dist)$", re.IGNORECASE,
 )
 
+# 경로에 이 디렉토리 컴포넌트가 있으면 차단 — Grep path=~/.ssh 처럼 디렉토리
+# 통째 탐색으로 그 안의 비밀(id_rsa 등) 내용이 content 모드에 노출되는 우회 차단.
+SENSITIVE_DIRS: set[str] = {".ssh", ".gnupg", ".aws", ".gcloud", ".azure", ".kube"}
+
+
+def _is_allowed(name_lower: str) -> bool:
+    """안전 예외(공개키·.env.example·*.sample 등)면 True (false positive 방지)."""
+    if name_lower.endswith(".pub") or _ALLOW_ENV_RE.match(name_lower):
+        return True
+    return any(name_lower.endswith(s) for s in ALLOW_SUFFIXES)
+
 
 def _is_secret_file(file_path: str) -> tuple[bool, str]:
     """(차단여부, 사유) 반환."""
     name = PurePosixPath(file_path).name
     name_lower = name.lower()
 
-    # 허용 예외 먼저 검사
-    if name_lower.endswith(".pub"):
+    if _is_allowed(name_lower):
         return False, ""
-    if _ALLOW_ENV_RE.match(name_lower):
-        return False, ""
-    for suffix in ALLOW_SUFFIXES:
-        if name_lower.endswith(suffix):
-            return False, ""
 
     # 정확한 파일명 매치
     if name_lower in SECRET_EXACT_NAMES:
@@ -102,7 +107,47 @@ def _is_secret_file(file_path: str) -> tuple[bool, str]:
     if suffix in SECRET_EXTENSIONS:
         return True, f"비밀 파일 읽기 차단 ({suffix}): {name}"
 
+    # *.env (prod.env, local.env 등) — 접두사 무관 .env 류는 비밀
+    # (dangerous_bash_check 의 _SECRET_FILES 와 동일 정책)
+    if name_lower.endswith(".env"):
+        return True, f"비밀 파일 읽기 차단: {name}"
+
     return False, ""
+
+
+def _hits_sensitive_dir(file_path: str) -> bool:
+    """경로 컴포넌트에 민감 디렉토리(.ssh 등)가 있으면 True (디렉토리 탐색 우회 차단)."""
+    parts = [p.lower() for p in PurePosixPath(file_path).parts]
+    return any(p in SENSITIVE_DIRS for p in parts)
+
+
+def _glob_targets_secret(glob: str) -> bool:
+    """Grep glob 파라미터가 비밀 파일을 겨냥하면 True (.env*, *.pem, id_rsa* 등)."""
+    core = glob.replace("*", "").replace("?", "")
+    if not core:
+        return False
+    if _is_secret_file(core)[0]:
+        return True
+    cl = core.lower()
+    return cl.endswith(".env") or any(cl.endswith(ext) for ext in SECRET_EXTENSIONS)
+
+
+def _evaluate(tool_input: dict) -> tuple[bool, str, str]:
+    """(차단여부, 사유, 표시대상) 반환. Read 는 file_path, Grep 은 path(+glob).
+
+    비밀 파일 직접 지목 / 민감 디렉토리 탐색 / glob 으로 비밀 겨냥 — 셋 다 차단.
+    """
+    file_path = tool_input.get("file_path") or tool_input.get("path") or ""
+    glob = tool_input.get("glob") or ""
+    if file_path:
+        blocked, reason = _is_secret_file(file_path)
+        if blocked:
+            return True, reason, file_path
+        if _hits_sensitive_dir(file_path):
+            return True, f"민감 디렉토리 접근 차단: {file_path}", file_path
+    if glob and _glob_targets_secret(glob):
+        return True, f"비밀 파일 glob 차단: {glob}", glob
+    return False, "", file_path or glob
 
 
 def main() -> int:
@@ -111,18 +156,10 @@ def main() -> int:
     except Exception:
         return 0
 
-    tool_name = data.get("tool_name", "")
-    if tool_name not in ("Read", "Grep"):
+    if data.get("tool_name", "") not in ("Read", "Grep"):
         return 0
 
-    tool_input = data.get("tool_input") or {}
-    # Read 는 file_path, Grep 은 path 로 대상을 받는다. Grep 의 path 가
-    # 비밀 파일을 직접 가리키면 content 모드에서 내용이 그대로 노출된다.
-    file_path: str = tool_input.get("file_path") or tool_input.get("path") or ""
-    if not file_path:
-        return 0
-
-    blocked, reason = _is_secret_file(file_path)
+    blocked, reason, target = _evaluate(data.get("tool_input") or {})
     if not blocked:
         return 0
 
@@ -132,7 +169,7 @@ def main() -> int:
         f"[secret-read-guard] 🔒 {reason}",
         DIVIDER,
         "",
-        f"  경로: {file_path}",
+        f"  대상: {target}",
         "",
         "시크릿/인증 파일은 Claude가 읽을 수 없습니다.",
         "필요하다면 사용자가 직접 터미널에서 확인하세요.",

@@ -194,6 +194,11 @@ def t_dangerous_bash(base: Path) -> None:
         ("cat .env.sample", 0),
         ("cat id_rsa", 2),
         ("rm -rf /", 2),
+        ("rm -rf /*", 2),          # 우회: / 뒤 glob
+        ("rm -rf ~", 2),           # 우회: 트레일링 슬래시 없음
+        ("rm -fr ~/", 2),          # 우회: 플래그 순서
+        ("bash -c 'cat .env'", 2),  # 우회: 인터프리터 인용 안의 명령
+        ("rm -rf build/", 0),      # 정상 (오탐 방지)
         ("ls -la", 0),
     ]
     for cmd, expect in cases:
@@ -235,12 +240,19 @@ def t_secret_read_guard() -> None:
     ]:
         check(f"통과: {cmd[:34]}", bash_rc(cmd) == 0, "오탐 차단")
 
-    # Grep 툴로 비밀 파일 content 읽기 차단
+    # Grep/Read 툴로 비밀 파일 content 읽기 차단 (디렉토리·glob 우회 포함)
     for tool, inp, want in [
         ("Grep", {"path": ".env", "pattern": ".", "output_mode": "content"}, 2),
         ("Read", {"file_path": "/p/.env"}, 2),
+        ("Read", {"file_path": "prod.env"}, 2),                              # *.env 정책 정렬
+        ("Grep", {"path": "/h/.ssh", "pattern": "PRIVATE", "output_mode": "content"}, 2),  # 민감 디렉토리
+        ("Read", {"file_path": "/u/.aws/credentials"}, 2),                  # 민감 디렉토리
+        ("Grep", {"path": "src", "glob": ".env*", "pattern": "x"}, 2),      # glob 우회
+        ("Grep", {"path": "src", "glob": "*.pem", "pattern": "x"}, 2),      # glob 우회
         ("Grep", {"path": "src/", "pattern": "TODO"}, 0),
+        ("Grep", {"path": "src", "glob": "*.py", "pattern": "x"}, 0),       # 정상 glob (오탐 방지)
         ("Read", {"file_path": "/p/README.md"}, 0),
+        ("Read", {"file_path": "id_rsa.pub"}, 0),                           # 공개키 허용
     ]:
         rc = subprocess.run(
             [sys.executable, str(guard)],
