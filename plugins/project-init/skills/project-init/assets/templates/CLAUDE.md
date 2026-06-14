@@ -28,7 +28,7 @@
 
 <!-- 코드로 알 수 없는 핵심 함정만 기록. 예: 특정 라이브러리 버그, 환경 제약, API 제한 -->
 
-- **plan-gate stash 동작**: plan-gate 차단 시 tracked 변경만 stash에 보존됨. untracked 파일은 working tree에 그대로 유지. `/approve-plan`, `/done`, `/skip` 시 tracked stash 자동 복원(pop). 수동 복원: `git stash pop`
+- **plan-gate 체크포인트 동작**: 게이트가 열릴 때(첫 Edit) working tree 전체를 git 프라이빗 ref(`refs/plan-gate/<id>/checkpoint`)로 1회 스냅샷한다 (사용자 인덱스·stash·브랜치 무간섭). 비-git 이거나 `/plan-gate-no-git` 이면 편집 직전 원본을 `.claude/state/checkpoints/<id>/` 에 복사한다. `/rollback` 이 이 스냅샷에서 복원(존재했던 파일 복구·신규 파일 삭제). ⚠️ stash 백엔드는 폐기됨 — `git stash pop` 으로 복원하지 않는다.
 
 ## 서브에이전트 전략
 
@@ -135,7 +135,7 @@ USER_DECISIONS 블록은 누락 금지. 사용자가 한 번이라도 명시 선
 ## 개발 워크플로우
 
 - 코드 수정 전 `docs/technical_doc.md` 및 연관 모듈 먼저 확인 (충돌 방지)
-- **plan-gate (자동 강제)**: 같은 코드 파일을 5회 이상 반복 편집하면 PreToolUse 훅이 자동 차단한다 (문서 파일은 카운트 제외). `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 차단 시점에 `git tag` + `git stash`로 체크포인트 자동 생성. `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on` 으로 활성화, `/plan-gate-off` 로 비활성화).
+- **plan-gate (자동 강제)**: 같은 코드 파일을 5회 이상 수렴 없이 반복 편집(thrash)하면 PreToolUse 훅이 자동 차단한다 (green Bash=테스트 통과 시 카운터 리셋, 문서 파일 제외). `tasks/todo.md` 에 계획 작성 후 사용자가 `/approve-plan` 입력해야 재개. 체크포인트는 게이트가 열릴 때(첫 Edit) git 프라이빗 ref 로 자동 스냅샷된다 (tag/stash 아님). `tasks/todo.md` 에 scope 매니페스트(`<!-- plan-gate: scope BEGIN/END -->`)를 선언하고 `/plan-gate-scope-enforce` 를 켜면 스코프 밖 편집을 거부·롤백한다 (기본 off, `*`=한 단계·`**`=하위 전체). `.claude/plan_gate_enabled` 파일이 있을 때만 동작 (`/plan-gate-on`·`/plan-gate-off`).
 
 ### 외과적 변경 원칙 (Surgical Changes)
 
