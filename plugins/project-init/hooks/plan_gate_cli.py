@@ -32,6 +32,16 @@ def _get_feature_hint(root) -> str:
     return "현재 작업"
 
 
+def _scope_note(manifest) -> str:
+    """매니페스트 선언 시 스코프 계약 저장 안내 한 줄 (강제는 step 5 — 현재 노출만)."""
+    if not manifest:
+        return ""
+    return (
+        f"\n  스코프 계약: {len(manifest['scope'])}개 패턴 저장됨"
+        " (현재 노출만 — 강제는 다음 버전)"
+    )
+
+
 def _info(msg: str) -> None:
     sys.stdout.write(msg + "\n")
 
@@ -63,12 +73,14 @@ def cmd_approve(root, state) -> int:
         gate["initial_edit_count"] = 0
         gate["initial_unique_files"] = 0
         gate["edit_count_post_approval"] = 0
+        manifest = lib.apply_manifest(root, gate)  # 사람 승인 — 넓은 글롭 가드 우회
         lib.set_current_gate(state, gate)
         lib.save_state(root, state)
         _info(
             f"[plan-gate approve] 선승인 완료: {gate['id']}\n"
             f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
             f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복"
+            + _scope_note(manifest)
         )
         return 0
 
@@ -106,12 +118,15 @@ def cmd_approve(root, state) -> int:
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])
 
+    manifest = lib.apply_manifest(root, gate)  # 사람 승인 — 넓은 글롭 가드 우회
+
     # 스냅샷 백엔드는 working tree 를 건드리지 않으므로(stash 안 함)
     # approve 후 복원할 것이 없다 — 작업 파일은 그대로 유지된다.
     lib.save_state(root, state)
     _info(
         f"[plan-gate approve] 승인 완료: {gate['id']}\n"
         f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 (scope creep 방지)"
+        + _scope_note(manifest)
     )
     return 0
 
@@ -343,6 +358,10 @@ def cmd_replan(root, state) -> int:
     gate["approved_at"] = None
     gate["todo_md_sha256"] = None
     gate["todo_md_mtime"] = None
+    # 매니페스트도 리셋 — 새 todo.md 를 /approve-plan 시 다시 파싱·저장한다
+    gate["scope"] = []
+    gate["do_not_touch"] = []
+    gate["manifest_sha256"] = None
     gate["verifier_status"] = None
     lib.save_state(root, state)
     wt_dirty = lib.has_git(root) and not lib.working_tree_clean(root)
@@ -417,12 +436,19 @@ def cmd_status(root, state) -> int:
     else:
         action_key = g_state
     next_action = _NEXT_ACTION.get(action_key, "")
+    scope = gate.get("scope") or []
+    scope_line = (
+        f"{len(scope)}개 패턴 (스코프 모드 — 현재 노출만)"
+        if scope
+        else "없음 (thrash-only)"
+    )
     _info(
         f"[plan-gate status]\n"
         f"  id              = {gate['id']}\n"
         f"  state           = {g_state}\n"
         f"  edits           = {gate['edit_count']}\n"
         f"  thrash(반복)    = {lib._max_code_repeat(gate)}/{lib.TRIGGER_REPEAT_RATIO} (green Bash 시 리셋)\n"
+        f"  scope           = {scope_line}\n"
         f"  unique_files    = {len(gate['unique_files'])}\n"
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"
         f"  approved_auto   = {'yes' if gate.get('approved_auto') else 'no (명시 승인)'}\n"

@@ -104,8 +104,13 @@ def main() -> int:
                     )
                 else:
                     ok, issues = lib.validate_todo_quality(root)
+                    manifest = lib.parse_manifest(todo_text)
                     if not ok:
                         advisories.append(lib.format_todo_quality_hint(issues))
+                    elif lib.manifest_has_broad_glob(manifest):
+                        # D6: 넓은 글롭은 자동 승인 비활성 → 사람 /approve-plan 강제.
+                        # 자동 승인하지 않고 created 상태로 남긴다(차단 아님 — advisory).
+                        advisories.append(lib.format_broad_glob_hint(manifest))
                     else:
                         gate["state"] = "approved"
                         gate["approved_at"] = lib.now_iso()
@@ -115,9 +120,20 @@ def main() -> int:
                         gate["initial_unique_files"] = 0
                         gate["todo_md_sha256"] = current_sha
                         gate["todo_md_mtime"] = current_mtime
+                        # 매니페스트 선언 시 스코프 계약 저장(노출만 — 강제는 step 5)
+                        if manifest:
+                            gate["scope"] = manifest["scope"]
+                            gate["do_not_touch"] = manifest["do_not_touch"]
+                            gate["manifest_sha256"] = lib.manifest_sha(todo_text)
+                        scope_note = (
+                            f"\n  스코프 계약: {len(manifest['scope'])}개 패턴 선언됨"
+                            " (현재 노출만 — 강제는 다음 버전)"
+                            if manifest
+                            else ""
+                        )
                         advisories.append(
                             f"[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복"
+                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복" + scope_note
                         )
         except Exception:
             pass

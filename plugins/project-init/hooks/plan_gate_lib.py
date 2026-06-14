@@ -411,6 +411,9 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "todo_md_mtime": None,
         "checkpoint_commit": None,             # git 프라이빗 ref 스냅샷 커밋 SHA (비-git 이면 None)
         "cp_snapshot": None,                   # touched 매니페스트 {relpath: 편집전존재여부} (롤백 구동)
+        "scope": [],                           # 매니페스트 scope 패턴 (빈 목록 = thrash-only)
+        "do_not_touch": [],                    # 매니페스트 do-not-touch 패턴 (deny-first)
+        "manifest_sha256": None,               # 매니페스트 블록 원문 sha256 (TOCTOU 고정)
         "verifier_status": None,
     }
 
@@ -532,6 +535,171 @@ def auto_add_gate_ignore(file_path: str, root: Path, existing_patterns: list[str
             except OSError:
                 pass
     return None
+
+
+# ── 매니페스트 파싱 (step 3 — 스코프 계약 파싱·노출, 강제는 step 5) ─────────
+# tasks/todo.md 안의 짝 마커 블록에서 scope / do-not-touch 파일 패턴을 읽는다.
+# 짝 마커(BEGIN/END)로 단일 마커의 "어디서 끝나는가" 모호성을 제거한다.
+# 이 단계는 파싱·노출만 — 어떤 편집도 차단하지 않는다(강제는 step 5,
+# plan_gate_scope_enabled 플래그 뒤 기본 OFF). 미선언/파싱 실패 → fail-open:
+# 스코프 없음 = thrash-only 모드. 절대 default-deny 금지(확정 결정 Q1).
+MANIFEST_MARKERS: dict[str, tuple[str, str]] = {
+    "scope": (
+        "<!-- plan-gate: scope BEGIN -->",
+        "<!-- plan-gate: scope END -->",
+    ),
+    "do_not_touch": (
+        "<!-- plan-gate: do-not-touch BEGIN -->",
+        "<!-- plan-gate: do-not-touch END -->",
+    ),
+}
+
+
+def _extract_manifest_block(text: str, begin: str, end: str) -> list[str]:
+    """begin/end 짝 마커 사이의 패턴 줄 목록. 마커 없거나 짝이 안 맞으면 빈 목록(fail-open)."""
+    bi = text.find(begin)
+    if bi < 0:
+        return []
+    bi += len(begin)
+    ei = text.find(end, bi)
+    if ei < 0:
+        return []  # 종료 마커 없음 → 미선언 취급 (default-deny 금지)
+    patterns: list[str] = []
+    for line in text[bi:ei].splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("<!--"):
+            continue
+        s = re.sub(r"^[-*]\s+", "", s)  # 불릿(- / *) 접두 허용
+        if s:
+            patterns.append(s)
+    return patterns
+
+
+def parse_manifest(text: str | None) -> dict[str, list[str]] | None:
+    """todo.md 본문에서 scope/do-not-touch 매니페스트 파싱.
+
+    반환: {"scope": [...], "do_not_touch": [...]} 또는 매니페스트 미선언이면 None.
+    scope 블록(짝 마커)이 비거나 없으면 None — 강제할 계약이 없다(fail-open).
+    """
+    if not text:
+        return None
+    sb, se = MANIFEST_MARKERS["scope"]
+    scope = _extract_manifest_block(text, sb, se)
+    if not scope:
+        return None
+    db, de = MANIFEST_MARKERS["do_not_touch"]
+    return {"scope": scope, "do_not_touch": _extract_manifest_block(text, db, de)}
+
+
+def manifest_sha(text: str | None) -> str | None:
+    """매니페스트 블록 원문(마커 포함)의 sha256 — 런 중 TOCTOU 고정용.
+
+    todo.md 전체가 아니라 매니페스트 영역만 해시해 무관한 계획 본문 편집과 분리한다.
+    매니페스트 없으면 None.
+    """
+    if not text:
+        return None
+    chunks: list[str] = []
+    for begin, end in MANIFEST_MARKERS.values():
+        bi = text.find(begin)
+        if bi < 0:
+            continue
+        ei = text.find(end, bi)
+        if ei < 0:
+            continue
+        chunks.append(text[bi : ei + len(end)])
+    if not chunks:
+        return None
+    return hashlib.sha256("\n".join(chunks).encode("utf-8")).hexdigest()
+
+
+def has_manifest(gate: dict[str, Any]) -> bool:
+    """게이트가 스코프 매니페스트를 선언했는지. False → thrash-only 모드(스코프 강제 없음)."""
+    return bool(gate.get("scope"))
+
+
+def is_broad_glob(pattern: str) -> bool:
+    """자동승인 비활성 대상인 '넓은 글롭' 판별 (D6).
+
+    `**`·`*`·최상위 컴포넌트가 글롭인 패턴(`**/x`, `*/x`)은 사실상 전체 우회
+    탈출구라 자동승인에서 배제하고 사람 /approve-plan 을 강제한다.
+    `src/auth/**` 처럼 디렉토리로 한정된 글롭은 넓지 않다.
+    """
+    p = pattern.strip().strip("/")
+    if p in ("", ".", "*", "**"):
+        return True
+    return p.split("/", 1)[0] in ("*", "**")
+
+
+def manifest_has_broad_glob(manifest: dict[str, list[str]] | None) -> bool:
+    """scope 패턴 중 넓은 글롭이 하나라도 있으면 True (자동승인 비활성, D6)."""
+    if not manifest:
+        return False
+    return any(is_broad_glob(p) for p in manifest.get("scope", []))
+
+
+def apply_manifest(root: Path, gate: dict[str, Any]) -> dict[str, list[str]] | None:
+    """todo.md 매니페스트를 파싱해 gate 에 저장(scope/do_not_touch/manifest_sha256).
+
+    사람 승인(/approve-plan) 경로용 — 넓은 글롭 가드는 적용하지 않는다(사람이 곧
+    검토 게이트). 매니페스트 없으면 스코프 필드를 비운다(fail-open, thrash-only).
+    반환: 파싱된 매니페스트 또는 None.
+    """
+    p = todo_md_path(root)
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore") if p.exists() else ""
+    except OSError:
+        text = ""
+    manifest = parse_manifest(text)
+    gate["scope"] = manifest["scope"] if manifest else []
+    gate["do_not_touch"] = manifest["do_not_touch"] if manifest else []
+    gate["manifest_sha256"] = manifest_sha(text) if manifest else None
+    return manifest
+
+
+def scope_allows(
+    target: str,
+    gate: dict[str, Any],
+    root: Path,
+    ignore_patterns: list[str] | None = None,
+) -> bool:
+    """target(상대/절대)이 게이트 스코프 계약상 허용되는지 (deny-first).
+
+    - 매니페스트 미선언(has_manifest False) → True (fail-open, thrash-only).
+    - .plan-gateignore 일치 → True (생성물/락파일은 스코프 검사 우회).
+    - do-not-touch 일치 → False (scope 보다 우선, detour 로도 못 품).
+    - scope 일치 → True, 아니면 False(루트 밖 포함).
+
+    ※ step 3 은 이 함수를 노출만 하고 강제하지 않는다 — 차단은 step 5.
+    매칭은 루트 상대경로 정규화 기준 fnmatch (절대경로 미스매치 버그 반복 금지).
+    """
+    if not has_manifest(gate):
+        return True
+    rel = _rel_to_root(root, target)
+    if rel is None:
+        return False  # 루트 밖 — 스코프 안에 있을 수 없다
+    if ignore_patterns is None:
+        ignore_patterns = load_gate_ignore(root)
+    if is_gate_ignored(str(root / rel), root, ignore_patterns):
+        return True
+    if any(fnmatch.fnmatch(rel, pat) for pat in gate.get("do_not_touch", [])):
+        return False
+    return any(fnmatch.fnmatch(rel, pat) for pat in gate.get("scope", []))
+
+
+def format_broad_glob_hint(manifest: dict[str, list[str]]) -> str:
+    """넓은 글롭 매니페스트 자동승인 보류 안내 (additionalContext 용, D6)."""
+    broad = ", ".join(p for p in manifest.get("scope", []) if is_broad_glob(p))
+    return (
+        f"\n{DIVIDER}\n"
+        f"[plan-gate] ⚠️  넓은 글롭 매니페스트 — 자동 승인 보류\n"
+        f"{DIVIDER}\n"
+        f"  scope 에 넓은 글롭이 있어 사람 검토가 필요합니다: {broad}\n"
+        f"  넓은 글롭(`**`·최상위 글롭)은 스코프 계약을 사실상 무력화합니다.\n"
+        f"  디렉토리로 한정하거나(예: src/auth/**), 의도한 것이면\n"
+        f"  /approve-plan 으로 명시 승인하세요.\n"
+        f"{DIVIDER}\n"
+    )
 
 
 # ── 토큰 정의 (D6) ──────────────────────────────────────────────────────

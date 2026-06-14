@@ -821,6 +821,133 @@ def t_approved_thrash(base: Path) -> None:
     check("green Bash 리셋 후 통과", rc2 == 0, f"rc={rc2}")
 
 
+_MANIFEST_TODO = """# auth 리팩터
+
+## 목표
+auth 모듈을 정리한다.
+
+<!-- plan-gate: scope BEGIN -->
+src/auth/**
+src/models/user.py
+<!-- plan-gate: scope END -->
+<!-- plan-gate: do-not-touch BEGIN -->
+src/payment/**
+<!-- plan-gate: do-not-touch END -->
+
+- [ ] 1단계
+- [ ] 2단계
+"""
+
+_BROAD_TODO = """# 전체 리팩터
+
+## 목표
+전부 고친다.
+
+<!-- plan-gate: scope BEGIN -->
+**
+<!-- plan-gate: scope END -->
+
+- [ ] 1단계
+- [ ] 2단계
+"""
+
+
+def t_manifest_parse(base: Path) -> None:
+    """step 3 — 매니페스트 파싱 + has_manifest 술어 (강제 없음, 추가형).
+
+    파싱·노출만 검증: 스코프 저장·broad-glob 자동승인 보류·fail-open·
+    그리고 결정적으로 '스코프 밖 편집을 차단하지 않음'(step 5 전까지 비강제).
+    """
+    print("[25] step3 매니페스트 파싱 + has_manifest")
+    sys.path.insert(0, str(HOOKS))
+    import importlib
+
+    import plan_gate_lib as lib
+
+    lib = importlib.reload(lib)
+
+    # ── 단위: parse_manifest ──────────────────────────────────────────────
+    m = lib.parse_manifest(_MANIFEST_TODO)
+    check(
+        "parse_manifest scope/do-not-touch 추출",
+        m is not None
+        and m["scope"] == ["src/auth/**", "src/models/user.py"]
+        and m["do_not_touch"] == ["src/payment/**"],
+        f"m={m}",
+    )
+    check("마커 없음 → None (미선언)", lib.parse_manifest("계획만 있음") is None)
+    check(
+        "종료 마커 없음 → None (fail-open, default-deny 금지)",
+        lib.parse_manifest("<!-- plan-gate: scope BEGIN -->\nsrc/a.py\n") is None,
+    )
+
+    # ── 단위: broad glob ──────────────────────────────────────────────────
+    check(
+        "is_broad_glob 판별",
+        lib.is_broad_glob("**")
+        and lib.is_broad_glob("*")
+        and lib.is_broad_glob("**/x.py")
+        and lib.is_broad_glob("*/models")
+        and not lib.is_broad_glob("src/auth/**")
+        and not lib.is_broad_glob("src/models/user.py"),
+    )
+    check(
+        "manifest_has_broad_glob",
+        lib.manifest_has_broad_glob(lib.parse_manifest(_BROAD_TODO))
+        and not lib.manifest_has_broad_glob(m),
+    )
+
+    # ── 단위: has_manifest / scope_allows (deny-first + ignore 우회 + fail-open) ──
+    g_scoped = {"scope": m["scope"], "do_not_touch": m["do_not_touch"]}
+    g_empty = {"scope": [], "do_not_touch": []}
+    check("has_manifest 선언/미선언", lib.has_manifest(g_scoped) and not lib.has_manifest(g_empty))
+    p = make_project(base, "manifest_unit")
+    check("scope_allows 스코프 안 → True", lib.scope_allows("src/auth/login.py", g_scoped, p))
+    check("scope_allows 스코프 밖 → False", not lib.scope_allows("src/other.py", g_scoped, p))
+    check(
+        "scope_allows do-not-touch deny-first → False",
+        not lib.scope_allows("src/payment/charge.py", g_scoped, p),
+    )
+    check("scope_allows 미선언 → True (fail-open)", lib.scope_allows("anything.py", g_empty, p))
+    (p / ".plan-gateignore").write_text("*.lock\n")
+    check(
+        "scope_allows .plan-gateignore 우회 → True",
+        lib.scope_allows("deps.lock", g_scoped, p),
+    )
+
+    # ── 통합: 자동 승인 시 스코프 저장 + sha 고정 ─────────────────────────
+    gate_hook = HOOKS / "plan_gate.py"
+    p = make_project(base, "manifest_auto")
+    (p / "tasks").mkdir()
+    (p / "tasks" / "todo.md").write_text(_MANIFEST_TODO)
+    run_hook(gate_hook, edit_payload("Edit", p / "src" / "auth" / "x.py"), p)
+    g = get_gate(p)
+    check(
+        "자동 승인 + 스코프 저장",
+        g["state"] == "approved"
+        and g.get("scope") == ["src/auth/**", "src/models/user.py"]
+        and bool(g.get("manifest_sha256")),
+        f"state={g['state']} scope={g.get('scope')} sha={g.get('manifest_sha256')}",
+    )
+
+    # ── 통합: 스코프 밖 편집도 step3 에선 차단 안 함 (추가형, 비강제) ──────
+    rc = run_hook(gate_hook, edit_payload("Edit", p / "src" / "other.py"), p).returncode
+    check("스코프 밖 편집 무차단 (step3 비강제)", rc == 0, f"rc={rc}")
+
+    # ── 통합: 넓은 글롭 → 자동 승인 보류(created 유지), 차단은 아님 ────────
+    p = make_project(base, "manifest_broad")
+    (p / "tasks").mkdir()
+    (p / "tasks" / "todo.md").write_text(_BROAD_TODO)
+    r = run_hook(gate_hook, edit_payload("Edit", p / "src" / "a.py"), p)
+    g = get_gate(p)
+    check(
+        "넓은 글롭 → 자동 승인 보류(created) + 무차단",
+        r.returncode == 0 and g["state"] == "created" and not g.get("scope"),
+        f"rc={r.returncode} state={g['state']} scope={g.get('scope')}",
+    )
+    check("넓은 글롭 advisory 출력", "넓은 글롭" in (r.stdout or ""), f"stdout={r.stdout[:120]!r}")
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -876,6 +1003,7 @@ def main() -> int:
         t_checkpoint_backend(base)
         t_green_bash_reset(base)
         t_approved_thrash(base)
+        t_manifest_parse(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()
