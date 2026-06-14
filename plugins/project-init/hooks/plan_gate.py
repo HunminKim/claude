@@ -112,12 +112,7 @@ def main() -> int:
                         # 자동 승인하지 않고 created 상태로 남긴다(차단 아님 — advisory).
                         advisories.append(lib.format_broad_glob_hint(manifest))
                     else:
-                        gate["state"] = "approved"
-                        gate["approved_at"] = lib.now_iso()
-                        gate["approved_auto"] = True
-                        gate["edit_count_post_approval"] = 0
-                        gate["initial_edit_count"] = 0
-                        gate["initial_unique_files"] = 0
+                        lib.transition(gate, "approve_auto")
                         gate["todo_md_sha256"] = current_sha
                         gate["todo_md_mtime"] = current_mtime
                         # 매니페스트 선언 시 스코프 계약 저장(노출만 — 강제는 step 5)

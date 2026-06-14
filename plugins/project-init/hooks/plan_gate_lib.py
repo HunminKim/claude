@@ -434,6 +434,72 @@ def clear_current_gate(state: dict[str, Any]) -> None:
     state["current_gate_id"] = None
 
 
+# ── 상태 전이 중앙화 (step 4) ─────────────────────────────────────────────
+# 5개 변이 지점(plan_gate.py 자동승인 + cli approve/retry/replan)의 카운터·계획
+# 리셋을 단일 출처로 모은다. 과거 "카운터 오염" 회귀(replan 미리셋·thrash 잔류)가
+# 흩어진 인라인 리셋 때문이었다. 전이마다 리셋 집합이 다르므로(source-aware)
+# 단일 transition(gate, to_state) 통합은 금지 — 명명 전이별로 자기 필드만 건드린다.
+# done 은 부수효과(체크포인트 정리·아카이브)를 동반하므로 do_gate_done 이 담당.
+# 데이터 적재(매니페스트 파싱·todo 해시)는 호출자 책임 — 이 함수는 리셋만 한다.
+_LEGAL_TRANSITION_FROM: dict[str, set[str]] = {
+    "approve_auto": {"created"},  # 자동승인: 생성 직후 fresh gate
+    "approve_manual": {"created"},  # /approve-plan: 선승인도 fresh(created)에서 출발
+    "retry": {"verified"},  # verifier ❌ 후 같은 체크포인트 재구현
+    "replan": {"created", "approved", "verified"},  # 계획 재작성 (활성 상태 어디서나)
+}
+
+
+def transition(gate: dict[str, Any], name: str) -> dict[str, Any]:
+    """게이트 상태 전이 + 전이별 필드 리셋의 단일 출처(step 4, R6 source-aware).
+
+    name ∈ {approve_auto, approve_manual, retry, replan}. 공통: 합법 from-state
+    가드(불법이면 ValueError) + state 설정. 리셋 필드는 전이마다 다르다 — naive
+    통합 금지(카운터 오염 회귀). 전이별 리셋 집합은 아래 분기가 단일 출처다.
+    """
+    legal = _LEGAL_TRANSITION_FROM.get(name)
+    if legal is None:
+        raise ValueError(f"unknown transition: {name!r}")
+    if gate.get("state") not in legal:
+        raise ValueError(
+            f"illegal transition {name!r} from state={gate.get('state')!r} "
+            f"(legal from: {sorted(legal)})"
+        )
+
+    if name in ("approve_auto", "approve_manual"):
+        gate["state"] = "approved"
+        gate["approved_at"] = now_iso()
+        gate["approved_auto"] = name == "approve_auto"
+        gate["edit_count_post_approval"] = 0
+        # 승인 시점 누적치를 initial 로 1회 고정(이미 있으면 보존 — 재승인 누적 방지)
+        if gate.get("initial_edit_count") is None:
+            gate["initial_edit_count"] = gate.get("edit_count", 0)
+            gate["initial_unique_files"] = len(gate.get("unique_files", []))
+    elif name == "retry":
+        # 같은 체크포인트·계획에서 재구현 → scope/계획/initial 보존, 시도 카운터만 리셋
+        gate["state"] = "approved"
+        gate["verifier_status"] = None
+        gate["edit_count_post_approval"] = 0
+        gate["file_edit_counts"] = {}
+    elif name == "replan":
+        # 계획 재작성 → 체크포인트만 유지, 카운터·계획·scope 전부 리셋
+        gate["state"] = "created"
+        gate["approved_auto"] = False
+        gate["approved_at"] = None
+        gate["edit_count"] = 0
+        gate["edit_count_post_approval"] = 0
+        gate["file_edit_counts"] = {}
+        gate["unique_files"] = []
+        gate["initial_edit_count"] = None
+        gate["initial_unique_files"] = None
+        gate["todo_md_sha256"] = None
+        gate["todo_md_mtime"] = None
+        gate["scope"] = []
+        gate["do_not_touch"] = []
+        gate["manifest_sha256"] = None
+        gate["verifier_status"] = None
+    return gate
+
+
 # ── 트리거 휴리스틱 (D5) ─────────────────────────────────────────────────
 def _max_code_repeat(gate: dict[str, Any]) -> int:
     """코드 파일 중 가장 많이 편집된 횟수. doc 파일은 제외."""

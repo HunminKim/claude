@@ -67,12 +67,7 @@ def cmd_approve(root, state) -> int:
         sha, mtime = lib.hash_todo_md(root)
         gate["todo_md_sha256"] = sha
         gate["todo_md_mtime"] = mtime
-        gate["state"] = "approved"
-        gate["approved_at"] = lib.now_iso()
-        gate["approved_auto"] = False  # 명시 선승인 — 자동 승인 sticky 방지
-        gate["initial_edit_count"] = 0
-        gate["initial_unique_files"] = 0
-        gate["edit_count_post_approval"] = 0
+        lib.transition(gate, "approve_manual")  # fresh gate(created)→approved
         manifest = lib.apply_manifest(root, gate)  # 사람 승인 — 넓은 글롭 가드 우회
         lib.set_current_gate(state, gate)
         lib.save_state(root, state)
@@ -110,14 +105,7 @@ def cmd_approve(root, state) -> int:
         lib.save_state(root, state)
         return 1
 
-    gate["state"] = "approved"
-    gate["approved_at"] = lib.now_iso()
-    gate["approved_auto"] = False  # 명시 승인 — 자동 승인 sticky 해제
-    gate["edit_count_post_approval"] = 0
-    if gate.get("initial_edit_count") is None:
-        gate["initial_edit_count"] = gate["edit_count"]
-        gate["initial_unique_files"] = len(gate["unique_files"])
-
+    lib.transition(gate, "approve_manual")  # created→approved (initial 누적치 보존)
     manifest = lib.apply_manifest(root, gate)  # 사람 승인 — 넓은 글롭 가드 우회
 
     # 스냅샷 백엔드는 working tree 를 건드리지 않으므로(stash 안 함)
@@ -327,12 +315,9 @@ def cmd_retry(root, state) -> int:
         )
         return 1
 
-    # 체크포인트 유지, 같은 gate를 다시 approved 상태로 돌려 재구현 허용
-    gate["state"] = "approved"
-    gate["verifier_status"] = None
-    # 재시도 = 새 시도 → thrash 카운터 리셋(이전 시도의 반복이 즉시 재차단하지 않도록).
-    gate["edit_count_post_approval"] = 0
-    gate["file_edit_counts"] = {}
+    # 체크포인트·계획 유지, 같은 gate를 다시 approved 로 돌려 재구현 허용.
+    # 재시도 = 새 시도 → thrash 카운터 리셋(이전 시도 반복이 즉시 재차단하지 않도록).
+    lib.transition(gate, "retry")
     lib.save_state(root, state)
     _info(
         f"[plan-gate retry] 같은 체크포인트에서 재시도 시작: {gate['id']}\n"
@@ -346,23 +331,9 @@ def cmd_replan(root, state) -> int:
     if gate is None:
         return 0
 
-    # 체크포인트 유지, 카운터/상태만 리셋 → tasks/todo.md 다시 작성하고 /approve-plan
-    gate["state"] = "created"
-    gate["approved_auto"] = False  # 명시 재승인 대기 — 자동 승인 sticky 해제
-    gate["edit_count"] = 0
-    gate["edit_count_post_approval"] = 0
-    gate["file_edit_counts"] = {}  # thrash 카운터도 리셋(이전 리뷰: replan 미리셋 버그)
-    gate["unique_files"] = []
-    gate["initial_edit_count"] = None
-    gate["initial_unique_files"] = None
-    gate["approved_at"] = None
-    gate["todo_md_sha256"] = None
-    gate["todo_md_mtime"] = None
-    # 매니페스트도 리셋 — 새 todo.md 를 /approve-plan 시 다시 파싱·저장한다
-    gate["scope"] = []
-    gate["do_not_touch"] = []
-    gate["manifest_sha256"] = None
-    gate["verifier_status"] = None
+    # 체크포인트만 유지, 카운터·계획·매니페스트 전부 리셋 → todo.md 재작성 후 /approve-plan.
+    # (전이별 리셋 집합은 lib.transition 의 replan 분기가 단일 출처)
+    lib.transition(gate, "replan")
     lib.save_state(root, state)
     wt_dirty = lib.has_git(root) and not lib.working_tree_clean(root)
     _info(

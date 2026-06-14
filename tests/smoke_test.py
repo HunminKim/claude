@@ -948,6 +948,112 @@ def t_manifest_parse(base: Path) -> None:
     check("넓은 글롭 advisory 출력", "넓은 글롭" in (r.stdout or ""), f"stdout={r.stdout[:120]!r}")
 
 
+def _reload_lib():
+    sys.path.insert(0, str(HOOKS))
+    import importlib
+
+    import plan_gate_lib as lib
+
+    return importlib.reload(lib)
+
+
+def _mkgate(lib, **over):
+    gate = lib.make_gate("t")
+    gate.update(over)
+    return gate
+
+
+def t_transition_approve(base: Path) -> None:
+    """step 4 — transition() approve_auto/approve_manual + 합법 from-state 가드."""
+    print("[26] step4 transition() approve + 가드")
+    lib = _reload_lib()
+
+    # approve_auto: created→approved, auto=True, initial 누적치 1회 고정
+    ga = _mkgate(lib, state="created", edit_count=4, unique_files=["a.py", "b.py"])
+    lib.transition(ga, "approve_auto")
+    check(
+        "approve_auto: approved + auto=True + initial 고정(4/2)",
+        ga["state"] == "approved" and ga["approved_auto"] is True and ga["approved_at"]
+        and ga["edit_count_post_approval"] == 0
+        and ga["initial_edit_count"] == 4 and ga["initial_unique_files"] == 2,
+        f"{ga}",
+    )
+
+    # approve_manual: auto=False, initial 이미 있으면 보존(재승인 누적 방지)
+    gm = _mkgate(lib, state="created", edit_count=9, initial_edit_count=3, initial_unique_files=1)
+    lib.transition(gm, "approve_manual")
+    check(
+        "approve_manual: approved + auto=False + initial 보존(3/1)",
+        gm["state"] == "approved" and gm["approved_auto"] is False
+        and gm["initial_edit_count"] == 3 and gm["initial_unique_files"] == 1,
+        f"{gm}",
+    )
+
+    # 합법 from-state 가드: 불법 전이는 ValueError
+    def _raises(name, state):
+        try:
+            lib.transition(_mkgate(lib, state=state), name)
+            return False
+        except ValueError:
+            return True
+
+    check(
+        "불법 from-state → ValueError",
+        _raises("retry", "created") and _raises("approve_auto", "approved")
+        and _raises("replan", "done") and _raises("bogus", "created"),
+    )
+
+
+def t_transition_retry_replan(base: Path) -> None:
+    """step 4 — retry(시도만 리셋·계획 보존) vs replan(전부 리셋·체크포인트만 유지).
+
+    카운터 오염 회귀(replan 미리셋·retry thrash 잔류) + 비대칭 보존을 행위로 고정.
+    """
+    print("[27] step4 transition() retry/replan 비대칭")
+    lib = _reload_lib()
+
+    # retry: verified→approved, 시도 카운터만 리셋, scope/계획/initial/edit_count 보존
+    gr = _mkgate(
+        lib, state="verified", verifier_status="❌", approved_at="T0", edit_count=7,
+        edit_count_post_approval=5, file_edit_counts={"a.py": 5}, initial_edit_count=2,
+        scope=["src/auth/**"], manifest_sha256="abc",
+    )
+    lib.transition(gr, "retry")
+    check(
+        "retry: thrash 리셋 + scope/계획/edit_count/승인시각 보존",
+        gr["state"] == "approved" and gr["verifier_status"] is None
+        and gr["edit_count_post_approval"] == 0 and gr["file_edit_counts"] == {}
+        and gr["edit_count"] == 7 and gr["approved_at"] == "T0"
+        and gr["initial_edit_count"] == 2 and gr["scope"] == ["src/auth/**"]
+        and gr["manifest_sha256"] == "abc",
+        f"{gr}",
+    )
+
+    # replan: *→created, 카운터·계획·scope 전부 리셋, 체크포인트만 유지
+    gp = _mkgate(
+        lib, state="approved", approved_auto=True, approved_at="T0", edit_count=8,
+        edit_count_post_approval=4, file_edit_counts={"a.py": 4}, unique_files=["a.py"],
+        initial_edit_count=2, initial_unique_files=1, todo_md_sha256="x",
+        scope=["src/auth/**"], do_not_touch=["src/pay/**"], manifest_sha256="abc",
+        verifier_status="❌", checkpoint_commit="deadbeef",
+    )
+    lib.transition(gp, "replan")
+    reset_ok = (
+        gp["state"] == "created" and gp["approved_auto"] is False
+        and gp["approved_at"] is None and gp["edit_count"] == 0
+        and gp["edit_count_post_approval"] == 0 and gp["file_edit_counts"] == {}
+        and gp["unique_files"] == [] and gp["initial_edit_count"] is None
+        and gp["initial_unique_files"] is None and gp["todo_md_sha256"] is None
+        and gp["scope"] == [] and gp["do_not_touch"] == []
+        and gp["manifest_sha256"] is None and gp["verifier_status"] is None
+    )
+    check(
+        "replan: 전 카운터·계획·scope 리셋 / 체크포인트 보존",
+        reset_ok and gp["checkpoint_commit"] == "deadbeef",
+        f"{gp}",
+    )
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -1004,6 +1110,8 @@ def main() -> int:
         t_green_bash_reset(base)
         t_approved_thrash(base)
         t_manifest_parse(base)
+        t_transition_approve(base)
+        t_transition_retry_replan(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()
