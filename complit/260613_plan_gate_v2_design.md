@@ -22,6 +22,47 @@
 
 ---
 
+## ★ 구현 진행 상황 + 다음 세션 핸드오프 (260614 기준)
+
+> 새 세션은 이 섹션을 먼저 읽으면 바로 이어서 개발 가능. 아래 외에 §2(결정)·§3(아키텍처)를 참조.
+
+### 작업 브랜치 (정확히)
+`claude/critical-code-review-5gcym9` — 모든 커밋은 여기로. `origin/main` 병합은 사용자 지시 시에만.
+
+### 확정 결정 (변경 금지, 사용자 합의 완료)
+- **Q1 = opt-in 스코프**: 매니페스트(scope 블록) 선언한 게이트만 스코프 강제. **미선언 → thrash-only 모드(절대 default-deny 금지)**. 비파괴적 마이그레이션.
+- **Q2 = advisory-first 롤아웃**: 스코프 강제(layer-1 deny + layer-2 롤백)는 `plan_gate_scope_enabled` opt-in 플래그(**기본 OFF**) 뒤. layer-2 는 *로그(shadow)* → 데이터 깨끗할 때만 *롤백* 승격.
+- **verifier = Opus + 실행 grounding**(D4), **중첩·fcntl 보류**(D5/D8), **todo.md thrash 카운트 제외**(D9).
+
+### 완료 (커밋·서명·푸시 됨) — project-init 버전별
+| 버전 | 내용 | 핵심 파일 |
+|---|---|---|
+| v1.40.0 | 체크포인트 백엔드 교체: tag/stash → 프라이빗 ref 스냅샷 + touched 매니페스트 롤백 (C1/C2/H9 해소) | `plan_gate_lib.py`(create_snapshot/record_touched/rollback_checkpoint/cleanup_checkpoint), `plan_gate.py`, `plan_gate_cli.py`, `plan_gate_gc.py` |
+| v1.40.1 | 보안 우회 차단 (rm `-rf /*`·`~`·`bash -c`; Grep 디렉토리·glob·`*.env`) | `dangerous_bash_check.py`, `secret_read_guard.py` |
+| v1.41.0 | D9 green-Bash 리셋 배선(신규 PostToolUse(Bash) 훅) | `plan_gate_bash.py`(신규), `hooks.json` |
+| v1.42.0 | 볼륨 scope-creep 산식 삭제 → thrash(created+approved) 정식화, 숨은 소비처 마이그레이션 | `plan_gate_lib.py`, `plan_gate.py`, `plan_gate_cli.py`, `plan_gate_stop_alert.py`, `detect_task_boundary.py`, `plan_gate_session_start.py` |
+| (테스트) | smoke git 설정 격리 (C3) | `tests/smoke_test.py` |
+
+현재 gate 상태 필드(step2 후): `checkpoint_commit`, `cp_snapshot`(touched 매니페스트 `{rel:존재}`), `last_successful_bash_ts`, `file_edit_counts`(thrash), `edit_count_post_approval`(verifier_remind 전용 유지). **삭제됨**: `file_edit_counts_post_approval`·`unique_files_post_approval`·`edit_overrides`·`checkpoint_clean_tag`·`checkpoint_dirty_stash_ref`.
+
+### 남은 단계 (안전 순서 — 사전검토 에이전트 도출, 각 단계 끝에 smoke 통과 + plugin.json 번프 + marketplace 동기화 + 서명 커밋)
+- **step 3 — 매니페스트 파싱 + `has_manifest` 술어 (강제 없음, 추가형, minor)**: tasks/todo.md 의 scope/do-not-touch 블록 파싱. **짝 마커 `<!-- plan-gate: scope BEGIN/END -->`** (종료 모호성 제거). 루트 상대경로 정규화는 기존 `_rel_to_root` 재사용. sha 고정. do-not-touch deny-first. `.plan-gateignore` 우회. **파싱 실패·미선언 → fail-open(thrash-only), 절대 default-deny 금지**. 넓은 글롭(`**`·최상위 단일 글롭)은 자동승인 비활성. 이 단계는 파싱·노출만, 차단 안 함.
+- **step 4 — `transition()` 중앙화 (minor)**: 5개 변이 지점(plan_gate.py 자동승인 블록 + cli `cmd_approve`/`cmd_retry`/`cmd_replan`/`_done_from_created`)의 필드 리셋을 단일 함수로. **각 지점의 리셋 필드 매트릭스를 명시 열거**(누락 시 카운터 오염 회귀 — CLAUDE.md 경고).
+- **step 5 — 스코프 강제 = v2.0.0 (MAJOR, 파괴적 가능)**: layer-1 PreToolUse deny(스코프 밖, `permissionDecision:deny`) + layer-2 PostToolUse(Bash) 스윕→touched 매니페스트 롤백. **`plan_gate_scope_enabled` 플래그 뒤, 기본 OFF**. layer-2 롤백은 **Bash 전용**(Edit 누수는 강한 advisory + revert 카운터 N회 초과 시 하드정지 — *silent Edit 롤백 금지*, desync 루프). `subplan` CLI 신규(**Claude 호출 가능 — `_ACTION_TOKENS` 에 넣지 말 것, `disable-model-invocation` 부여 금지**). t_plan_gate 에 스코프 테스트 추가.
+- **step 6 — verifier opus + 실행 grounding**: `assets/templates/agents/verifier.md` `model: sonnet → opus`(**템플릿 전용 — 기존 사용자 .claude/agents 는 안 바뀜**). 실행 grounding 은 verifier.md 산문 지시일 뿐 훅이 강제 못 함(정직히 명시). spawned-verifier 행위 검증.
+- **(후속) 템플릿 doc-sync**: 템플릿 `CLAUDE.md`·`memory/workflow.md` 의 plan-gate 설명(아직 "5회 차단 + git tag/stash + scope creep" 구설명)을 thrash/프라이빗-ref/스코프로 갱신. placeholder 문서라 smoke 무영향이나 생성 프로젝트 오안내 방지.
+
+### 사전검토 에이전트가 짚은 함정 (구현 시 반드시 준수)
+1. 자동승인(`plan_gate.py` validate_todo_quality 통과 시 즉시 approved)이 스코프를 무력화할 수 있음 → `has_manifest` 술어로 스코프 모드 분기, 미선언은 thrash-only.
+2. PostToolUse(Edit) 롤백은 Claude 파일 인식과 desync 루프 → layer-2 롤백은 Bash 전용.
+3. fcntl 없음 — 단일 에이전트 직렬 실행 전제(상태 read/save 는 매 호출 fresh). 멀티세션 lost-update 는 보류된 위험.
+
+### 운영 규약 (이 repo)
+- 커밋 전 `python3 tests/smoke_test.py` 통과 필수. 서명 커밋 `git commit -S`(서명 누락 시 Stop 훅이 재서명 요구). 플러그인 파일 변경 시 `plugin.json` 버전 번프 + `marketplace.json` description 동기화. ruff 는 PostToolUse 자동(E/W/F/I/B). ast_check 복잡도는 advisory.
+- SemVer git 태그는 `origin/main` 병합 시 부여(feature 브랜치에선 plugin.json 버전만 올림). 누락된 v1.38/v1.39 태그 푸시도 main 병합 시 함께.
+
+---
+
 ## 0. 이 설계가 필요한 이유 (배경)
 
 운영 중 다수의 버그를 처리했으나 **구조적 결함은 증상 패치로 해소되지 않았다.** 비판 리뷰에서 행위 검증으로 확정한 치명 결함:
