@@ -22,6 +22,58 @@
 
 ---
 
+## rev.3 변경 이력 (step 3 후 비판 검토가 막은 것 — step 5 NO-GO 해소, 260614)
+
+step 3(v1.43.0) 랜딩 직후 적대적 비판 검토 서브에이전트가 step 4/5 설계를 코드 대조로
+레드팀했다. **step 5 는 현재 설계로 NO-GO** 판정 — "layer-2 가 airtight 강제 경계"라는
+핵심 주장이 코드로 뒷받침되지 않았다. 확정된 해소안(사용자 합의 완료):
+
+- **[R1 — CRITICAL] layer-2 스윕은 git-status 구동(매니페스트 비의존), git 전용.**
+  `record_touched` 는 PreToolUse Edit 경로(`plan_gate.py`)에서만 호출 → Bash 작성
+  스코프밖 파일은 touched 매니페스트(`gate["cp_snapshot"]`)에 안 들어가고
+  `rollback_checkpoint` 는 그 매니페스트만 순회 → **layer-2 가 잡으라고 존재하는 바로 그
+  파일이 롤백에 invisible**. §3.2 가 탐지(git-status)와 롤백(매니페스트)을 다른 집합으로
+  둔 모순. → step 5 의 layer-2 는 **별도 git-status 스윕**: `git status --porcelain`(`??`
+  포함) → 각 경로 `scope_allows` 판정 → 스코프밖이면 **스냅샷 트리 존재 probe**
+  (`git cat-file -e <snap>:<path>`)로 checkout-vs-`rm` 결정. touched 매니페스트에 의존하지
+  않는다. **비-git 은 등가물 없음 → detect/warn 만(롤백 불가)**. 이 한계를 설계에 명시.
+- **[R2 — CRITICAL] control-plane allowlist.** 강제 ON 시 `scope_allows` 가 매니페스트가
+  사는 `tasks/todo.md`·`.claude/state/**`·`docs/.verifier_result.json`·audit log 편집을
+  스코프밖으로 deny/롤백 → `/replan`(todo.md 재작성) 불능, subplan 의 state 쓰기가 그
+  인가를 롤백하는 자멸 루프, /done verifier 핸드셰이크 불능. → **하드코딩 allowlist**:
+  `tasks/todo.md`, `.claude/state/**`, `docs/.verifier_result.json`,
+  `.claude/state/plan_gate_audit.log`, `.plan-gateignore` 는 매니페스트 무관 **무조건 허용**.
+  §3.1 의 자기변조 한계(todo.md 자유편집)는 이미 수용된 트레이드오프 — 명시적으로 박는다.
+- **[R3 — HIGH, 결정 A] 글롭 매처를 path-aware 로.** 파이썬 `fnmatch` 의 `*` 가 `/` 까지
+  삼켜 `src/auth/*` ≡ `src/auth/**`, `src/*` 가 src 서브트리 전체를 조용히 허용하면서
+  `is_broad_glob` 에도 안 걸림(첫 컴포넌트 글롭만 잡음) → **보안 계약이 읽히는 것보다 넓게
+  허용**. → 글롭→정규식 변환(`*`=한 경로 컴포넌트, `**`=다중 컴포넌트 횡단)으로
+  `scope_allows` 매칭을 교체하고 `is_broad_glob` 을 새 의미 기준으로 재정의. step 5 에서
+  적용하되 step 3 의 broad-glob 자동승인 가드도 함께 정밀화된다(아직 비강제라 교체 위험 0).
+- **[R4 — HIGH, 결정 단일 3상태] 스코프 플래그 = 단일 3상태.** 불리언 하나로는
+  {off, shadow, enforce} 표현 불가(shadow 롤아웃 ↔ on/off 는 직교 축) → 플래그 난립.
+  → `.claude/plan_gate_scope` 파일 **내용**으로 `off`(기본/부재)|`shadow`|`enforce` 표현
+  (기존 `plan_gate_no_git` 플래그-파일 패턴을 값까지 읽도록 확장). **shadow** = 스윕 실행 +
+  `log_audit("scope_violation_shadow")` + advisory, **롤백 안 함**. **enforce** = 스윕 + 롤백.
+  새 플래그 0 개로 advisory-first 확보, audit 로그가 "데이터 깨끗한가" 승격 근거.
+- **[R5 — HIGH] subplan 은 R1 의 하드 선결조건.** subplan 자기승인 + R1 미해소 = 스코프밖
+  Bash 쓰기가 in-flight 무탐지로 생존(검증 ②verifier ③사람은 최종 diff 라 사후엔 잡지만,
+  ①layer-2 의 silent-proof 가 무력) → 설계 목표 "선언 안 된 변경이 *조용히* 통과 못 함"
+  위반. **R1 의 git-status 스윕이 롤백하기 전엔 subplan 출하 금지.**
+- **[R6 — MEDIUM] step 4 `transition()` 은 source-aware.** 5 지점 리셋 매트릭스가
+  전이쌍별로 다름 — `approved_auto`(auto=True/manual=False), `file_edit_counts` 리셋
+  (retry/replan 만, approve 미리셋), `initial_edit_count`(cmd_approve 는 조건부 보존),
+  **scope 리셋은 replan 만(retry 는 같은 계획 유지 → 보존)**. → `transition(gate, to_state)`
+  단순화 **금지**. 명명 전이(`approve_auto`/`approve_manual`/`retry`/`replan`/`done`)로
+  각자 리셋셋 + 공통은 합법전이 가드·state·timestamp 만. 전이별 필드 매트릭스 smoke 단언.
+  (과거 "카운터 오염" 회귀가 실재 — naive 통합은 재발.)
+
+**판정**: step 4 = **GO**(R6 source-aware 제약 하). step 5 = **R1·R2·R3 해소 후 GO**(셋이
+구조적 차단 요인). step 3 구현 자체는 건전(fail-open·deny-first·manifest_sha·broad-glob
+created 잔류+thrash 생존 검증). 잔여 결함: `src/*` 사람승인 맹점(R3 파생), 성능·cosmetic.
+
+---
+
 ## ★ 구현 진행 상황 + 다음 세션 핸드오프 (260614 기준)
 
 > 새 세션은 이 섹션을 먼저 읽으면 바로 이어서 개발 가능. 아래 외에 §2(결정)·§3(아키텍처)를 참조.
@@ -48,8 +100,8 @@
 
 ### 남은 단계 (안전 순서 — 사전검토 에이전트 도출, 각 단계 끝에 smoke 통과 + plugin.json 번프 + marketplace 동기화 + 서명 커밋)
 - ~~**step 3 — 매니페스트 파싱 + `has_manifest` 술어**~~ ✅ **완료 (v1.43.0)**. 짝 마커 BEGIN/END 파싱·`scope_allows`(deny-first+ignore 우회)·manifest_sha 고정·넓은 글롭 자동승인 비활성·fail-open 모두 행위 검증(t_manifest_parse). 강제는 step 5. **step 5 구현 시 주의**: `scope_allows`/`has_manifest` 는 이미 lib 에 있으니 layer-1/2 에서 *호출*만 하면 됨. gate 필드 `scope`/`do_not_touch`/`manifest_sha256` 도 이미 저장됨. `expansions` 필드와 `subplan` CLI 는 아직 미구현.
-- **step 4 — `transition()` 중앙화 (minor)**: 5개 변이 지점(plan_gate.py 자동승인 블록 + cli `cmd_approve`/`cmd_retry`/`cmd_replan`/`_done_from_created`)의 필드 리셋을 단일 함수로. **각 지점의 리셋 필드 매트릭스를 명시 열거**(누락 시 카운터 오염 회귀 — CLAUDE.md 경고).
-- **step 5 — 스코프 강제 = v2.0.0 (MAJOR, 파괴적 가능)**: layer-1 PreToolUse deny(스코프 밖, `permissionDecision:deny`) + layer-2 PostToolUse(Bash) 스윕→touched 매니페스트 롤백. **`plan_gate_scope_enabled` 플래그 뒤, 기본 OFF**. layer-2 롤백은 **Bash 전용**(Edit 누수는 강한 advisory + revert 카운터 N회 초과 시 하드정지 — *silent Edit 롤백 금지*, desync 루프). `subplan` CLI 신규(**Claude 호출 가능 — `_ACTION_TOKENS` 에 넣지 말 것, `disable-model-invocation` 부여 금지**). t_plan_gate 에 스코프 테스트 추가.
+- **step 4 — `transition()` 중앙화 (minor) [GO]**: 5개 변이 지점(plan_gate.py 자동승인 블록 + cli `cmd_approve`/`cmd_retry`/`cmd_replan`/`_done_from_created`)의 필드 리셋을 단일 함수로. **★R6: source-aware 명명 전이**(`approve_auto`/`approve_manual`/`retry`/`replan`/`done`) — `transition(gate, to_state)` 단순화 금지. 공통은 합법전이 가드·state·timestamp 만, 리셋셋은 전이별. **각 전이의 리셋 필드 매트릭스를 smoke 단언**(누락 시 카운터 오염 회귀 — CLAUDE.md 경고). 비대칭 보존: `approved_auto`(auto=True/manual=False), `file_edit_counts`(retry/replan 만 리셋), **scope(replan 리셋, retry 보존)**, `initial_edit_count`(cmd_approve 조건부 보존).
+- **step 5 — 스코프 강제 = v2.0.0 (MAJOR, 파괴적 가능) [R1·R2·R3 해소 후 GO]**: layer-1 PreToolUse deny(스코프 밖, `permissionDecision:deny`) + **★R1: layer-2 PostToolUse(Bash) = git-status 구동 스윕**(`git status --porcelain` → `scope_allows` → 스냅샷 트리 probe 로 checkout/`rm`) — touched 매니페스트 비의존, **git 전용**(비-git=detect/warn). **★R4: 단일 3상태 플래그** `.claude/plan_gate_scope`={off|shadow|enforce}, 기본 off, shadow=스윕+audit+advisory(롤백X)/enforce=스윕+롤백. **★R2: control-plane allowlist**(`tasks/todo.md`·`.claude/state/**`·`docs/.verifier_result.json`·audit log·`.plan-gateignore` 무조건 허용). **★R3: path-aware 글롭 매처**(`*`=한 컴포넌트/`**`=횡단, `is_broad_glob` 재정의). layer-2 롤백은 **Bash 전용**(Edit 누수는 강한 advisory — *silent Edit 롤백 금지*, desync 루프). **★R5: `subplan` CLI 는 R1 스윕 롤백 후에만 출하**(미해소 시 스코프밖 Bash 쓰기 조용히 생존). subplan(**Claude 호출 가능 — `_ACTION_TOKENS` 에 넣지 말 것, `disable-model-invocation` 부여 금지**). 스코프 행위 테스트(특히 **Bash echo→스코프밖 파일→롤백** smoke).
 - **step 6 — verifier opus + 실행 grounding**: `assets/templates/agents/verifier.md` `model: sonnet → opus`(**템플릿 전용 — 기존 사용자 .claude/agents 는 안 바뀜**). 실행 grounding 은 verifier.md 산문 지시일 뿐 훅이 강제 못 함(정직히 명시). spawned-verifier 행위 검증.
 - **(후속) 템플릿 doc-sync**: 템플릿 `CLAUDE.md`·`memory/workflow.md` 의 plan-gate 설명(아직 "5회 차단 + git tag/stash + scope creep" 구설명)을 thrash/프라이빗-ref/스코프로 갱신. placeholder 문서라 smoke 무영향이나 생성 프로젝트 오안내 방지.
 
