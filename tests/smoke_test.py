@@ -1188,6 +1188,18 @@ def t_scope_layer2(base: Path) -> None:
     )
 
 
+def t_verifier_spec() -> None:
+    """step 6 — verifier 템플릿: opus 모델 + 실행 grounding 규칙(✅ 최소 1개 실제 실행)."""
+    print("[31] verifier 스펙 (opus + 실행 grounding)")
+    text = (TEMPLATES / "agents" / "verifier.md").read_text(encoding="utf-8")
+    check("verifier model: opus", "model: opus" in text and "model: sonnet" not in text)
+    check(
+        "실행 grounding 규칙 — 전 항목 static ✅ 금지",
+        "실행 grounding" in text and "전 항목이 `static` 인데 `✅` 는 금지" in text,
+    )
+    check("method enum 보유", "isolated_exec" in text and "production_exec" in text)
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -1251,6 +1263,7 @@ def main() -> int:
         t_scope_layer2(base)
     t_scaffold_consistency()
     t_command_files()
+    t_verifier_spec()
     t_platform_compat()
     t_hook_future_imports()
     t_version_sync()
