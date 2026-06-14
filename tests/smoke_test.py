@@ -1054,6 +1054,140 @@ def t_transition_retry_replan(base: Path) -> None:
     )
 
 
+def t_scope_unit(base: Path) -> None:
+    """step 5 — R3 path-aware 매처 + R2 allowlist + R4 3상태 플래그 (단위)."""
+    print("[28] step5 스코프 매처/allowlist/모드 (단위)")
+    lib = _reload_lib()
+
+    check(
+        "path_match: ** 서브트리 횡단",
+        lib._path_match("src/auth/sub/x.py", "src/auth/**")
+        and lib._path_match("src/auth/x.py", "src/auth/**"),
+    )
+    check(
+        "path_match: * 한 컴포넌트만 (R3 핵심 — 서브트리 누출 차단)",
+        lib._path_match("src/auth/x.py", "src/auth/*")
+        and not lib._path_match("src/auth/sub/x.py", "src/auth/*"),
+    )
+    check(
+        "path_match: 리터럴 exact",
+        lib._path_match("src/models/user.py", "src/models/user.py")
+        and not lib._path_match("src/models/admin.py", "src/models/user.py"),
+    )
+    check(
+        "path_match: **/x 임의 깊이 + 단일 * 최상위만",
+        lib._path_match("x.py", "**/x.py")
+        and lib._path_match("a/b/x.py", "**/x.py")
+        and lib._path_match("top.py", "*")
+        and not lib._path_match("a/b.py", "*"),
+    )
+    check(
+        "is_control_plane (R2 allowlist)",
+        lib.is_control_plane("tasks/todo.md")
+        and lib.is_control_plane(".claude/state/x.json")
+        and lib.is_control_plane(".claude/plan_gate_enabled")
+        and lib.is_control_plane("docs/.verifier_result.json")
+        and lib.is_control_plane(".plan-gateignore")
+        and not lib.is_control_plane("src/auth/x.py"),
+    )
+
+    p = make_project(base, "scope_mode")
+    check("mode 기본 off", lib.scope_mode(p) == "off")
+    lib.set_scope_mode(p, "shadow")
+    check("set shadow", lib.scope_mode(p) == "shadow")
+    lib.set_scope_mode(p, "enforce")
+    check("set enforce", lib.scope_mode(p) == "enforce")
+    (p / ".claude" / "plan_gate_scope").write_text("garbage\n")
+    check("미지값 → off (안전 기본)", lib.scope_mode(p) == "off")
+    lib.set_scope_mode(p, "off")
+    check("off → 플래그 삭제", not (p / ".claude" / "plan_gate_scope").exists())
+
+
+def _scoped_gate_project(base: Path, name: str) -> Path:
+    """매니페스트 자동승인 + 스냅샷까지 만든 git 프로젝트 (layer-1/2 부트스트랩)."""
+    p = make_project(base, name)
+    (p / "tasks").mkdir()
+    (p / "tasks" / "todo.md").write_text(_MANIFEST_TODO)
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "src" / "auth" / "x.py"), p)
+    return p
+
+
+def t_scope_layer1(base: Path) -> None:
+    """step 5 — layer-1 PreToolUse 스코프 강제 (enforce=deny / shadow=환기)."""
+    print("[29] step5 layer-1 스코프 deny/shadow")
+    hook = HOOKS / "plan_gate.py"
+    p = _scoped_gate_project(base, "scope_l1")
+    g = get_gate(p)
+    check("부트스트랩: 자동승인 + 스코프 저장", g["state"] == "approved" and bool(g.get("scope")), f"{g.get('state')}")
+
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    r = run_hook(hook, edit_payload("Edit", p / "src" / "other" / "evil.py"), p)
+    check(
+        "enforce: 스코프 밖 Edit → deny",
+        '"deny"' in (r.stdout or "") and "스코프 밖" in (r.stdout or ""),
+        f"out={r.stdout[:140]!r}",
+    )
+    r = run_hook(hook, edit_payload("Edit", p / "src" / "auth" / "y.py"), p)
+    check("enforce: 스코프 안 Edit → 허용", '"deny"' not in (r.stdout or ""), f"out={r.stdout[:120]!r}")
+    r = run_hook(hook, edit_payload("Write", p / "docs" / ".verifier_result.json"), p)
+    check("enforce: control-plane → 허용", '"deny"' not in (r.stdout or ""), f"out={r.stdout[:120]!r}")
+
+    (p / ".claude" / "plan_gate_scope").write_text("shadow\n")
+    r = run_hook(hook, edit_payload("Edit", p / "src" / "other" / "evil2.py"), p)
+    check(
+        "shadow: 스코프 밖 → 허용 + 환기(차단 없음)",
+        '"deny"' not in (r.stdout or "") and "shadow" in (r.stdout or ""),
+        f"out={r.stdout[:160]!r}",
+    )
+
+
+def t_scope_layer2(base: Path) -> None:
+    """step 5 — layer-2 PostToolUse(Bash) git-status 스윕 (R1).
+
+    핵심: touched 매니페스트가 아닌 git status 기반이라 Bash 우회 쓰기를 잡는다.
+    """
+    print("[30] step5 layer-2 git-status 스윕")
+    hook = HOOKS / "plan_gate_bash.py"
+    p = _scoped_gate_project(base, "scope_l2")
+    g = get_gate(p)
+    check("부트스트랩: 스냅샷 커밋 생성", bool(g.get("checkpoint_commit")), f"ckpt={g.get('checkpoint_commit')}")
+
+    def bash(code: int) -> dict:
+        return {"tool_name": "Bash", "tool_input": {"command": "echo x"}, "tool_response": {"exit_code": code}}
+
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    (p / "src" / "other").mkdir(parents=True)
+    evil = p / "src" / "other" / "evil.py"
+    evil.write_text("evil")
+    r = run_hook(hook, bash(0), p)
+    check(
+        "enforce: Bash 스코프 밖 신규 파일 → 롤백(삭제)",
+        not evil.exists() and "되돌렸" in (r.stdout or ""),
+        f"exists={evil.exists()} out={r.stdout[:140]!r}",
+    )
+
+    evil.write_text("evil again")
+    run_hook(hook, bash(1), p)  # 실패한 Bash 도 파일을 남길 수 있다
+    check("enforce: exit≠0 Bash 도 스윕", not evil.exists(), f"exists={evil.exists()}")
+
+    (p / ".claude" / "plan_gate_scope").write_text("shadow\n")
+    evil.write_text("evil shadow")
+    r = run_hook(hook, bash(0), p)
+    check(
+        "shadow: 스코프 밖 보존 + 환기",
+        evil.exists() and "shadow" in (r.stdout or ""),
+        f"exists={evil.exists()} out={r.stdout[:160]!r}",
+    )
+
+    # 자멸 방지: enforce 스윕이 .claude 플래그 파일(스코프 밖·untracked)을 지우면 안 됨
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    run_hook(hook, bash(0), p)
+    check(
+        "control-plane(.claude) 자멸 방지 — 플래그 보존",
+        (p / ".claude" / "plan_gate_enabled").exists() and (p / ".claude" / "plan_gate_scope").exists(),
+    )
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -1112,6 +1246,9 @@ def main() -> int:
         t_manifest_parse(base)
         t_transition_approve(base)
         t_transition_retry_replan(base)
+        t_scope_unit(base)
+        t_scope_layer1(base)
+        t_scope_layer2(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()

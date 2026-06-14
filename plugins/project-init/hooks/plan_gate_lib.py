@@ -122,6 +122,36 @@ def unset_prefer_no_git(root: Path) -> None:
         p.unlink()
 
 
+# ── 스코프 강제 모드 (R4 — 단일 3상태 플래그) ─────────────────────────────
+# 불리언 하나로는 {off, shadow, enforce} 직교 축을 표현 못 한다(롤아웃 ↔ on/off).
+# .claude/plan_gate_scope 파일 내용으로 모드를 표현 — 부재/미지값이면 off(기본).
+PLAN_GATE_SCOPE_FLAG = ".claude/plan_gate_scope"
+SCOPE_MODES = ("off", "shadow", "enforce")
+
+
+def scope_mode(root: Path) -> str:
+    """스코프 강제 모드: off(기본)|shadow(감지·기록만)|enforce(차단·롤백)."""
+    p = root / PLAN_GATE_SCOPE_FLAG
+    if not p.exists():
+        return "off"
+    try:
+        val = p.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return "off"
+    return val if val in SCOPE_MODES else "off"
+
+
+def set_scope_mode(root: Path, mode: str) -> None:
+    """모드 플래그 기록. off 면 파일 삭제(부재=off 와 동치)."""
+    p = root / PLAN_GATE_SCOPE_FLAG
+    if mode == "off":
+        if p.exists():
+            p.unlink()
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(mode + "\n")
+
+
 # ── 상태 파일 입출력 ─────────────────────────────────────────────────────
 def state_path(root: Path) -> Path:
     return root / ".claude" / "state" / "plan_gate.json"
@@ -350,6 +380,63 @@ def cleanup_checkpoint(root: Path, gate: dict[str, Any]) -> None:
     if gate.get("checkpoint_commit"):
         _git(root, "update-ref", "-d", snapshot_ref(gate["id"]))
     shutil.rmtree(cp_checkpoint_dir(root, gate["id"]), ignore_errors=True)
+
+
+# ── layer-2 스코프 스윕 (R1 — git-status 구동, 매니페스트 비의존) ──────────
+# 핵심 교훈(rev.3 R1): touched 매니페스트만 롤백하면 정작 잡으라는 Bash 우회
+# 쓰기(스코프밖 파일)가 매니페스트에 안 들어가 invisible 했다. 따라서 실제
+# working tree 변경 전체를 git status 로 훑어 스코프밖을 처리한다. git 전용 —
+# 비-git 은 등가 스윕이 없어 빈 목록(호출자가 detect/warn 만).
+def _git_status_paths(root: Path) -> list[str]:
+    """working tree 의 변경/신규(untracked 포함) 파일 루트 상대경로 목록."""
+    r = _git(root, "status", "--porcelain", "--untracked-files=all")
+    if r.returncode != 0:
+        return []
+    paths: list[str] = []
+    for line in r.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:  # 리네임 "old -> new" 는 new 만
+            path = path.split(" -> ", 1)[1]
+        paths.append(path.strip().strip('"'))
+    return paths
+
+
+def _snapshot_has_path(root: Path, commit: str, rel: str) -> bool:
+    """스냅샷 커밋 트리에 해당 경로가 존재했는지 (git cat-file probe)."""
+    return _git(root, "cat-file", "-e", f"{commit}:{rel}").returncode == 0
+
+
+def scope_sweep(root: Path, gate: dict[str, Any], mode: str) -> list[str]:
+    """layer-2: git-status 로 실제 변경 파일을 훑어 스코프밖을 처리 (R1).
+
+    mode=enforce: 스코프밖 파일을 스냅샷 상태로 롤백(존재했으면 checkout / 신규면 rm).
+    mode=shadow: 롤백 없이 위반 목록만 반환(호출자가 audit). off/매니페스트 없음/비-git
+    → 빈 목록. 반환: 스코프밖으로 판정된 rel 목록.
+    """
+    if mode == "off" or not has_manifest(gate) or not has_git(root):
+        return []
+    commit = gate.get("checkpoint_commit")
+    cpdir = cp_checkpoint_dir(root, gate["id"])
+    ignore_patterns = load_gate_ignore(root)
+    violations: list[str] = []
+    for rel in _git_status_paths(root):
+        if scope_allows(str(root / rel), gate, root, ignore_patterns):
+            continue
+        violations.append(rel)
+        if mode == "enforce":
+            existed = _snapshot_has_path(root, commit, rel) if commit else False
+            _rollback_one(root, rel, existed, commit, cpdir)
+    if violations:
+        log_audit(
+            root,
+            "scope_violation_" + ("enforced" if mode == "enforce" else "shadow"),
+            gate_id=gate["id"],
+            count=len(violations),
+            files=violations[:20],
+        )
+    return violations
 
 
 # ── todo.md 해시 ────────────────────────────────────────────────────────
@@ -603,12 +690,12 @@ def auto_add_gate_ignore(file_path: str, root: Path, existing_patterns: list[str
     return None
 
 
-# ── 매니페스트 파싱 (step 3 — 스코프 계약 파싱·노출, 강제는 step 5) ─────────
+# ── 매니페스트 파싱 (스코프 계약 — 강제는 scope_mode 플래그로 분기) ─────────
 # tasks/todo.md 안의 짝 마커 블록에서 scope / do-not-touch 파일 패턴을 읽는다.
 # 짝 마커(BEGIN/END)로 단일 마커의 "어디서 끝나는가" 모호성을 제거한다.
-# 이 단계는 파싱·노출만 — 어떤 편집도 차단하지 않는다(강제는 step 5,
-# plan_gate_scope_enabled 플래그 뒤 기본 OFF). 미선언/파싱 실패 → fail-open:
-# 스코프 없음 = thrash-only 모드. 절대 default-deny 금지(확정 결정 Q1).
+# 파싱 결과는 승인 시 gate.scope/do_not_touch 에 저장되고, 강제 여부는
+# scope_mode(off|shadow|enforce) 가 결정한다(기본 off — 부재=off). 미선언/파싱
+# 실패 → fail-open: 스코프 없음 = thrash-only 모드. 절대 default-deny 금지(결정 Q1).
 MANIFEST_MARKERS: dict[str, tuple[str, str]] = {
     "scope": (
         "<!-- plan-gate: scope BEGIN -->",
@@ -723,6 +810,67 @@ def apply_manifest(root: Path, gate: dict[str, Any]) -> dict[str, list[str]] | N
     return manifest
 
 
+# ── path-aware 글롭 매처 (R3 — fnmatch 의 `*`→`/` 삼킴 결함 제거) ──────────
+def _glob_to_regex(pattern: str) -> str:
+    """글롭 패턴을 path-aware 정규식 문자열로 변환.
+
+    `*` = 한 경로 컴포넌트 내(슬래시 미포함), `**`(+옵션 `/`) = 0개 이상 컴포넌트
+    횡단, `?` = 슬래시 아닌 한 글자. 나머지는 리터럴. 선행/후행 `/` 는 정규화.
+    """
+    p = pattern.strip().strip("/")
+    out = ["^"]
+    i, n = 0, len(p)
+    while i < n:
+        c = p[i]
+        if c == "*":
+            if i + 1 < n and p[i + 1] == "*":
+                if i + 2 < n and p[i + 2] == "/":
+                    out.append("(?:.*/)?")  # `**/x` → x, a/x, a/b/x 모두 매칭
+                    i += 3
+                else:
+                    out.append(".*")  # 후행 `**` → 서브트리 전체
+                    i += 2
+            else:
+                out.append("[^/]*")  # 단일 `*` → 한 컴포넌트 내
+                i += 1
+        elif c == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(c))
+            i += 1
+    out.append("$")
+    return "".join(out)
+
+
+def _path_match(rel: str, pattern: str) -> bool:
+    """rel(루트 상대경로)이 path-aware 글롭 pattern 에 매칭되는지 (R3)."""
+    norm = rel.replace("\\", "/").strip("/")
+    try:
+        return re.match(_glob_to_regex(pattern), norm) is not None
+    except re.error:
+        return False
+
+
+# ── control-plane allowlist (R2 — 강제 ON 이어도 무조건 허용) ──────────────
+# 매니페스트·게이트 상태·검증결과·ignore 파일을 스코프밖으로 막으면 /replan·
+# subplan·verifier 핸드셰이크가 자멸한다(rev.3 R2). 이 패턴은 계약과 무관하게 허용.
+# `.claude/**` 전체를 허용한다: state 뿐 아니라 plan_gate_enabled/plan_gate_scope
+# 같은 플래그 파일도 포함해야 한다 — layer-2 스윕이 이들(untracked·스코프밖)을
+# 롤백하면 plan-gate 가 자기 자신을 비활성화하는 자멸이 발생한다.
+_CONTROL_PLANE_ALLOW = (
+    "tasks/todo.md",
+    ".claude/**",
+    "docs/.verifier_result.json",
+    ".plan-gateignore",
+)
+
+
+def is_control_plane(rel: str) -> bool:
+    """plan-gate 자체 운영 파일(매니페스트·상태·검증결과·ignore)인지 (R2 allowlist)."""
+    return any(_path_match(rel, pat) for pat in _CONTROL_PLANE_ALLOW)
+
+
 def scope_allows(
     target: str,
     gate: dict[str, Any],
@@ -732,25 +880,62 @@ def scope_allows(
     """target(상대/절대)이 게이트 스코프 계약상 허용되는지 (deny-first).
 
     - 매니페스트 미선언(has_manifest False) → True (fail-open, thrash-only).
+    - control-plane(매니페스트·상태·검증결과·ignore) → True (R2, 무조건 허용).
     - .plan-gateignore 일치 → True (생성물/락파일은 스코프 검사 우회).
     - do-not-touch 일치 → False (scope 보다 우선, detour 로도 못 품).
     - scope 일치 → True, 아니면 False(루트 밖 포함).
 
-    ※ step 3 은 이 함수를 노출만 하고 강제하지 않는다 — 차단은 step 5.
-    매칭은 루트 상대경로 정규화 기준 fnmatch (절대경로 미스매치 버그 반복 금지).
+    매칭은 루트 상대경로 정규화 기준 path-aware 글롭(_path_match, R3) — fnmatch 의
+    '`*` 가 `/` 까지 삼킴' 결함을 제거해 계약이 적힌 것보다 넓게 허용하지 않는다.
     """
     if not has_manifest(gate):
         return True
     rel = _rel_to_root(root, target)
     if rel is None:
         return False  # 루트 밖 — 스코프 안에 있을 수 없다
+    if is_control_plane(rel):
+        return True  # R2: plan-gate 운영 파일은 강제 ON 이어도 무조건 허용
     if ignore_patterns is None:
         ignore_patterns = load_gate_ignore(root)
     if is_gate_ignored(str(root / rel), root, ignore_patterns):
         return True
-    if any(fnmatch.fnmatch(rel, pat) for pat in gate.get("do_not_touch", [])):
+    if any(_path_match(rel, pat) for pat in gate.get("do_not_touch", [])):
         return False
-    return any(fnmatch.fnmatch(rel, pat) for pat in gate.get("scope", []))
+    return any(_path_match(rel, pat) for pat in gate.get("scope", []))
+
+
+def format_scope_deny(rel: str, gate: dict[str, Any]) -> str:
+    """layer-1 스코프 밖 편집 거부 사유 (permissionDecisionReason, enforce)."""
+    scope = ", ".join(gate.get("scope", [])) or "(없음)"
+    dnt = gate.get("do_not_touch") or []
+    dnt_line = f"\n  do-not-touch: {', '.join(dnt)}" if dnt else ""
+    return (
+        f"[plan-gate] 🛑 스코프 밖 편집 거부: {rel}\n"
+        f"  이번 계획의 scope: {scope}{dnt_line}\n"
+        f"  scope 안의 파일만 수정하거나, 계획 변경이 필요하면 /replan 으로 "
+        f"tasks/todo.md 의 매니페스트를 갱신한 뒤 /approve-plan 하세요."
+    )
+
+
+def format_scope_shadow(rel: str, layer: str) -> str:
+    """shadow 모드 위반 환기 (차단·롤백 없음 — additionalContext 용)."""
+    return (
+        f"[plan-gate] 👁  스코프 위반 감지(shadow, {layer}): {rel}\n"
+        f"  enforce 모드였다면 거부/롤백됐을 변경입니다. 현재는 기록만 합니다 "
+        f"(audit log)."
+    )
+
+
+def format_scope_rollback(violations: list[str]) -> str:
+    """layer-2 enforce 롤백 알림 (Claude 환기 — desync 방지, additionalContext 용)."""
+    shown = "\n".join(f"  • {v}" for v in violations[:10])
+    more = f"\n  • ... ({len(violations) - 10}개 더)" if len(violations) > 10 else ""
+    return (
+        f"[plan-gate] ↩️  스코프 밖 변경 {len(violations)}건을 체크포인트 상태로 "
+        f"되돌렸습니다(enforce):\n{shown}{more}\n"
+        f"  방금 Bash 가 만든/수정한 스코프 밖 파일이 복원·삭제됐습니다. "
+        f"필요한 변경이면 tasks/todo.md scope 에 추가 후 /replan→/approve-plan 하세요."
+    )
 
 
 def format_broad_glob_hint(manifest: dict[str, list[str]]) -> str:

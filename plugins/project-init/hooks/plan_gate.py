@@ -38,6 +38,19 @@ def _print_stderr(msg: str) -> None:
     sys.stderr.write(msg + "\n")
 
 
+def _emit_deny(reason: str) -> None:
+    """PreToolUse deny: 이 도구 호출만 거부하고 사유를 Claude 에 전달 (layer-1)."""
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.flush()
+
+
 def _emit_advisories(items: list[str]) -> None:
     """누적된 환기 메시지를 hookSpecificOutput.additionalContext JSON 한 번으로 출력."""
     if not items:
@@ -52,6 +65,29 @@ def _emit_advisories(items: list[str]) -> None:
     }
     sys.stdout.write(json.dumps(payload, ensure_ascii=False))
     sys.stdout.flush()
+
+
+def _layer1_denied(root, gate, state, target, advisories: list[str]) -> bool:
+    """layer-1 스코프 판정. enforce 거부면 deny emit 후 True(호출자 return 0).
+
+    shadow 위반이면 advisory 누적 후 False. off/허용/매니페스트 없음 → False.
+    스코프 밖 Edit/Write 를 편집 전에 거부한다 — Bash 우회는 layer-2 가 사후 스윕.
+    enforce 는 이 도구 호출만 deny(Claude 는 다른 in-scope 파일로 진행 가능).
+    """
+    if not target:
+        return False
+    mode = lib.scope_mode(root)
+    if mode == "off" or not lib.has_manifest(gate) or lib.scope_allows(target, gate, root):
+        return False
+    rel = lib._rel_to_root(root, target) or target
+    if mode == "enforce":
+        lib.log_audit(root, "scope_deny_enforced", gate_id=gate["id"], file=rel)
+        lib.save_state(root, state)  # 편집 미발생 — 카운터 미증가
+        _emit_deny(lib.format_scope_deny(rel, gate))
+        return True
+    lib.log_audit(root, "scope_deny_shadow", gate_id=gate["id"], file=rel)
+    advisories.append(lib.format_scope_shadow(rel, "Edit"))
+    return False
 
 
 def main() -> int:
@@ -115,14 +151,14 @@ def main() -> int:
                         lib.transition(gate, "approve_auto")
                         gate["todo_md_sha256"] = current_sha
                         gate["todo_md_mtime"] = current_mtime
-                        # 매니페스트 선언 시 스코프 계약 저장(노출만 — 강제는 step 5)
+                        # 매니페스트 선언 시 스코프 계약 저장 (강제 여부는 scope_mode)
                         if manifest:
                             gate["scope"] = manifest["scope"]
                             gate["do_not_touch"] = manifest["do_not_touch"]
                             gate["manifest_sha256"] = lib.manifest_sha(todo_text)
                         scope_note = (
                             f"\n  스코프 계약: {len(manifest['scope'])}개 패턴 선언됨"
-                            " (현재 노출만 — 강제는 다음 버전)"
+                            f" (강제={lib.scope_mode(root)})"
                             if manifest
                             else ""
                         )
@@ -178,6 +214,10 @@ def main() -> int:
         if lib.is_gate_ignored(target, root, ignore_patterns):
             lib.save_state(root, state)
             return 0
+
+    # ── layer-1 스코프 강제 (R3/R4 — enforce=deny / shadow=환기) ──────────
+    if _layer1_denied(root, gate, state, target, advisories):
+        return 0  # enforce: 이 편집만 거부(deny JSON), 카운터 미증가
 
     # ── 편집 직전 touched 기록 (롤백 매니페스트) ─────────────────────────
     # git: 스냅샷 커밋이 내용 출처라 존재 비트만 / 비-git: cp 디렉토리에 복사.

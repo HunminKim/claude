@@ -32,14 +32,17 @@ def _get_feature_hint(root) -> str:
     return "현재 작업"
 
 
-def _scope_note(manifest) -> str:
-    """매니페스트 선언 시 스코프 계약 저장 안내 한 줄 (강제는 step 5 — 현재 노출만)."""
+def _scope_note(manifest, root) -> str:
+    """매니페스트 선언 시 스코프 계약 저장 + 현재 강제 모드 안내."""
     if not manifest:
         return ""
-    return (
-        f"\n  스코프 계약: {len(manifest['scope'])}개 패턴 저장됨"
-        " (현재 노출만 — 강제는 다음 버전)"
-    )
+    mode = lib.scope_mode(root)
+    tail = {
+        "off": "강제 off — 기록만 (켜기: /plan-gate-scope-shadow|enforce)",
+        "shadow": "강제 shadow — 위반 감지·기록만",
+        "enforce": "강제 enforce — 스코프 밖 편집 거부 + Bash 롤백",
+    }[mode]
+    return f"\n  스코프 계약: {len(manifest['scope'])}개 패턴 저장됨 ({tail})"
 
 
 def _info(msg: str) -> None:
@@ -75,7 +78,7 @@ def cmd_approve(root, state) -> int:
             f"[plan-gate approve] 선승인 완료: {gate['id']}\n"
             f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
             f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복"
-            + _scope_note(manifest)
+            + _scope_note(manifest, root)
         )
         return 0
 
@@ -114,7 +117,7 @@ def cmd_approve(root, state) -> int:
     _info(
         f"[plan-gate approve] 승인 완료: {gate['id']}\n"
         f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 (scope creep 방지)"
-        + _scope_note(manifest)
+        + _scope_note(manifest, root)
     )
     return 0
 
@@ -385,6 +388,33 @@ def cmd_use_git(root, state) -> int:
     return 0
 
 
+def _set_scope_mode(root, mode: str) -> int:
+    cur = lib.scope_mode(root)
+    if cur == mode:
+        _info(f"[plan-gate scope] 이미 '{mode}' 모드입니다.")
+        return 0
+    lib.set_scope_mode(root, mode)
+    desc = {
+        "off": "스코프 강제 끔 — 매니페스트는 기록만(thrash 가드는 유지).",
+        "shadow": "감지·기록만 — 위반을 audit 에 남기되 차단·롤백 안 함(롤아웃 관찰용).",
+        "enforce": "강제 — 스코프 밖 Edit 거부(layer-1) + Bash 스코프밖 변경 롤백(layer-2).",
+    }[mode]
+    _info(f"[plan-gate scope] '{cur}' → '{mode}' 전환.\n  {desc}")
+    return 0
+
+
+def cmd_scope_off(root, state) -> int:
+    return _set_scope_mode(root, "off")
+
+
+def cmd_scope_shadow(root, state) -> int:
+    return _set_scope_mode(root, "shadow")
+
+
+def cmd_scope_enforce(root, state) -> int:
+    return _set_scope_mode(root, "enforce")
+
+
 _NEXT_ACTION = {
     "created": "→ 다음 액션: tasks/todo.md 작성 → /approve-plan",
     "approved": "→ 다음 액션: 작업 진행 → @verifier 호출 → /done | /rollback",
@@ -408,10 +438,16 @@ def cmd_status(root, state) -> int:
         action_key = g_state
     next_action = _NEXT_ACTION.get(action_key, "")
     scope = gate.get("scope") or []
+    mode = lib.scope_mode(root)
+    mode_label = {
+        "off": "off (기록만)",
+        "shadow": "shadow (감지·기록)",
+        "enforce": "enforce (차단·롤백)",
+    }[mode]
     scope_line = (
-        f"{len(scope)}개 패턴 (스코프 모드 — 현재 노출만)"
+        f"{len(scope)}개 패턴 / 강제={mode_label}"
         if scope
-        else "없음 (thrash-only)"
+        else f"없음 (thrash-only) / 강제={mode_label}"
     )
     _info(
         f"[plan-gate status]\n"
@@ -444,6 +480,9 @@ COMMANDS = {
     "off": cmd_off,
     "no-git": cmd_no_git,
     "use-git": cmd_use_git,
+    "scope-off": cmd_scope_off,
+    "scope-shadow": cmd_scope_shadow,
+    "scope-enforce": cmd_scope_enforce,
 }
 
 

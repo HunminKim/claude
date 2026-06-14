@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""PostToolUse hook (Bash) — green-Bash 수렴 신호로 thrash 카운터 리셋.
+"""PostToolUse hook (Bash) — layer-2 스코프 스윕 + green-Bash thrash 리셋.
 
-역할: Bash 가 성공(exit 0)하면 "현재 작업이 수렴 중"이라는 신호로 보고,
-현재 게이트의 파일별 반복 편집 카운터(file_edit_counts)를 리셋한다. 이렇게 하면
-정상적으로 열심히 반복 편집하는 경우(중간에 테스트가 통과)는 반복 트리거(thrash)에
-걸리지 않고, 수렴 없이 같은 파일만 계속 패치하는 flailing(계속 실패)만 트리거에
-도달한다 — v1 반복 트리거 오탐의 핵심 원인을 제거하는 가드(설계 D9).
+역할 1 (layer-2 스코프 강제, R1): Bash 가 스코프 밖 파일을 만들거나 수정했는지
+git status 로 훑어, enforce 면 체크포인트 상태로 롤백하고 shadow 면 기록만 한다.
+touched 매니페스트가 아닌 실제 working tree 변경을 보므로 `echo > 스코프밖파일`
+같은 Edit 우회까지 잡는다(rev.3 R1). exit code 무관(실패한 Bash 도 파일을 남길 수 있다).
+
+역할 2 (green-bash 수렴 신호, D9): Bash 성공(exit 0)이면 현재 게이트의 파일별
+반복 편집 카운터(file_edit_counts)를 리셋해, 수렴 중인 정상 반복은 thrash 트리거에
+걸리지 않고 수렴 없는 flailing 만 도달하게 한다.
 
 동작 단계:
-  1. stdin JSON 에서 tool_response.exit_code 확인 (Bash 외 / 실패 시 no-op)
-  2. plan-gate 활성 + 활성 게이트 존재 시에만 동작
-  3. green(exit 0) → gate['last_successful_bash_ts'] 기록 + 반복 카운터 리셋
+  1. stdin JSON 에서 tool_name=Bash + 활성 게이트 확인 (아니면 no-op)
+  2. scope_mode != off + 매니페스트 선언 시 layer-2 스윕(enforce 롤백 / shadow 기록)
+  3. exit 0 이면 green-bash 리셋
+  4. 스코프 위반이 있었으면 Claude 에 환기(additionalContext)
 
-출력 채널: 없음 (상태 부수효과 — 사용자/Claude 메시지 없음, silent exit 0)
+출력 채널: 환기 (스코프 위반 시 exit 0 + stdout hookSpecificOutput.additionalContext
+JSON — Claude 가 롤백·위반을 인지해 desync 방지). 위반 없으면 무출력(silent exit 0).
 """
 
 from __future__ import annotations
@@ -27,11 +32,9 @@ import plan_gate_lib as lib  # noqa: E402
 
 
 def _active_gate(data: dict[str, Any]):
-    """green Bash 처리 대상이면 (root, state, gate), 아니면 None."""
+    """Bash + 활성 게이트면 (root, state, gate), 아니면 None. (exit code 무관)"""
     if data.get("tool_name") != "Bash":
         return None
-    if (data.get("tool_response") or {}).get("exit_code", 0) != 0:
-        return None  # 실패/비정상 종료는 수렴 신호가 아니다
     root = lib.find_project_root()
     if root is None or not lib.is_plan_gate_enabled(root):
         return None
@@ -40,6 +43,31 @@ def _active_gate(data: dict[str, Any]):
     if gate is None or gate.get("state") in ("done", "rolled_back"):
         return None
     return root, state, gate
+
+
+def _emit_advisory(msg: str) -> None:
+    """스코프 위반 환기 — additionalContext 로 Claude context 에 주입."""
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.flush()
+
+
+def _sweep_advisory(root, gate, mode: str) -> str | None:
+    """layer-2 스윕 실행 후 환기 메시지(있으면). off/매니페스트 없음 → None."""
+    if mode == "off" or not lib.has_manifest(gate):
+        return None
+    violations = lib.scope_sweep(root, gate, mode)
+    if not violations:
+        return None
+    if mode == "enforce":
+        return lib.format_scope_rollback(violations)
+    summary = "; ".join(violations[:5]) + (" …" if len(violations) > 5 else "")
+    return lib.format_scope_shadow(summary, "Bash")
 
 
 def main() -> int:
@@ -52,14 +80,22 @@ def main() -> int:
     if ctx is None:
         return 0
     root, state, gate = ctx
+    exit_code = (data.get("tool_response") or {}).get("exit_code", 0)
 
-    # green Bash = 수렴 신호 → 반복(thrash) 카운터 리셋 + 성공 시각 기록.
-    had_counts = bool(gate.get("file_edit_counts"))
-    gate["last_successful_bash_ts"] = lib.now_iso()
-    gate["file_edit_counts"] = {}
-    lib.save_state(root, state)
-    if had_counts:
-        lib.log_audit(root, "green_bash_reset", gate_id=gate["id"])
+    # ── layer-2 스코프 스윕 (R1) — exit code 무관 ──────────────────────────
+    advisory = _sweep_advisory(root, gate, lib.scope_mode(root))
+
+    # ── green Bash = 수렴 신호 → 반복(thrash) 카운터 리셋 (exit 0 만) ──────
+    if exit_code == 0:
+        had_counts = bool(gate.get("file_edit_counts"))
+        gate["last_successful_bash_ts"] = lib.now_iso()
+        gate["file_edit_counts"] = {}
+        lib.save_state(root, state)
+        if had_counts:
+            lib.log_audit(root, "green_bash_reset", gate_id=gate["id"])
+
+    if advisory:
+        _emit_advisory(advisory)
     return 0
 
 
