@@ -120,26 +120,15 @@ def main() -> int:
         _emit_advisories(advisories)
         return 0
 
-    max_repeat, post_unique = lib.post_approval_stats(gate)
-    auto_label = "자동" if gate.get("approved_auto") else "명시"
-
-    if lib.post_approval_limit_exceeded(gate):
-        # 이미 차단 — scope creep 메시지가 이미 나왔을 것
-        _emit_advisories(advisories)
-        return 0
-
-    near_limit = max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
-    if near_limit:
+    # thrash(같은 파일 반복) 임박 시에만 환기 — 평시 always-on 환기는 제거
+    # (Stop 훅 turn-extension 노이즈 방지, 이전 리뷰 C-8).
+    max_repeat = lib._max_code_repeat(gate)
+    if max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1:
+        auto_label = "자동" if gate.get("approved_auto") else "명시"
         advisories.append(
-            f"[plan-gate] ⚠️  approved({auto_label})"
-            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}"
-            f" — 다음 편집 시 차단됩니다. 작업 완료면 /done"
-        )
-    else:
-        advisories.append(
-            f"[plan-gate] approved({auto_label})"
-            f" 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}"
-            f" — 새 작업이면 /done"
+            f"[plan-gate] ⚠️  approved({auto_label}) 같은 파일 반복"
+            f" {max_repeat}/{lib.TRIGGER_REPEAT_RATIO}"
+            f" — 수렴 안 되면 멈추고 재검토(테스트 통과 시 리셋). 완료면 /done"
         )
 
     _emit_advisories(advisories)

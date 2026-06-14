@@ -94,14 +94,11 @@ def main() -> int:
         return 0
 
     if gate["state"] == "approved":
-        max_repeat, post_unique = lib.post_approval_stats(gate)
+        max_repeat = lib._max_code_repeat(gate)
         auto_label = "자동" if gate.get("approved_auto") else "명시"
-        if lib.post_approval_limit_exceeded(gate):
-            return 0
-        near_limit = max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
         near_msg = (
-            f"\n  ⚠️  scope 임박 — 파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} (다음 편집 시 차단)"
-            if near_limit
+            f"\n  ⚠️  같은 파일 반복 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO} (수렴 안 되면 재검토)"
+            if max_repeat >= lib.TRIGGER_REPEAT_RATIO - 1
             else ""
         )
         emit_advisory(

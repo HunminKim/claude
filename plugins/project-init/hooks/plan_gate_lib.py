@@ -25,14 +25,9 @@ from pathlib import Path
 from typing import Any
 
 # ── 정책 디폴트 (D5/D2/D7) ───────────────────────────────────────────────
-# 누더기 감지: 동일 파일 반복 패치 (파일별 편집 횟수 기준)
+# thrash(flailing) 감지: 동일 파일 반복 패치 임계. green Bash(테스트 통과) 시 리셋되어
+# 정상 반복은 회피하고 수렴 없는 반복(계속 실패)만 도달한다(설계 D9).
 TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
-# 파일별 편집 임계 오버라이드 상한 — todo.md 마커가 이보다 커도 클램프(무한 budget 자가부여 방지)
-MAX_EDIT_OVERRIDE = 20
-# tasks/todo.md 마커: <!-- plan-gate: max-edits-per-file=N file=glob -->  (file 생략 시 전체)
-_OVERRIDE_RE = re.compile(
-    r"<!--\s*plan-gate:\s*max-edits-per-file\s*=\s*(\d+)(?:\s+file\s*=\s*(\S+?))?\s*-->"
-)
 GC_MAX_AGE_DAYS = 30
 
 # 자동으로 .plan-gateignore에 추가할 후보 패턴 (파일명 기준, fnmatch)
@@ -403,11 +398,9 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "created_at": now_iso(),
         "state": "created",
         "edit_count": 0,
-        "edit_count_post_approval": 0,
+        "edit_count_post_approval": 0,       # 승인 후 편집 수 (verifier_remind 용)
         "unique_files": [],
-        "file_edit_counts": {},              # {파일경로: 편집횟수} — 파일별 반복 편집 감지용
-        "file_edit_counts_post_approval": {},  # 승인 후 파일별 편집 횟수 (재차단 기준)
-        "unique_files_post_approval": [],      # 승인 후 편집된 파일 목록
+        "file_edit_counts": {},              # {파일경로: 편집횟수} — thrash(반복) 감지용
         "initial_edit_count": None,
         "initial_unique_files": None,
         "approved_at": None,
@@ -452,55 +445,6 @@ def _unique_code_files(gate: dict[str, Any]) -> int:
 
 def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
     return _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
-
-
-def post_approval_stats(gate: dict[str, Any]) -> tuple[int, int]:
-    """승인 후 파일별 편집 통계: (단일 파일 최대 횟수, 코드 파일 수)."""
-    counts = gate.get("file_edit_counts_post_approval", {})
-    max_repeat = max((c for fp, c in counts.items() if not is_doc_path(fp)), default=0)
-    unique = sum(1 for fp in gate.get("unique_files_post_approval", []) if not is_doc_path(fp))
-    return max_repeat, unique
-
-
-def parse_gate_overrides(root: Path) -> dict[str, int]:
-    """tasks/todo.md 의 plan-gate 마커에서 파일별 편집 임계 오버라이드를 읽는다 (B-1).
-
-    형식: <!-- plan-gate: max-edits-per-file=N file=glob -->  (file 생략 시 전체 '*')
-    값은 MAX_EDIT_OVERRIDE 로 클램프. approve 시점에 1회 호출해 gate 에 저장하므로
-    PreToolUse 매 편집 재파싱(latency)을 피한다. 승인 전 trigger 에는 적용되지 않는다
-    (계획 강제 취지 유지) — 승인 후 scope creep 한도만 파일별로 상향한다.
-    """
-    p = todo_md_path(root)
-    if not p.exists():
-        return {}
-    overrides: dict[str, int] = {}
-    for m in _OVERRIDE_RE.finditer(p.read_text(errors="ignore")):
-        n = min(int(m.group(1)), MAX_EDIT_OVERRIDE)
-        pat = m.group(2) or "*"
-        overrides[pat] = max(overrides.get(pat, 0), n)
-    return overrides
-
-
-def _threshold_for(fp: str, overrides: dict[str, int]) -> int:
-    """파일 fp 의 편집 임계. 매칭되는 마커 오버라이드가 있으면 상향(기본 TRIGGER_REPEAT_RATIO)."""
-    threshold = TRIGGER_REPEAT_RATIO
-    name = os.path.basename(fp)
-    for pat, n in overrides.items():
-        if fnmatch.fnmatch(fp, pat) or fnmatch.fnmatch(name, pat):
-            threshold = max(threshold, n)
-    return threshold
-
-
-def post_approval_limit_exceeded(gate: dict[str, Any]) -> bool:
-    """승인 후 파일별 편집 임계 초과 시 재차단. todo.md 마커로 파일별 상향 가능(B-1)."""
-    counts = gate.get("file_edit_counts_post_approval", {})
-    overrides = gate.get("edit_overrides", {})
-    for fp, c in counts.items():
-        if is_doc_path(fp):
-            continue
-        if c >= _threshold_for(fp, overrides):
-            return True
-    return False
 
 
 # ── doc 경로 판별 ───────────────────────────────────────────────────────
@@ -806,18 +750,18 @@ def format_d1_lock_message(gate: dict[str, Any]) -> str:
     )
 
 
-def format_scope_creep_message(gate: dict[str, Any]) -> str:
-    """승인 후 scope 초과 시."""
-    max_repeat, _ = post_approval_stats(gate)
-    reason = f"단일 파일 반복 편집 {max_repeat}회 (임계 {TRIGGER_REPEAT_RATIO}회)"
+def format_thrash_message(gate: dict[str, Any]) -> str:
+    """승인 후 같은 파일 반복(thrash/flailing) 임계 도달 시 (차단)."""
+    max_repeat = _max_code_repeat(gate)
     return (
         f"\n{DIVIDER}\n"
-        f"🛑 PLAN-GATE — 승인된 계획의 범위 초과\n"
+        f"🛑 PLAN-GATE — 같은 파일 반복 편집(수렴 안 됨)\n"
         f"{DIVIDER}\n"
         f"\n"
         f"▌ 무슨 일이?\n"
-        f"  /approve-plan 승인 후 scope creep 임계값을 초과했습니다.\n"
-        f"  사유: {reason}\n"
+        f"  같은 코드 파일을 {max_repeat}회 반복 편집했습니다 (임계 {TRIGGER_REPEAT_RATIO}회).\n"
+        f"  테스트가 통과하면(green Bash) 카운터가 리셋됩니다 — 계속 막힌다면\n"
+        f"  접근 방식 자체를 재검토할 신호입니다.\n"
         f"\n"
         f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
         f"  /done      현재까지를 완료로 마감\n"
@@ -825,9 +769,8 @@ def format_scope_creep_message(gate: dict[str, Any]) -> str:
         f"  /rollback  체크포인트로 복원\n"
         f"\n"
         f"▌ Claude 행동 지시\n"
-        f"  0. 즉시 사용자에게 보고: scope 초과 상황을 한국어로 먼저 알린다.\n"
-        f"  1. 현재 진행 상황을 요약하고, 위 세 옵션의 의미를\n"
-        f"     사용자가 결정할 수 있게 풀어 안내한다.\n"
+        f"  0. 즉시 사용자에게 보고: 같은 파일이 수렴 없이 반복됨을 한국어로 알린다.\n"
+        f"  1. 접근을 바꿀지(재검토) 현재로 마감할지 사용자가 정하게 안내한다.\n"
         f"  2. 사용자가 토큰을 입력할 때까지 추가 Edit/Write 시도하지 않는다.\n"
         f"\n{DIVIDER}\n"
     )

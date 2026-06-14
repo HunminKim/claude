@@ -43,7 +43,7 @@ def main() -> int:
     if g_state not in ("created", "approved", "verified"):
         return 0
 
-    max_repeat, post_unique = lib.post_approval_stats(gate)
+    max_repeat = lib._max_code_repeat(gate)
     auto_label = "자동" if gate.get("approved_auto") else "명시"
     approved_at = gate.get("approved_at") or "-"
     ckpt = (gate.get("checkpoint_commit") or "")[:12] or ("cp" if gate.get("cp_snapshot") else "(없음)")
@@ -87,7 +87,7 @@ def main() -> int:
         if near_repeat:
             lines += [
                 "",
-                f"⚠️  scope creep 임박 (파일최대 {max_repeat}/{lib.TRIGGER_REPEAT_RATIO})",
+                f"⚠️  같은 파일 반복 임박 ({max_repeat}/{lib.TRIGGER_REPEAT_RATIO}, 테스트 통과 시 리셋)",
                 "  작업을 마치려면 /done, 계획 조정은 /replan.",
             ]
         else:

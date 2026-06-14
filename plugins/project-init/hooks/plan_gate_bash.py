@@ -53,13 +53,10 @@ def main() -> int:
         return 0
     root, state, gate = ctx
 
-    # green Bash = 수렴 신호 → 반복 편집 카운터 리셋 + 성공 시각 기록.
-    had_counts = bool(
-        gate.get("file_edit_counts") or gate.get("file_edit_counts_post_approval")
-    )
+    # green Bash = 수렴 신호 → 반복(thrash) 카운터 리셋 + 성공 시각 기록.
+    had_counts = bool(gate.get("file_edit_counts"))
     gate["last_successful_bash_ts"] = lib.now_iso()
     gate["file_edit_counts"] = {}
-    gate["file_edit_counts_post_approval"] = {}
     lib.save_state(root, state)
     if had_counts:
         lib.log_audit(root, "green_bash_reset", gate_id=gate["id"])

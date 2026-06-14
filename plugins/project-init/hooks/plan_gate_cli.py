@@ -63,9 +63,6 @@ def cmd_approve(root, state) -> int:
         gate["initial_edit_count"] = 0
         gate["initial_unique_files"] = 0
         gate["edit_count_post_approval"] = 0
-        gate["file_edit_counts_post_approval"] = {}
-        gate["unique_files_post_approval"] = []
-        gate["edit_overrides"] = lib.parse_gate_overrides(root)
         lib.set_current_gate(state, gate)
         lib.save_state(root, state)
         _info(
@@ -105,9 +102,6 @@ def cmd_approve(root, state) -> int:
     gate["approved_at"] = lib.now_iso()
     gate["approved_auto"] = False  # 명시 승인 — 자동 승인 sticky 해제
     gate["edit_count_post_approval"] = 0
-    gate["file_edit_counts_post_approval"] = {}
-    gate["unique_files_post_approval"] = []
-    gate["edit_overrides"] = lib.parse_gate_overrides(root)
     if gate.get("initial_edit_count") is None:
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])
@@ -187,12 +181,6 @@ def cmd_done(root, state) -> int:
                 "  의도적으로 건너뛰려면 /skip-verify 를 명시적으로 입력."
             )
             return 1
-
-    if lib.post_approval_limit_exceeded(gate):
-        _info(
-            "[plan-gate done] ⚠️  scope creep 상태에서 완료 처리됩니다.\n"
-            "  승인된 계획 범위를 초과한 작업이 포함됩니다. 의도된 경우 계속 진행하세요."
-        )
 
     # F-2: verified+❌ 상태에서 /done 시 보존 의도 명시
     if gate["state"] == "verified" and gate.get("verifier_status") == "❌":
@@ -327,16 +315,13 @@ def cmd_retry(root, state) -> int:
     # 체크포인트 유지, 같은 gate를 다시 approved 상태로 돌려 재구현 허용
     gate["state"] = "approved"
     gate["verifier_status"] = None
-    # post_approval 카운터 리셋 — verifier 실패는 이전 시도의 실패이므로
-    # 수정 기회를 박탈하지 않도록 초기화한다. initial_edit_count는 유지해
-    # limit 계산 기준점(scope creep 방지)은 보존한다.
+    # 재시도 = 새 시도 → thrash 카운터 리셋(이전 시도의 반복이 즉시 재차단하지 않도록).
     gate["edit_count_post_approval"] = 0
-    gate["file_edit_counts_post_approval"] = {}
-    gate["unique_files_post_approval"] = []
+    gate["file_edit_counts"] = {}
     lib.save_state(root, state)
     _info(
         f"[plan-gate retry] 같은 체크포인트에서 재시도 시작: {gate['id']}\n"
-        f"  post_approval 카운터 리셋"
+        f"  반복 카운터 리셋"
     )
     return 0
 
@@ -351,8 +336,7 @@ def cmd_replan(root, state) -> int:
     gate["approved_auto"] = False  # 명시 재승인 대기 — 자동 승인 sticky 해제
     gate["edit_count"] = 0
     gate["edit_count_post_approval"] = 0
-    gate["file_edit_counts_post_approval"] = {}
-    gate["unique_files_post_approval"] = []
+    gate["file_edit_counts"] = {}  # thrash 카운터도 리셋(이전 리뷰: replan 미리셋 버그)
     gate["unique_files"] = []
     gate["initial_edit_count"] = None
     gate["initial_unique_files"] = None
@@ -438,10 +422,10 @@ def cmd_status(root, state) -> int:
         f"  id              = {gate['id']}\n"
         f"  state           = {g_state}\n"
         f"  edits           = {gate['edit_count']}\n"
-        f"  edits_approved  = {gate['edit_count_post_approval']} (한도: 단일 파일 반복 {lib.TRIGGER_REPEAT_RATIO}회)\n"
+        f"  thrash(반복)    = {lib._max_code_repeat(gate)}/{lib.TRIGGER_REPEAT_RATIO} (green Bash 시 리셋)\n"
         f"  unique_files    = {len(gate['unique_files'])}\n"
         f"  approved_at     = {gate.get('approved_at') or '-'}\n"
-        f"  approved_auto   = {'yes (보수적 limit)' if gate.get('approved_auto') else 'no (명시 승인)'}\n"
+        f"  approved_auto   = {'yes' if gate.get('approved_auto') else 'no (명시 승인)'}\n"
         f"  verifier_status = {verifier or '-'}\n"
         f"  checkpoint      = {(gate.get('checkpoint_commit') or '')[:12] or ('cp' if gate.get('cp_snapshot') else '-')}\n"
         f"\n"

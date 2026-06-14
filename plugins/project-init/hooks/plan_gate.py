@@ -111,9 +111,6 @@ def main() -> int:
                         gate["approved_at"] = lib.now_iso()
                         gate["approved_auto"] = True
                         gate["edit_count_post_approval"] = 0
-                        gate["file_edit_counts_post_approval"] = {}
-                        gate["unique_files_post_approval"] = []
-                        gate["edit_overrides"] = lib.parse_gate_overrides(root)
                         gate["initial_edit_count"] = 0
                         gate["initial_unique_files"] = 0
                         gate["todo_md_sha256"] = current_sha
@@ -192,24 +189,18 @@ def main() -> int:
     gate["edit_count"] += 1
     gate["last_edit_ts"] = lib.now_iso()
     if gate["state"] == "approved":
-        gate["edit_count_post_approval"] += 1
-        if target:
-            post_counts = gate.setdefault("file_edit_counts_post_approval", {})
-            post_counts[target] = post_counts.get(target, 0) + 1
-            post_unique = gate.setdefault("unique_files_post_approval", [])
-            if target not in post_unique:
-                post_unique.append(target)
+        gate["edit_count_post_approval"] += 1  # verifier_remind 트리거용
     if target:
         if target not in gate["unique_files"]:
             gate["unique_files"].append(target)
         counts = gate.setdefault("file_edit_counts", {})
         counts[target] = counts.get(target, 0) + 1
 
-    # ── soft hint (트리거 직전) ─────────────────────────────────────────
-    # created 상태에서 트리거 임박 시 부드러운 경고만 출력 (차단 X).
+    # ── soft hint (thrash 트리거 직전) ──────────────────────────────────
+    # created/approved 모두 같은 파일 반복(thrash) 임박 시 부드러운 경고 (차단 X).
     _max_repeat = lib._max_code_repeat(gate)
     if (
-        gate["state"] == "created"
+        gate["state"] in ("created", "approved")
         and not lib.trigger_threshold_exceeded(gate)
         and _max_repeat == lib.TRIGGER_REPEAT_RATIO - 1
     ):
@@ -245,10 +236,14 @@ def main() -> int:
             lib.mark_intro_seen(root)
         return 2
 
-    # ── 승인 후 scope creep 차단 (D2) ────────────────────────────────────
-    if gate["state"] == "approved" and lib.post_approval_limit_exceeded(gate):
-        _print_stderr(lib.format_scope_creep_message(gate))
+    # ── 승인 후 thrash 차단 (flailing) ───────────────────────────────────
+    # scope-creep 볼륨 차단(v1)은 제거됨 — 스코프 강제는 매니페스트(step3+)가 대체.
+    # 단 '같은 파일을 수렴 없이 반복'은 승인 후에도 thrash 로 잡는다(사용자 가치 보존).
+    if gate["state"] == "approved" and lib.trigger_threshold_exceeded(gate):
+        lib.log_audit(root, "thrash_approved", gate_id=gate["id"],
+                      max_repeat=lib._max_code_repeat(gate))
         lib.save_state(root, state)
+        _print_stderr(lib.format_thrash_message(gate))
         return 2
 
     # ── 통과 ────────────────────────────────────────────────────────────

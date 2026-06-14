@@ -587,33 +587,6 @@ def t_stop_hook_active_guard(base: Path) -> None:
     check("stop_alert active=true → 억제(빈 출력)", run_hook(psa, {"stop_hook_active": True}, p).stdout.strip() == "")
 
 
-def t_gate_edit_overrides(base: Path) -> None:
-    """B-1: todo.md 마커로 파일별 편집 임계 오버라이드 (승인 후 scope creep 한도 상향).
-
-    단일 C 파일 다회편집(함수 여러 개 추가)이 기본 5회 임계에 오탐 차단되던 문제.
-    마커는 approve 시점 1회 파싱(latency 0), MAX_EDIT_OVERRIDE 로 상한 클램프.
-    """
-    print("[19] 파일별 임계 오버라이드")
-    sys.path.insert(0, str(HOOKS))
-    import plan_gate_lib as lib
-
-    p = make_project(base, "overrides")
-    (p / "tasks").mkdir()
-    (p / "tasks" / "todo.md").write_text("# DMS\n<!-- plan-gate: max-edits-per-file=8 file=*.c -->\n")
-    ov = lib.parse_gate_overrides(p)
-    check("마커 파싱 *.c → 8", ov.get("*.c") == 8, f"ov={ov}")
-    check("_threshold_for vcap.c → 8(상향)", lib._threshold_for("src/vcap.c", ov) == 8)
-    check("_threshold_for main.py → 5(기본)", lib._threshold_for("main.py", ov) == lib.TRIGGER_REPEAT_RATIO)
-    (p / "tasks" / "todo.md").write_text("<!-- plan-gate: max-edits-per-file=999 -->\n")
-    check("상한 클램프 999 → MAX", lib.parse_gate_overrides(p).get("*") == lib.MAX_EDIT_OVERRIDE)
-    g_ok = {"file_edit_counts_post_approval": {"src/vcap.c": 7}, "edit_overrides": {"*.c": 8}}
-    check("vcap.c 7<8 → 미차단", not lib.post_approval_limit_exceeded(g_ok))
-    g_hit = {"file_edit_counts_post_approval": {"src/vcap.c": 8}, "edit_overrides": {"*.c": 8}}
-    check("vcap.c 8>=8 → 차단", lib.post_approval_limit_exceeded(g_hit))
-    g_py = {"file_edit_counts_post_approval": {"app.py": 5}, "edit_overrides": {"*.c": 8}}
-    check("app.py 5>=5(기본) → 차단(오버라이드 무관)", lib.post_approval_limit_exceeded(g_py))
-
-
 def t_verifier_advisory_dedup(base: Path) -> None:
     """Stop verifier 경고가 같은 편집 배치에서 1회만 (B-3 dedup — 매 턴 반복 제거).
 
@@ -827,6 +800,27 @@ def t_green_bash_reset(base: Path) -> None:
     check("실패 Bash는 리셋 안 함", before is not None and before == after, f"before={before} after={after}")
 
 
+def t_approved_thrash(base: Path) -> None:
+    """승인 후에도 같은 파일 반복(thrash) 차단 — scope-creep 볼륨 차단의 대체(D9).
+
+    승인 전(created)뿐 아니라 승인 후(approved)에도 같은 파일을 수렴 없이 반복하면
+    차단한다(사용자가 가치 본 반복 보호 보존). green Bash 통과 시 리셋된다.
+    """
+    print("[24] 승인 후 thrash 차단")
+    gate_hook = HOOKS / "plan_gate.py"
+    bash_hook = HOOKS / "plan_gate_bash.py"
+    p = make_project(base, "appthrash")
+    f = p / "svc.py"
+    run_hook(gate_hook, edit_payload("Edit", f), p)  # gate 생성(created)
+    set_gate(p, state="approved", file_edit_counts={}, edit_count=0)
+    rcs = [run_hook(gate_hook, edit_payload("Edit", f), p).returncode for _ in range(5)]
+    check("승인 후 1~4회 미차단", all(rc == 0 for rc in rcs[:4]), f"rcs={rcs}")
+    check("승인 후 5회째 thrash 차단", rcs[4] == 2, f"rcs={rcs}")
+    run_hook(bash_hook, {"tool_name": "Bash", "tool_response": {"exit_code": 0}, "tool_input": {"command": "t"}}, p)
+    rc2 = run_hook(gate_hook, edit_payload("Edit", f), p).returncode
+    check("green Bash 리셋 후 통과", rc2 == 0, f"rc={rc2}")
+
+
 def t_hook_future_imports() -> None:
     """훅이 PEP604/제네릭 어노테이션을 쓰면 from __future__ import annotations 필수 (3.8 호환).
 
@@ -877,11 +871,11 @@ def main() -> int:
         t_done_from_created(base)
         t_stop_hook_active_guard(base)
         t_verifier_advisory_dedup(base)
-        t_gate_edit_overrides(base)
         t_cp_rollback_nongit(base)
         t_plan_gate_no_git_optout(base)
         t_checkpoint_backend(base)
         t_green_bash_reset(base)
+        t_approved_thrash(base)
     t_scaffold_consistency()
     t_command_files()
     t_platform_compat()
