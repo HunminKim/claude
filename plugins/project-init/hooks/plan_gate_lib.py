@@ -499,6 +499,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "checkpoint_commit": None,             # git 프라이빗 ref 스냅샷 커밋 SHA (비-git 이면 None)
         "cp_snapshot": None,                   # touched 매니페스트 {relpath: 편집전존재여부} (롤백 구동)
         "scope": [],                           # 매니페스트 scope 패턴 (빈 목록 = thrash-only)
+        "expansions": [],                      # subplan 으로 audit 하에 추가된 스코프 패턴 (replan 시 리셋)
         "do_not_touch": [],                    # 매니페스트 do-not-touch 패턴 (deny-first)
         "manifest_sha256": None,               # 매니페스트 블록 원문 sha256 (TOCTOU 고정)
         "verifier_status": None,
@@ -581,6 +582,7 @@ def transition(gate: dict[str, Any], name: str) -> dict[str, Any]:
         gate["todo_md_sha256"] = None
         gate["todo_md_mtime"] = None
         gate["scope"] = []
+        gate["expansions"] = []
         gate["do_not_touch"] = []
         gate["manifest_sha256"] = None
         gate["verifier_status"] = None
@@ -900,8 +902,9 @@ def scope_allows(
     if is_gate_ignored(str(root / rel), root, ignore_patterns):
         return True
     if any(_path_match(rel, pat) for pat in gate.get("do_not_touch", [])):
-        return False
-    return any(_path_match(rel, pat) for pat in gate.get("scope", []))
+        return False  # deny-first — subplan 확장으로도 do-not-touch 는 못 뚫는다
+    allowed = gate.get("scope", []) + gate.get("expansions", [])
+    return any(_path_match(rel, pat) for pat in allowed)
 
 
 def format_scope_deny(rel: str, gate: dict[str, Any]) -> str:

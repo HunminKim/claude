@@ -1016,16 +1016,16 @@ def t_transition_retry_replan(base: Path) -> None:
     gr = _mkgate(
         lib, state="verified", verifier_status="❌", approved_at="T0", edit_count=7,
         edit_count_post_approval=5, file_edit_counts={"a.py": 5}, initial_edit_count=2,
-        scope=["src/auth/**"], manifest_sha256="abc",
+        scope=["src/auth/**"], expansions=["src/util/**"], manifest_sha256="abc",
     )
     lib.transition(gr, "retry")
     check(
-        "retry: thrash 리셋 + scope/계획/edit_count/승인시각 보존",
+        "retry: thrash 리셋 + scope/expansions/계획/edit_count/승인시각 보존",
         gr["state"] == "approved" and gr["verifier_status"] is None
         and gr["edit_count_post_approval"] == 0 and gr["file_edit_counts"] == {}
         and gr["edit_count"] == 7 and gr["approved_at"] == "T0"
         and gr["initial_edit_count"] == 2 and gr["scope"] == ["src/auth/**"]
-        and gr["manifest_sha256"] == "abc",
+        and gr["expansions"] == ["src/util/**"] and gr["manifest_sha256"] == "abc",
         f"{gr}",
     )
 
@@ -1034,8 +1034,8 @@ def t_transition_retry_replan(base: Path) -> None:
         lib, state="approved", approved_auto=True, approved_at="T0", edit_count=8,
         edit_count_post_approval=4, file_edit_counts={"a.py": 4}, unique_files=["a.py"],
         initial_edit_count=2, initial_unique_files=1, todo_md_sha256="x",
-        scope=["src/auth/**"], do_not_touch=["src/pay/**"], manifest_sha256="abc",
-        verifier_status="❌", checkpoint_commit="deadbeef",
+        scope=["src/auth/**"], expansions=["src/util/**"], do_not_touch=["src/pay/**"],
+        manifest_sha256="abc", verifier_status="❌", checkpoint_commit="deadbeef",
     )
     lib.transition(gp, "replan")
     reset_ok = (
@@ -1044,7 +1044,7 @@ def t_transition_retry_replan(base: Path) -> None:
         and gp["edit_count_post_approval"] == 0 and gp["file_edit_counts"] == {}
         and gp["unique_files"] == [] and gp["initial_edit_count"] is None
         and gp["initial_unique_files"] is None and gp["todo_md_sha256"] is None
-        and gp["scope"] == [] and gp["do_not_touch"] == []
+        and gp["scope"] == [] and gp["expansions"] == [] and gp["do_not_touch"] == []
         and gp["manifest_sha256"] is None and gp["verifier_status"] is None
     )
     check(
@@ -1106,6 +1106,8 @@ def t_scope_unit(base: Path) -> None:
 def _scoped_gate_project(base: Path, name: str) -> Path:
     """매니페스트 자동승인 + 스냅샷까지 만든 git 프로젝트 (layer-1/2 부트스트랩)."""
     p = make_project(base, name)
+    (p / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
+    (p / ".claude" / "agents" / "verifier.md").touch()  # CLI is_project_init_managed 통과용
     (p / "tasks").mkdir()
     (p / "tasks" / "todo.md").write_text(_MANIFEST_TODO)
     run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "src" / "auth" / "x.py"), p)
@@ -1188,6 +1190,44 @@ def t_scope_layer2(base: Path) -> None:
     )
 
 
+def t_subplan(base: Path) -> None:
+    """step 5 후속 — subplan 스코프 확장 escape-hatch (audit + do-not-touch 불가침)."""
+    print("[32] step5 subplan 확장 escape-hatch")
+    hook = HOOKS / "plan_gate.py"
+    cli = HOOKS / "plan_gate_cli.py"
+    p = _scoped_gate_project(base, "subplan")
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+
+    def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(p)}
+        return subprocess.run(
+            [sys.executable, str(cli), *args], capture_output=True, text=True, cwd=str(p), env=env
+        )
+
+    r = run_hook(hook, edit_payload("Edit", p / "src" / "util" / "shared.py"), p)
+    check("확장 전: 스코프 밖 → deny", '"deny"' in (r.stdout or ""), f"{r.stdout[:100]!r}")
+
+    rc = run_cli("subplan", "src/util/**")
+    check("subplan CLI 확장 추가", rc.returncode == 0 and "확장" in rc.stdout, f"out={rc.stdout[:120]!r}")
+    check("expansions 저장", get_gate(p).get("expansions") == ["src/util/**"], f"exp={get_gate(p).get('expansions')}")
+
+    r = run_hook(hook, edit_payload("Edit", p / "src" / "util" / "shared.py"), p)
+    check("확장 후: 같은 파일 허용(deny 없음)", '"deny"' not in (r.stdout or ""), f"{r.stdout[:100]!r}")
+
+    # do-not-touch(src/payment/**)는 확장으로도 못 뚫는다 (deny-first)
+    run_cli("subplan", "src/payment/**")
+    r = run_hook(hook, edit_payload("Edit", p / "src" / "payment" / "charge.py"), p)
+    check("do-not-touch 는 확장으로도 deny", '"deny"' in (r.stdout or ""), f"{r.stdout[:100]!r}")
+
+    # 설계 불변식: subplan 은 Claude 호출 가능(disable-model-invocation 없음) + 사용자 토큰 아님
+    sub_md = (REPO / "plugins" / "project-init" / "commands" / "subplan.md").read_text()
+    import plan_approval
+    check(
+        "subplan: Claude 호출 가능 + _ACTION_TOKENS 제외",
+        "disable-model-invocation: true" not in sub_md and "subplan" not in plan_approval._ACTION_TOKENS,
+    )
+
+
 def t_verifier_spec() -> None:
     """step 6 — verifier 템플릿: opus 모델 + 실행 grounding 규칙(✅ 최소 1개 실제 실행)."""
     print("[31] verifier 스펙 (opus + 실행 grounding)")
@@ -1261,6 +1301,7 @@ def main() -> int:
         t_scope_unit(base)
         t_scope_layer1(base)
         t_scope_layer2(base)
+        t_subplan(base)
     t_scaffold_consistency()
     t_command_files()
     t_verifier_spec()

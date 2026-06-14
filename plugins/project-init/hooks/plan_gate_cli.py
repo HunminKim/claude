@@ -403,6 +403,45 @@ def _set_scope_mode(root, mode: str) -> int:
     return 0
 
 
+def cmd_subplan(root, state) -> int:
+    """스코프 확장 escape-hatch (Claude 호출 가능). enforce 중 예상 밖 인접 파일을
+    audit 남기며 스코프에 추가한다 — 전면 /replan 없이 진행하되 흔적을 남긴다.
+
+    do-not-touch 는 확장으로도 못 뚫는다(scope_allows deny-first). 인자 없으면
+    현재 확장 목록을 표시. 사용: plan_gate_cli.py subplan <패턴> [패턴...]
+    """
+    gate = _need_gate(state, "subplan")
+    if gate is None:
+        return 0
+    patterns = [a.strip() for a in sys.argv[2:] if a.strip()]
+    if not patterns:
+        exps = gate.get("expansions") or []
+        _info(
+            f"[plan-gate subplan] 현재 확장 패턴 {len(exps)}개: {', '.join(exps) or '(없음)'}\n"
+            "  사용법: /subplan <패턴> [패턴...] — 승인 스코프에 파일 패턴을 추가합니다."
+        )
+        return 0
+    if not lib.has_manifest(gate):
+        _err(
+            "[plan-gate subplan] 스코프 매니페스트가 없습니다 — 확장할 계약이 없습니다.\n"
+            "  tasks/todo.md 에 scope 선언 + /plan-gate-scope-enforce 후 의미가 있습니다."
+        )
+        return 1
+    exps = gate.setdefault("expansions", [])
+    existing = set(exps) | set(gate.get("scope", []))
+    added = [p for p in patterns if p not in existing]
+    exps.extend(added)
+    lib.save_state(root, state)
+    lib.log_audit(root, "subplan_expand", gate_id=gate["id"], added=added, total=len(exps))
+    _info(
+        f"[plan-gate subplan] 스코프 확장: {', '.join(added) if added else '(이미 포함 — 변화 없음)'}\n"
+        f"  현재 강제={lib.scope_mode(root)} / 확장 누계 {len(exps)}개. audit 에 기록됨 — "
+        "사용자가 최종 diff 로 검토합니다.\n"
+        "  ⚠️  do-not-touch 패턴은 확장으로도 허용되지 않습니다. /replan 시 확장은 초기화됩니다."
+    )
+    return 0
+
+
 def cmd_scope_off(root, state) -> int:
     return _set_scope_mode(root, "off")
 
@@ -444,8 +483,10 @@ def cmd_status(root, state) -> int:
         "shadow": "shadow (감지·기록)",
         "enforce": "enforce (차단·롤백)",
     }[mode]
+    exps = gate.get("expansions") or []
+    exp_note = f" (+확장 {len(exps)})" if exps else ""
     scope_line = (
-        f"{len(scope)}개 패턴 / 강제={mode_label}"
+        f"{len(scope)}개 패턴{exp_note} / 강제={mode_label}"
         if scope
         else f"없음 (thrash-only) / 강제={mode_label}"
     )
@@ -483,6 +524,7 @@ COMMANDS = {
     "scope-off": cmd_scope_off,
     "scope-shadow": cmd_scope_shadow,
     "scope-enforce": cmd_scope_enforce,
+    "subplan": cmd_subplan,
 }
 
 
