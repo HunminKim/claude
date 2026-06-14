@@ -67,46 +67,37 @@ checklist / completion_report / technical_doc 자동 업데이트
 
 #### plan-gate (자동 강제 + 체크포인트 자동 관리)
 
-복잡한 코드 수정을 자동 감지해 사용자 계획 승인을 강제하고, 작업 시작 시점에
-체크포인트를 자동으로 만들어 롤백 가능하게 한다. 사용자는 메시지 토큰만으로
-모든 단계를 제어한다 (코드/파일시스템 직접 접근 불필요).
+복잡한·계획 외 코드 수정을 자동 감지해 사용자 검토를 강제하고, 게이트가 열릴 때
+체크포인트를 자동으로 만들어 롤백 가능하게 한다. 사용자는 메시지 토큰만으로 모든
+단계를 제어한다 (코드/파일시스템 직접 접근 불필요).
 
-**트리거 조건** (PreToolUse 훅):
-- 단일 코드 파일을 `Edit`/`Write`/`MultiEdit` 로 ≥ 5회 반복 편집 (문서 파일은 카운트 제외)
+**두 가지 가드**:
+- **thrash(반복 편집) 가드** (기본 켜짐): 같은 코드 파일을 *수렴 없이* ≥ 5회 반복 편집하면 차단. Bash 성공(green) 시 카운터 리셋되어 정상 반복은 통과하고 막힌 flailing 만 잡는다 (문서 파일 제외).
+- **스코프 강제** (선택, 기본 off): `tasks/todo.md` 에 `<!-- plan-gate: scope BEGIN/END -->` 매니페스트로 건드릴 파일 패턴을 선언하고 `/plan-gate-scope-enforce` 를 켜면, 스코프 밖 편집을 거부(layer-1)하고 Bash 가 만든 스코프 밖 변경을 롤백(layer-2)한다. `*`=한 경로 단계, `**`=하위 전체.
 
 **워크플로우**:
 
 ```
-Claude: 같은 코드 파일 반복 편집 (1·2·…·5차)
-    ↓ 5차에서 차단 (단일 파일 반복 임계값 도달)
-PreToolUse 훅: git stash + git tag (체크포인트 생성)
+Claude: 첫 Edit → 게이트 열림 + git 프라이빗 ref 스냅샷(체크포인트) 자동 생성
+    ↓ tasks/todo.md 가 있으면 자동 승인, 없으면 thrash/스코프 강제만
+Claude: (필요 시) tasks/todo.md 작성 → 사용자에게 /approve-plan 요청
+사용자: /approve-plan   ← todo.md SHA-256 검증 (gate.state = approved)
     ↓
-Claude: tasks/todo.md 작성
-    ↓ PostToolUse 훅(plan_summary_request): 계획 내용 Claude 컨텍스트 주입
-Claude: 계획 요약 → 사용자에게 /approve-plan 요청
+Claude: 구현 (thrash 임계 / 스코프 강제 적용. 예상 밖 인접 파일은 /subplan 로 audit 확장)
     ↓
-사용자: /approve-plan
-    ↓ todo.md SHA-256 검증
-plan_approval 훅(UserPromptSubmit): plan_gate_cli approve 호출 → gate.state = "approved"
-    ↓
-Claude: 구현 진행 (max(initial+2, 5) 초과 시 scope creep 차단)
-    ↓
-@verifier 호출 → docs/.verifier_result.json
-    ↓
-update_docs 훅: gate.state = "verified", verifier_status 기록
+@verifier(opus) 호출 → docs/.verifier_result.json → gate.state = verified
     ↓
 사용자 결정:
-  ✅ → /done       (체크포인트 정리)
-       /rollback   (체크포인트로 복원, dirty stash 보존)
-  ❌ → /retry      (같은 체크포인트에서 재시도)
-       /rollback   (체크포인트로 복원)
-계획 재작성 필요 → /replan (카운터 리셋, 체크포인트 유지)
+  ✅ → /done      (체크포인트 정리)   |  /rollback (스냅샷으로 복원)
+  ❌ → /retry     (같은 체크포인트 재구현)  |  /skip (현 변경 보존)  |  /rollback
+계획 재작성 → /replan (카운터·스코프 리셋, 체크포인트 유지)
 ```
 
-**상태 파일**: `.claude/state/plan_gate.json`
-**체크포인트**: `git tag .claude/gate/<id>/clean` + `[plan-gate] <id>` stash entry
-　└ **git 백엔드를 못/안 쓸 때**: 루트가 git repo 가 아니거나 `/plan-gate-no-git` 으로 명시적 opt-out 하면, 편집 직전 파일 원본을 `.claude/state/checkpoints/<id>/` 에 복사하는 cp 스냅샷 백엔드로 전환 → `/rollback` 이 원본 복원·신규 파일 삭제로 동작. `/plan-gate-use-git` 으로 git 백엔드 복귀 (기본은 git)
-**GC**: SessionEnd 훅이 30일 이상된 tag·stash·gate 기록 정리
+**상태 파일**: `.claude/state/plan_gate.json` · **audit**: `.claude/state/plan_gate_audit.log`
+**체크포인트**: git 프라이빗 ref `refs/plan-gate/<id>/checkpoint` (게이트 열림 시 working tree 1회 스냅샷, 사용자 인덱스·stash·브랜치 무간섭)
+　└ **비-git / `/plan-gate-no-git` opt-out**: 편집 직전 원본을 `.claude/state/checkpoints/<id>/` 에 cp 복사 → `/rollback` 이 원본 복원·신규 삭제. (v1 git tag/stash 백엔드는 refname 위반·stash drop 유실로 폐기)
+**스코프 강제 모드**: `.claude/plan_gate_scope` = `off`(기본)·`shadow`(감지·기록만)·`enforce`(차단·롤백). layer-2 롤백은 git 저장소에서만 동작(스냅샷 없으면 shadow 강등). 운영 파일(tasks/todo.md·.claude/state·플래그·verifier 결과)은 강제 면제.
+**GC**: SessionEnd 훅이 30일 이상된 프라이빗 ref·gate 기록 정리
 
 **활성화 스위치**: `.claude/plan_gate_enabled` 파일 존재 여부로 판정한다 (`/plan-gate-on` · `/plan-gate-off` 로 토글). `verifier.md` 존재 여부와는 독립이다.
 

@@ -1,12 +1,13 @@
 """plan-gate 공통 라이브러리.
 
-상태 관리, 체크포인트(git tag/stash), 트리거 휴리스틱, 프로젝트 감지를 담당.
-훅 스크립트(plan_gate.py, plan_approval.py, plan_gate_cli.py, plan_gate_gc.py,
-update_docs.py)에서 공유한다.
+상태 관리, 체크포인트(git 프라이빗 ref 스냅샷 / 비-git cp 디렉토리), 스코프 강제,
+트리거 휴리스틱, 프로젝트 감지를 담당. 훅 스크립트(plan_gate.py, plan_gate_bash.py,
+plan_approval.py, plan_gate_cli.py, plan_gate_gc.py, update_docs.py)에서 공유한다.
 
 상태 파일: <project>/.claude/state/plan_gate.json
-체크포인트: git tag `.claude/gate/<gate_id>/clean`
-            git stash entry (message에 gate_id 포함)
+체크포인트: git 프라이빗 ref `refs/plan-gate/<gate_id>/checkpoint` (working tree 1회 스냅샷)
+            비-git/opt-out: `.claude/state/checkpoints/<gate_id>/` cp 디렉토리
+            (v1 git tag/stash 백엔드는 refname 위반·stash drop 유실로 폐기 — 부록 C)
 """
 
 from __future__ import annotations
@@ -104,8 +105,9 @@ PREFER_NO_GIT_FLAG = ".claude/plan_gate_no_git"
 def prefers_no_git(root: Path) -> bool:
     """.claude/plan_gate_no_git 존재 시 git 체크포인트를 끄고 cp 스냅샷을 강제한다.
 
-    git repo 이면서도 plan-gate 가 git tag/stash 를 만들지 않기를 원하는 사용자용
-    명시적 opt-out. (예: 별도 VCS 워크플로우와 충돌 회피, git 추적 비선호)
+    git repo 이면서도 plan-gate 가 git 프라이빗 ref 스냅샷을 만들지 않기를 원하는
+    사용자용 명시적 opt-out. (예: 별도 VCS 워크플로우와 충돌 회피, git 추적 비선호)
+    ⚠️ 이 경우 checkpoint_commit 이 없어 layer-2 enforce 는 shadow 로 강등된다(H-2).
     """
     return (root / PREFER_NO_GIT_FLAG).exists()
 
@@ -387,20 +389,33 @@ def cleanup_checkpoint(root: Path, gate: dict[str, Any]) -> None:
 # 쓰기(스코프밖 파일)가 매니페스트에 안 들어가 invisible 했다. 따라서 실제
 # working tree 변경 전체를 git status 로 훑어 스코프밖을 처리한다. git 전용 —
 # 비-git 은 등가 스윕이 없어 빈 목록(호출자가 detect/warn 만).
-def _git_status_paths(root: Path) -> list[str]:
-    """working tree 의 변경/신규(untracked 포함) 파일 루트 상대경로 목록."""
-    r = _git(root, "status", "--porcelain", "--untracked-files=all")
+def _git_status_entries(root: Path) -> list[tuple[str, str | None]]:
+    """working tree 변경/신규 파일을 (경로, 원본경로 or None) 목록으로.
+
+    `-z` 사용 — 경로를 verbatim(따옴표·C-style 이스케이프 없음, NUL 구분)으로 받아
+    공백·특수문자·유니코드 경로를 정확히 파싱한다(H-3). 리네임/카피(R/C)는 새 경로와
+    원본 경로(porcelain -z 는 `XY new` NUL `orig`)를 함께 반환해 in-scope 원본 복원
+    판단에 쓴다(H-4).
+    """
+    r = _git(root, "status", "--porcelain", "-z", "--untracked-files=all")
     if r.returncode != 0:
         return []
-    paths: list[str] = []
-    for line in r.stdout.splitlines():
-        if len(line) < 4:
+    entries: list[tuple[str, str | None]] = []
+    tokens = r.stdout.split("\0")
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if len(tok) < 4:
+            i += 1
             continue
-        path = line[3:]
-        if " -> " in path:  # 리네임 "old -> new" 는 new 만
-            path = path.split(" -> ", 1)[1]
-        paths.append(path.strip().strip('"'))
-    return paths
+        status, path = tok[:2], tok[3:]
+        if status[0] in ("R", "C") and i + 1 < len(tokens):
+            entries.append((path, tokens[i + 1] or None))  # (새 경로, 원본 경로)
+            i += 2
+        else:
+            entries.append((path, None))
+            i += 1
+    return entries
 
 
 def _snapshot_has_path(root: Path, commit: str, rel: str) -> bool:
@@ -408,35 +423,57 @@ def _snapshot_has_path(root: Path, commit: str, rel: str) -> bool:
     return _git(root, "cat-file", "-e", f"{commit}:{rel}").returncode == 0
 
 
-def scope_sweep(root: Path, gate: dict[str, Any], mode: str) -> list[str]:
+def sweep_effective_mode(root: Path, gate: dict[str, Any], mode: str) -> str:
+    """enforce 라도 복원 출처(git 스냅샷 커밋)가 없으면 파괴 금지 → shadow 강등(H-2).
+
+    스냅샷이 없으면 파일이 게이트 열림 시점에 존재했는지 판정할 수 없어 신규/기존
+    구분도 복원도 불가능하다 — 무백업 삭제로 빠지는 fail-open 을 막고 감지만 한다.
+    """
+    if mode == "enforce" and not gate.get("checkpoint_commit"):
+        return "shadow"
+    return mode
+
+
+def scope_sweep(root: Path, gate: dict[str, Any], mode: str) -> dict[str, list[str]]:
     """layer-2: git-status 로 실제 변경 파일을 훑어 스코프밖을 처리 (R1).
 
-    mode=enforce: 스코프밖 파일을 스냅샷 상태로 롤백(존재했으면 checkout / 신규면 rm).
-    mode=shadow: 롤백 없이 위반 목록만 반환(호출자가 audit). off/매니페스트 없음/비-git
-    → 빈 목록. 반환: 스코프밖으로 판정된 rel 목록.
+    반환 {"removed":[...], "warned":[...]}. enforce 안전 정책:
+    - 스코프 밖 *신규* 파일(스냅샷에 없음) → rm (명백한 Bash 우회 생성물).
+    - 스코프 밖 *기존* 파일 수정 → 되돌리지 않고 경고만(C-1: 사용자 직접 편집일 수
+      있어 checkout 으로 덮으면 데이터 손실). audit + 최종 diff 로 surface.
+    - 스코프 밖으로의 리네임으로 in-scope 원본이 사라졌으면 원본 복원(H-4).
+    - 스냅샷 커밋 없으면 enforce→shadow 강등(H-2, sweep_effective_mode).
+    shadow/강등: 전부 warned 로만 기록(롤백 없음). off/매니페스트없음/비-git → 빈 결과.
     """
+    result: dict[str, list[str]] = {"removed": [], "warned": []}
     if mode == "off" or not has_manifest(gate) or not has_git(root):
-        return []
+        return result
+    effective = sweep_effective_mode(root, gate, mode)
     commit = gate.get("checkpoint_commit")
     cpdir = cp_checkpoint_dir(root, gate["id"])
     ignore_patterns = load_gate_ignore(root)
-    violations: list[str] = []
-    for rel in _git_status_paths(root):
-        if scope_allows(str(root / rel), gate, root, ignore_patterns):
+    for path, orig in _git_status_entries(root):
+        if scope_allows(str(root / path), gate, root, ignore_patterns):
             continue
-        violations.append(rel)
-        if mode == "enforce":
-            existed = _snapshot_has_path(root, commit, rel) if commit else False
-            _rollback_one(root, rel, existed, commit, cpdir)
-    if violations:
+        existed = _snapshot_has_path(root, commit, path) if commit else True
+        if effective == "enforce" and not existed:
+            _rollback_one(root, path, False, commit, cpdir)  # 신규 스코프밖 → 삭제
+            result["removed"].append(path)
+            # 스코프 밖으로의 리네임으로 사라진 in-scope 원본 복원
+            if orig and _snapshot_has_path(root, commit, orig) and not (root / orig).exists():
+                _rollback_one(root, orig, True, commit, cpdir)
+                result["removed"].append(f"{orig} (원본 복원)")
+        else:
+            result["warned"].append(path)  # 기존 파일 수정 or shadow → 경고만(데이터 보호)
+    if result["removed"] or result["warned"]:
         log_audit(
             root,
-            "scope_violation_" + ("enforced" if mode == "enforce" else "shadow"),
+            "scope_violation_" + ("enforced" if effective == "enforce" else "shadow"),
             gate_id=gate["id"],
-            count=len(violations),
-            files=violations[:20],
+            removed=result["removed"][:20],
+            warned=result["warned"][:20],
         )
-    return violations
+    return result
 
 
 # ── todo.md 해시 ────────────────────────────────────────────────────────
@@ -630,9 +667,10 @@ def extract_target_file(
     tool_input: dict[str, Any],
     project_root: Path | None = None,
 ) -> str | None:
-    if tool_name not in ("Edit", "Write", "MultiEdit"):
+    if tool_name not in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         return None
-    fp = tool_input.get("file_path")
+    # NotebookEdit 는 file_path 가 아닌 notebook_path 를 쓴다 (C-2 커버리지)
+    fp = tool_input.get("notebook_path") if tool_name == "NotebookEdit" else tool_input.get("file_path")
     if not isinstance(fp, str):
         return None
     # 프로젝트 루트 외부 경로(메모리·설정 파일 등)는 카운터에서 제외
@@ -857,12 +895,14 @@ def _path_match(rel: str, pattern: str) -> bool:
 # ── control-plane allowlist (R2 — 강제 ON 이어도 무조건 허용) ──────────────
 # 매니페스트·게이트 상태·검증결과·ignore 파일을 스코프밖으로 막으면 /replan·
 # subplan·verifier 핸드셰이크가 자멸한다(rev.3 R2). 이 패턴은 계약과 무관하게 허용.
-# `.claude/**` 전체를 허용한다: state 뿐 아니라 plan_gate_enabled/plan_gate_scope
-# 같은 플래그 파일도 포함해야 한다 — layer-2 스윕이 이들(untracked·스코프밖)을
-# 롤백하면 plan-gate 가 자기 자신을 비활성화하는 자멸이 발생한다.
+# ⚠️ `.claude/**` 전체 허용은 과잉(H-5): `.claude/hooks/*.py`·`agents/*.md` 같은
+# 실행 코드/스펙까지 스코프 강제 밖이 된다. plan-gate 가 *실제 쓰는* 운영 파일만
+# 허용한다 — state 디렉토리 + `plan_gate_*` 플래그 파일(enabled/scope/no_git/
+# off_explicit). 플래그가 untracked·스코프밖이라 스윕이 지우면 자멸하므로 이들만 면제.
 _CONTROL_PLANE_ALLOW = (
     "tasks/todo.md",
-    ".claude/**",
+    ".claude/state/**",
+    ".claude/plan_gate_*",
     "docs/.verifier_result.json",
     ".plan-gateignore",
 )
@@ -929,16 +969,44 @@ def format_scope_shadow(rel: str, layer: str) -> str:
     )
 
 
-def format_scope_rollback(violations: list[str]) -> str:
-    """layer-2 enforce 롤백 알림 (Claude 환기 — desync 방지, additionalContext 용)."""
-    shown = "\n".join(f"  • {v}" for v in violations[:10])
-    more = f"\n  • ... ({len(violations) - 10}개 더)" if len(violations) > 10 else ""
-    return (
-        f"[plan-gate] ↩️  스코프 밖 변경 {len(violations)}건을 체크포인트 상태로 "
-        f"되돌렸습니다(enforce):\n{shown}{more}\n"
-        f"  방금 Bash 가 만든/수정한 스코프 밖 파일이 복원·삭제됐습니다. "
-        f"필요한 변경이면 tasks/todo.md scope 에 추가 후 /replan→/approve-plan 하세요."
+def _bullet(items: list[str], n: int = 10) -> str:
+    shown = "\n".join(f"  • {x}" for x in items[:n])
+    more = f"\n  • ... ({len(items) - n}개 더)" if len(items) > n else ""
+    return shown + more
+
+
+def format_scope_sweep(
+    removed: list[str], warned: list[str], effective: str, requested: str
+) -> str:
+    """layer-2 스윕 결과 환기 (Claude desync 방지, additionalContext 용).
+
+    removed=enforce 가 삭제한 스코프 밖 신규 파일, warned=되돌리지 않고 경고만 한
+    스코프 밖 변경(기존 파일 수정/shadow). requested↔effective 가 다르면(스냅샷 없어
+    enforce→shadow 강등) 그 사실을 명시한다.
+    """
+    parts = [f"\n{DIVIDER}", "[plan-gate] 스코프 위반 감지 (layer-2 / git-status 스윕)"]
+    if removed:
+        parts.append(f"↩️  스코프 밖 신규 변경 {len(removed)}건 롤백(삭제, enforce):")
+        parts.append(_bullet(removed))
+    if warned:
+        why = (
+            "기존 파일 수정 — 되돌리지 않음(사용자 직접 편집 보호)"
+            if effective == "enforce"
+            else "감지·기록만(shadow)"
+        )
+        parts.append(f"👁  스코프 밖 {len(warned)}건 {why}:")
+        parts.append(_bullet(warned))
+    if requested == "enforce" and effective != "enforce":
+        parts.append(
+            "⚠️  체크포인트 스냅샷이 없어 enforce 롤백을 건너뛰고 감지만 했습니다 "
+            "— 신규 파일도 삭제하지 않았습니다(무백업 삭제 방지)."
+        )
+    parts.append(
+        "필요한 변경이면 tasks/todo.md scope 에 추가(또는 /subplan)하세요. "
+        "남은 스코프 밖 변경은 최종 diff 로 사용자가 검토합니다."
     )
+    parts.append(DIVIDER)
+    return "\n".join(parts)
 
 
 def format_broad_glob_hint(manifest: dict[str, list[str]]) -> str:
@@ -1045,8 +1113,8 @@ def _intro_block() -> str:
     return (
         "▌ plan-gate 란?\n"
         "  큰 변경을 사용자가 검토하지 못한 채로 진행되는 것을 막는 자동 게이트입니다.\n"
-        "  차단 시점에 git tag + git stash로 자동 체크포인트를 생성하므로,\n"
-        "  /rollback 으로 안전하게 되돌릴 수 있습니다.\n"
+        "  게이트가 열릴 때 working tree 를 git 프라이빗 ref(비-git 은 cp 디렉토리)로\n"
+        "  자동 스냅샷하므로, /rollback 으로 안전하게 되돌릴 수 있습니다.\n"
         "  비활성화: /plan-gate-off 입력 (.claude/plan_gate_enabled 삭제).\n"
         "  카운트 제외: 문서·메타파일은 .plan-gateignore 에 패턴을 추가하면\n"
         "              편집 카운터에서 빠집니다.\n"

@@ -1163,14 +1163,52 @@ def t_scope_layer2(base: Path) -> None:
     evil.write_text("evil")
     r = run_hook(hook, bash(0), p)
     check(
-        "enforce: Bash 스코프 밖 신규 파일 → 롤백(삭제)",
-        not evil.exists() and "되돌렸" in (r.stdout or ""),
+        "enforce: Bash 스코프 밖 *신규* 파일 → 롤백(삭제)",
+        not evil.exists() and "롤백" in (r.stdout or ""),
         f"exists={evil.exists()} out={r.stdout[:140]!r}",
     )
 
     evil.write_text("evil again")
     run_hook(hook, bash(1), p)  # 실패한 Bash 도 파일을 남길 수 있다
     check("enforce: exit≠0 Bash 도 스윕", not evil.exists(), f"exists={evil.exists()}")
+
+    # C-1: 게이트 열림 시점에 존재하던 스코프 밖 파일을 사용자가 직접 수정하면
+    #      enforce 라도 되돌리지 않는다(checkout 으로 덮으면 사용자 편집 유실).
+    pc = make_project(base, "scope_l2_c1")
+    (pc / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
+    (pc / ".claude" / "agents" / "verifier.md").touch()
+    (pc / "tasks").mkdir()
+    (pc / "tasks" / "todo.md").write_text(_MANIFEST_TODO)  # scope=src/auth/**
+    outside = pc / "src" / "config.py"  # scope 밖
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text("ORIGINAL\n")  # 게이트 열기 전 존재 → 스냅샷에 포함
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", pc / "src" / "auth" / "x.py"), pc)
+    (pc / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    outside.write_text("USER EDIT\n")  # 사용자가 스코프 밖 기존 파일 직접 수정
+    run_hook(hook, bash(0), pc)
+    check(
+        "C-1: 스코프 밖 *기존* 파일의 사용자 수정은 되돌리지 않음(데이터 보호)",
+        outside.exists() and outside.read_text() == "USER EDIT\n",
+        f"content={outside.read_text()!r}",
+    )
+
+    # H-2: 스냅샷 커밋이 없으면(no-git opt-out 등) enforce 라도 무백업 삭제 금지 → shadow 강등
+    ph = _scoped_gate_project(base, "scope_l2_h2")
+    gh = get_gate(ph)
+    sp = ph / ".claude" / "state" / "plan_gate.json"
+    d = json.loads(sp.read_text())
+    d["gates"][gh["id"]]["checkpoint_commit"] = None  # 스냅샷 실패 시뮬레이션
+    sp.write_text(json.dumps(d))
+    (ph / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    (ph / "src" / "other").mkdir(parents=True)
+    ev2 = ph / "src" / "other" / "evil.py"
+    ev2.write_text("evil")
+    r = run_hook(hook, bash(0), ph)
+    check(
+        "H-2: 스냅샷 없으면 enforce→shadow 강등(무백업 삭제 금지)",
+        ev2.exists() and "스냅샷이 없어" in (r.stdout or ""),
+        f"exists={ev2.exists()} out={r.stdout[:180]!r}",
+    )
 
     (p / ".claude" / "plan_gate_scope").write_text("shadow\n")
     evil.write_text("evil shadow")
@@ -1185,7 +1223,7 @@ def t_scope_layer2(base: Path) -> None:
     (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
     run_hook(hook, bash(0), p)
     check(
-        "control-plane(.claude) 자멸 방지 — 플래그 보존",
+        "control-plane 자멸 방지 — plan_gate_* 플래그 보존",
         (p / ".claude" / "plan_gate_enabled").exists() and (p / ".claude" / "plan_gate_scope").exists(),
     )
 
@@ -1225,6 +1263,74 @@ def t_subplan(base: Path) -> None:
     check(
         "subplan: Claude 호출 가능 + _ACTION_TOKENS 제외",
         "disable-model-invocation: true" not in sub_md and "subplan" not in plan_approval._ACTION_TOKENS,
+    )
+
+
+def t_scope_hardening(base: Path) -> None:
+    """비판 리뷰 하드닝 — C-2 NotebookEdit / H-5 allowlist 축소 / M-1 subplan broad / H-3 -z 파싱."""
+    print("[33] step5 하드닝 (C-2/H-5/M-1/H-3)")
+    lib = _reload_lib()
+    hook = HOOKS / "plan_gate.py"
+    cli = HOOKS / "plan_gate_cli.py"
+
+    # H-5: control-plane allowlist 축소 — .claude/hooks 코드는 보호 대상, 플래그/state 만 면제
+    check(
+        "H-5: allowlist 는 state+플래그만 (코드/스펙 제외)",
+        lib.is_control_plane(".claude/state/x.json")
+        and lib.is_control_plane(".claude/plan_gate_enabled")
+        and not lib.is_control_plane(".claude/hooks/ruff_check.py")
+        and not lib.is_control_plane(".claude/agents/verifier.md"),
+    )
+
+    p = _scoped_gate_project(base, "scope_hard")
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+
+    # C-2: NotebookEdit 도 layer-1 강제 대상 (notebook_path 인식)
+    def nb(path: Path) -> dict:
+        return {"tool_name": "NotebookEdit", "tool_input": {"notebook_path": str(path)}}
+
+    r = run_hook(hook, nb(p / "src" / "other" / "n.ipynb"), p)
+    check("C-2: NotebookEdit 스코프 밖 → deny", '"deny"' in (r.stdout or ""), f"{r.stdout[:100]!r}")
+    r = run_hook(hook, nb(p / "src" / "auth" / "n.ipynb"), p)
+    check("C-2: NotebookEdit 스코프 안 → 허용", '"deny"' not in (r.stdout or ""), f"{r.stdout[:100]!r}")
+
+    # H-5(행위): .claude/hooks 아래 코드 편집은 enforce 에서 deny
+    r = run_hook(hook, edit_payload("Edit", p / ".claude" / "hooks" / "evil.py"), p)
+    check("H-5: .claude/hooks 코드 편집 → deny", '"deny"' in (r.stdout or ""), f"{r.stdout[:100]!r}")
+    r = run_hook(hook, edit_payload("Write", p / ".claude" / "state" / "x.json"), p)
+    check("H-5: .claude/state 는 여전히 허용", '"deny"' not in (r.stdout or ""), f"{r.stdout[:100]!r}")
+
+    # M-1: subplan 은 넓은 글롭 확장 거부
+    env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(p)}
+    rc = subprocess.run([sys.executable, str(cli), "subplan", "**"], capture_output=True, text=True, cwd=str(p), env=env)
+    check("M-1: subplan 넓은 글롭 거부", rc.returncode == 1 and "넓은 글롭" in (rc.stderr or ""), f"rc={rc.returncode} err={rc.stderr[:100]!r}")
+
+    # H-3: git status -z 가 유니코드/공백 경로를 verbatim 파싱
+    p2 = make_project(base, "scope_h3")
+    (p2 / "한글 파일.py").write_text("x")
+    paths = [e[0] for e in lib._git_status_entries(p2)]
+    check("H-3: -z 유니코드·공백 경로 정확 파싱", "한글 파일.py" in paths, f"paths={paths}")
+
+    # H-4: in-scope→스코프밖 rename 시 새 파일 rm + in-scope 원본 복원
+    p3 = make_project(base, "scope_h4")
+    (p3 / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
+    (p3 / ".claude" / "agents" / "verifier.md").touch()
+    (p3 / "tasks").mkdir()
+    (p3 / "tasks" / "todo.md").write_text(_MANIFEST_TODO)  # scope=src/auth/**
+    a = p3 / "src" / "auth" / "a.py"
+    a.parent.mkdir(parents=True, exist_ok=True)
+    a.write_text("keep me\n")
+    subprocess.run(["git", "-C", str(p3), "add", "-A"], check=True, env=GIT_ENV)
+    subprocess.run(["git", "-C", str(p3), "commit", "-q", "-m", "seed"], check=True, env=GIT_ENV)
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p3 / "src" / "auth" / "x.py"), p3)  # 게이트 열기(스냅샷)
+    (p3 / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    subprocess.run(["git", "-C", str(p3), "mv", "src/auth/a.py", "src/other_b.py"], check=True, env=GIT_ENV)
+    run_hook(HOOKS / "plan_gate_bash.py",
+             {"tool_name": "Bash", "tool_input": {"command": "echo x"}, "tool_response": {"exit_code": 0}}, p3)
+    check(
+        "H-4: 스코프밖 rename → 새 파일 rm + in-scope 원본 복원",
+        a.exists() and a.read_text() == "keep me\n" and not (p3 / "src" / "other_b.py").exists(),
+        f"a={a.exists()} b={(p3 / 'src' / 'other_b.py').exists()}",
     )
 
 
@@ -1302,6 +1408,7 @@ def main() -> int:
         t_scope_layer1(base)
         t_scope_layer2(base)
         t_subplan(base)
+        t_scope_hardening(base)
     t_scaffold_consistency()
     t_command_files()
     t_verifier_spec()

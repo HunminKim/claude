@@ -427,6 +427,16 @@ def cmd_subplan(root, state) -> int:
             "  tasks/todo.md 에 scope 선언 + /plan-gate-scope-enforce 후 의미가 있습니다."
         )
         return 1
+    # 넓은 글롭 확장 거부(M-1) — 자동승인 broad-glob 가드와 일관. `**`·최상위 글롭은
+    # 스코프 계약을 형해화하므로 디렉토리로 한정하게 강제한다.
+    broad = [p for p in patterns if lib.is_broad_glob(p)]
+    if broad:
+        _err(
+            f"[plan-gate subplan] 넓은 글롭은 확장 불가: {', '.join(broad)}\n"
+            "  `**`·최상위 글롭은 스코프를 사실상 무력화합니다. 디렉토리로 한정하세요"
+            " (예: src/util/**). 계획 자체를 넓혀야 하면 /replan 을 쓰세요."
+        )
+        return 1
     exps = gate.setdefault("expansions", [])
     existing = set(exps) | set(gate.get("scope", []))
     added = [p for p in patterns if p not in existing]

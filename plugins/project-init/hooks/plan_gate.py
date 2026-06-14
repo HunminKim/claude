@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (matcher: Edit|Write|MultiEdit) — plan-gate 강제.
+"""PreToolUse hook (matcher: Edit|Write|MultiEdit|NotebookEdit) — plan-gate 강제.
 
 출력 채널:
 - 차단 (D1 lock / 트리거 / scope creep): exit 2 + stderr — Claude blocking error 주입
@@ -101,7 +101,7 @@ def main() -> int:
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {}) or {}
 
-    if tool_name not in ("Edit", "Write", "MultiEdit"):
+    if tool_name not in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         return 0
 
     root = lib.find_project_root()

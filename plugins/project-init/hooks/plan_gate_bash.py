@@ -58,16 +58,15 @@ def _emit_advisory(msg: str) -> None:
 
 
 def _sweep_advisory(root, gate, mode: str) -> str | None:
-    """layer-2 스윕 실행 후 환기 메시지(있으면). off/매니페스트 없음 → None."""
+    """layer-2 스윕 실행 후 환기 메시지(있으면). off/매니페스트 없음/위반 없음 → None."""
     if mode == "off" or not lib.has_manifest(gate):
         return None
-    violations = lib.scope_sweep(root, gate, mode)
-    if not violations:
+    res = lib.scope_sweep(root, gate, mode)
+    removed, warned = res["removed"], res["warned"]
+    if not removed and not warned:
         return None
-    if mode == "enforce":
-        return lib.format_scope_rollback(violations)
-    summary = "; ".join(violations[:5]) + (" …" if len(violations) > 5 else "")
-    return lib.format_scope_shadow(summary, "Bash")
+    effective = lib.sweep_effective_mode(root, gate, mode)
+    return lib.format_scope_sweep(removed, warned, effective, mode)
 
 
 def main() -> int:

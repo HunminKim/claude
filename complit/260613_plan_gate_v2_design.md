@@ -74,6 +74,50 @@ created 잔류+thrash 생존 검증). 잔여 결함: `src/*` 사람승인 맹점
 
 ---
 
+## rev.4 변경 이력 (v2 출시 전 적대적 코드 리뷰 하드닝 — 260614)
+
+step5(enforce) 랜딩 후 서브에이전트 3개로 ① v1↔v2 비교 ② flow 비판 ③ 설계-구현 정합을
+병렬 감사했다. flow 비판이 **enforce 의 데이터 손실 경로**를 찾아냈고(행복 경로만 테스트해
+놓친 코너), 전부 해소 후 smoke 281 통과. 확정 수정:
+
+- **[C-1] enforce 오탐 데이터 손실 차단**: `scope_sweep` 가 git status 전체를 주체 구분
+  없이 롤백해 **사용자가 직접 수정한 스코프 밖 파일까지 되돌리던** 문제. → enforce 는
+  스코프 밖 *신규* 파일만 `rm`(명백한 Bash 우회 생성물), *기존* 파일 수정은 되돌리지
+  않고 경고만(checkout 으로 덮으면 사용자 편집 유실). smoke C-1.
+- **[H-2] 무백업 삭제 fail-open 차단**: 스냅샷 커밋 없음(생성 실패·no-git opt-out)인데
+  enforce 면 `existed=False`→백업 없이 `unlink` 로 빠지던 경로. → `sweep_effective_mode`
+  로 스냅샷 없으면 enforce→shadow 강등(복원 출처 없으면 파괴 금지). smoke H-2.
+- **[H-3] git status 파싱**: `strip('"')` 가 C-style 이스케이프(유니코드·탭)를 미복원 →
+  경로 오판. → `--porcelain -z`(NUL, verbatim) 로 교체(`_git_status_entries`). smoke H-3.
+- **[H-4] rename 유실**: `R old -> new` 에서 new 만 봐 in-scope 원본이 사라지던 문제. →
+  -z 로 (new, orig) 쌍 파싱, 스코프 밖 rename 이면 new rm + in-scope orig 복원. smoke H-4.
+- **[C-2] 커버리지 구멍**: layer-1 이 Edit/Write/MultiEdit 만, NotebookEdit 누락. →
+  매처(hooks.json)+`extract_target_file`(notebook_path)에 NotebookEdit 추가. smoke C-2.
+  **잔여 한계(정직)**: MCP 파일도구·Bash 없는 세션의 layer-2 사각은 미해소 — layer-2 가
+  PostToolUse(Bash) 전용이라 Bash 미실행 세션은 사후 스윕이 없다(후속 과제).
+- **[H-5] control-plane 과잉**: `.claude/**` 전면 면제가 `.claude/hooks/*.py`(실행 코드)
+  까지 강제 밖으로 둠. → `.claude/state/**` + `.claude/plan_gate_*`(플래그)로 축소.
+  자멸 방지는 플래그 경로만 면제하면 충분. smoke H-5.
+- **[M-1] subplan broad-glob**: 자동승인은 `**` 막으면서 `subplan "**"` 는 허용하던
+  비대칭. → `cmd_subplan` 에 `is_broad_glob` 거부 추가. smoke M-1.
+- **문서 정합(정합 감사 지적)**: README plan-gate 섹션을 v2 모델로 전면 재작성,
+  `plan_gate_lib.py` 모듈 docstring·intro 메시지의 "git tag/stash" 잔재 정정.
+- **수용된 트레이드오프(미수정, 근거 명시)**: H-1(자동승인 후 첫 스코프밖 Edit self-deny
+  — 동작 일관, 메시지가 /replan 안내) · M-2(/skip-verify escape-hatch) · M-3(스코프밖
+  반복 Edit thrash 미카운트 — 편집 미발생이라 데이터 무해) · M-4(todo.md 변경 후
+  2회차 approve 통과 — 사용자 행동 의존).
+- **D9 화해(정합 감사)**: rev.2 §3.5 의 thrash 개명(`THRASH_REPEAT_SOFT/HARD` 6/9) +
+  `is_doc_path` 제거는 **미착수**. 현재 코드는 `TRIGGER_REPEAT_RATIO=5` + `is_doc_path`
+  유지 — 의도적 보류(현 동작 안정적). rev.3 핸드오프는 이를 완료 주장한 적 없음.
+- **R3 문구 정정**: rev.3 의 "`is_broad_glob` 을 `_glob_to_regex` 기준으로 재정의"는
+  과장 — 실제 `is_broad_glob` 은 독립 문자열 휴리스틱(자동승인 가드 목적엔 충분). 코드
+  변경 없이 문구만 정정.
+
+**enforce 판정**: C-1/H-2/H-3/H-4 해소로 **데이터 손실 경로 제거 → enforce production 가능**.
+단 잔여 한계(비-git layer-2 부재, MCP/Bash-less 사각)는 명시. shadow-first 롤아웃 권장 유지.
+
+---
+
 ## ★ 구현 진행 상황 + 다음 세션 핸드오프 (260614 기준)
 
 > 새 세션은 이 섹션을 먼저 읽으면 바로 이어서 개발 가능. 아래 외에 §2(결정)·§3(아키텍처)를 참조.
