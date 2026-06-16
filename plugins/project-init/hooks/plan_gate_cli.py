@@ -61,26 +61,41 @@ def _need_gate(state, action: str):
     return gate
 
 
+def _approve_fresh_gate(root, state) -> int:
+    """선승인(편집 전 /approve-plan): 즉시 approved gate 생성.
+
+    첫 편집이 gate 를 열기 전에 승인하므로 plan_gate.py 의 첫-편집 스냅샷 분기를
+    못 탄다. 여기서 직접 캡처하지 않으면 checkpoint 가 없어 layer-2 enforce 가 무백업
+    삭제 방지로 영구 shadow 강등된다(H-2) — enforce 를 켜도 Bash 스코프밖 생성물이
+    롤백 안 되는 설정·동작 불일치.
+    """
+    gate = lib.make_gate()
+    if not lib.prefers_no_git(root):
+        commit = lib.create_snapshot(root, gate)
+        if commit:
+            gate["checkpoint_commit"] = commit
+    sha, mtime = lib.hash_todo_md(root)
+    gate["todo_md_sha256"] = sha
+    gate["todo_md_mtime"] = mtime
+    lib.transition(gate, "approve_manual")  # fresh gate(created)→approved
+    manifest = lib.apply_manifest(root, gate)  # 사람 승인 — 넓은 글롭 가드 우회
+    lib.set_current_gate(state, gate)
+    lib.save_state(root, state)
+    _info(
+        f"[plan-gate approve] 선승인 완료: {gate['id']}\n"
+        f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
+        f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복"
+        + _scope_note(manifest, root)
+    )
+    return 0
+
+
 def cmd_approve(root, state) -> int:
     gate = lib.current_gate(state)
 
-    # gate 없음 = 아직 편집 시작 전 → 선승인: 즉시 approved gate 생성
+    # gate 없음 = 아직 편집 시작 전 → 선승인 (스냅샷 포함)
     if gate is None or gate["state"] in ("done", "rolled_back"):
-        gate = lib.make_gate()
-        sha, mtime = lib.hash_todo_md(root)
-        gate["todo_md_sha256"] = sha
-        gate["todo_md_mtime"] = mtime
-        lib.transition(gate, "approve_manual")  # fresh gate(created)→approved
-        manifest = lib.apply_manifest(root, gate)  # 사람 승인 — 넓은 글롭 가드 우회
-        lib.set_current_gate(state, gate)
-        lib.save_state(root, state)
-        _info(
-            f"[plan-gate approve] 선승인 완료: {gate['id']}\n"
-            f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
-            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복"
-            + _scope_note(manifest, root)
-        )
-        return 0
+        return _approve_fresh_gate(root, state)
 
     if gate["state"] == "approved":
         _info(f"[plan-gate approve] 이미 승인됨: {gate['id']}")

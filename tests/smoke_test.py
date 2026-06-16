@@ -1266,6 +1266,41 @@ def t_subplan(base: Path) -> None:
     )
 
 
+def t_preapprove_snapshot(base: Path) -> None:
+    """선승인(/approve-plan 편집 전)도 체크포인트 스냅샷을 만들어야 layer-2 enforce 가
+    shadow 로 강등되지 않는다 (cmd_approve 가 create_snapshot 누락하던 갭 회귀 방지).
+    """
+    print("[34] 선승인 스냅샷 + layer-2 enforce 롤백")
+    cli = HOOKS / "plan_gate_cli.py"
+    bash_hook = HOOKS / "plan_gate_bash.py"
+    p = make_project(base, "preapprove")
+    (p / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
+    (p / ".claude" / "agents" / "verifier.md").touch()
+    (p / "tasks").mkdir()
+    (p / "tasks" / "todo.md").write_text(_MANIFEST_TODO)  # scope=src/auth/**
+
+    env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(p)}
+    # 편집 전 선승인 — 이 시점에 working tree 스냅샷이 잡혀야 한다
+    r = subprocess.run([sys.executable, str(cli), "approve"], capture_output=True, text=True, cwd=str(p), env=env)
+    g = get_gate(p)
+    check("선승인: approved + 스코프 저장", g["state"] == "approved" and bool(g.get("scope")), f"state={g['state']}")
+    check("선승인: 체크포인트 스냅샷 생성(갭 회귀 방지)", bool(g.get("checkpoint_commit")), f"ckpt={g.get('checkpoint_commit')}")
+
+    # layer-2 enforce: Bash 가 만든 스코프 밖 신규 파일이 실제로 삭제 롤백돼야 한다
+    # (스냅샷 없으면 H-2 로 shadow 강등돼 evil.py 가 살아남는다 — 바로 그 갭)
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    (p / "src" / "other").mkdir(parents=True)
+    evil = p / "src" / "other" / "evil.py"
+    evil.write_text("evil")
+    bash = {"tool_name": "Bash", "tool_input": {"command": "echo x"}, "tool_response": {"exit_code": 0}}
+    r = run_hook(bash_hook, bash, p)
+    check(
+        "선승인 후 layer-2 enforce 롤백(삭제) — shadow 강등 아님",
+        not evil.exists() and "롤백" in (r.stdout or ""),
+        f"exists={evil.exists()} out={r.stdout[:160]!r}",
+    )
+
+
 def t_scope_hardening(base: Path) -> None:
     """비판 리뷰 하드닝 — C-2 NotebookEdit / H-5 allowlist 축소 / M-1 subplan broad / H-3 -z 파싱."""
     print("[33] step5 하드닝 (C-2/H-5/M-1/H-3)")
@@ -1408,6 +1443,7 @@ def main() -> int:
         t_scope_layer1(base)
         t_scope_layer2(base)
         t_subplan(base)
+        t_preapprove_snapshot(base)
         t_scope_hardening(base)
     t_scaffold_consistency()
     t_command_files()
