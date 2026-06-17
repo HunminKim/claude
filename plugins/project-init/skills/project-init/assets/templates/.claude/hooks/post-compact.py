@@ -57,6 +57,10 @@ def restore_plan_gate(root: Path) -> None:
     claude_dir = root / ".claude"
     if not claude_dir.exists():
         return
+    # project-init 프로젝트에서만 자동 복구 — verifier.md 가드.
+    # 없으면 비-project-init 디렉토리에서 compact 마다 플래그가 부활해 오활성된다.
+    if not (claude_dir / "agents" / "verifier.md").exists():
+        return
     off_explicit = claude_dir / "plan_gate_off_explicit"
     if off_explicit.exists():
         return

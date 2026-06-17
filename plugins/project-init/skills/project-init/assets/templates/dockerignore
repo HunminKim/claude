@@ -1,0 +1,36 @@
+# .dockerignore — 빌드 컨텍스트에서 제외 (이미지 크기·빌드속도·비밀 유출 방지)
+# (파일명에 점이 없는 것은 이 저장소 자체 git 동작에 영향 안 주려는 것 — gitignore 템플릿과 동일 컨벤션)
+.git
+.gitignore
+.github
+.githooks
+
+# 비밀·환경
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Python
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.pytest_cache
+.ruff_cache
+
+# Node
+node_modules
+npm-debug.log
+
+# 하네스·문서 (런타임 이미지에 불필요)
+.claude
+docs
+tasks
+specs
+*.md
+
+# OS
+.DS_Store
+Thumbs.db

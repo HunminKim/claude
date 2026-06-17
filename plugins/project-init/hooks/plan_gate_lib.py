@@ -87,6 +87,17 @@ def is_plan_gate_enabled(root: Path) -> bool:
     return (root / PLAN_GATE_FLAG).exists()
 
 
+def is_plan_gate_manageable(root: Path) -> bool:
+    """plan-gate CLI(done/off/rollback 등)가 이 디렉토리에서 동작해도 되는지.
+
+    강제 훅은 plan_gate_enabled 만으로 켜지므로, 게이트가 켜져 있으면 verifier.md
+    유무와 무관하게 **항상 닫을 수 있어야** 한다 (강제는 되는데 CLI 가 verifier.md
+    부재로 거부하면 닫을 수 없는 데드락이 된다). project-init 프로젝트면 아직 게이트가
+    켜지기 전이라도 /plan-gate-on 등을 허용한다.
+    """
+    return is_plan_gate_enabled(root) or is_project_init_managed(root)
+
+
 def enable_plan_gate(root: Path) -> None:
     p = root / PLAN_GATE_FLAG
     p.parent.mkdir(parents=True, exist_ok=True)

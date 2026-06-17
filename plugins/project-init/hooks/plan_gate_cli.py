@@ -562,9 +562,10 @@ def main(argv: list[str]) -> int:
     if root is None:
         _err("[plan-gate cli] 프로젝트 루트를 찾을 수 없다 (CLAUDE_PROJECT_DIR 미설정).")
         return 2
-    if not lib.is_project_init_managed(root):
+    if not lib.is_plan_gate_manageable(root):
         _err(
-            "[plan-gate cli] project-init으로 초기화된 프로젝트가 아니다 (.claude/agents/verifier.md 없음)."
+            "[plan-gate cli] plan-gate 관리 대상이 아니다 "
+            "(.claude/plan_gate_enabled 도 .claude/agents/verifier.md 도 없음)."
         )
         return 2
 

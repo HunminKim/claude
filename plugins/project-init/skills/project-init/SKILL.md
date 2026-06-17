@@ -21,6 +21,9 @@ touch "${TMPDIR:-/tmp}/.claude_init_in_progress"
 
 ### 1단계: 프로젝트 파악
 
+**먼저 대상 루트를 확정·확인한다 (stray 플래그 방지)**: 초기화 대상은 현재 작업 디렉토리(절대경로)다.
+`pwd` 로 절대경로를 확인하고, 그것이 **사용자 홈(`$HOME`)이나 시스템 디렉토리(`/`, `/home`, `/root`, `/tmp` 등)면 초기화를 멈추고** AskUserQuestion 으로 "여기에 정말 초기화할까요? (보통은 프로젝트 하위 폴더에서 실행)" 를 확인한다. 홈/시스템 디렉토리에 `.claude/plan_gate_enabled` 등을 만들면 그 디렉토리 전체에 plan-gate 가 잘못 활성화된다. 이후 모든 파일은 이 확정된 루트 기준으로 생성한다.
+
 현재 디렉토리를 탐색해서 프로젝트 성격을 파악한다.
 
 - 어떤 언어/프레임워크인지 (`package.json`, `requirements.txt`, `go.mod`, `Cargo.toml` 등)
@@ -64,10 +67,14 @@ touch "${TMPDIR:-/tmp}/.claude_init_in_progress"
 
 **빈 프로젝트인 경우**: **AskUserQuestion 툴**로 최대 4개씩 나눠 묻는다.
 
-첫 번째 호출 (기술 스택 + 명령어):
+첫 번째 호출 (기술 스택 + 명령어 + 서비스 구성):
 - "사용할 주요 언어/프레임워크는?" — 옵션: `["Python / FastAPI", "TypeScript / Next.js", "Go", "기타 (직접 입력)"]`
 - "빌드·테스트·린트 명령어를 알고 있나요?" — 옵션: `["알고 있습니다 (직접 입력)", "모름 — TBD로 남겨주세요"]`
 - "알려진 버그, 환경 제약, 주의사항이 있나요?" — 옵션: `["없습니다", "있습니다 (직접 입력)"]`
+- "서비스 구성은?" — 옵션: `["단일 서비스", "멀티서비스 스택 (front/back/vLLM/DB 등 여러 컨테이너)"]`
+
+> **멀티서비스 응답 시**: 2단계에서 `docker-compose.yml` + `.dockerignore` 골격을 추가 생성한다 (아래 "멀티서비스 스택" 참조). 단일 서비스면 생성하지 않는다.
+> **기존 프로젝트**: `docker-compose.yml`/`compose.yaml` 이 이미 있으면 멀티서비스로 간주하고 이 질문을 건너뛴다 (기존 compose 는 덮어쓰지 않는다).
 
 > 프로젝트 이름·목적 등 순수 텍스트 정보는 AskUserQuestion 응답 후 추가로 물어보거나, 첫 대화에서 이미 언급된 경우 그대로 사용한다.
 
@@ -176,7 +183,18 @@ scripts/
    - 주의: `.claude/commands/` 에 plan-gate 커맨드(skip.md 등)를 만들지 않는다 —
      /done·/skip 등 전이 커맨드는 플러그인이 제공하며, 프로젝트 로컬 동명 커맨드가
      플러그인 커맨드를 가려(shadow) 무력화할 수 있다
+   - **멀티서비스 스택인 경우만** (1단계 응답): `docker-compose.yml` + `.dockerignore` 추가 생성 (아래 "멀티서비스 스택" 참조). 기존 `docker-compose.yml`/`compose.yaml` 이 있으면 덮어쓰지 않는다.
 8. `.claude/plan_gate_enabled` — **반드시 마지막**. 이 파일이 생성된 순간부터 plan-gate가 활성화된다
+
+#### 멀티서비스 스택 (선택 — 1단계에서 "멀티서비스" 응답 시에만)
+
+여러 컨테이너(front/back/vLLM/DB 등)를 docker-compose 로 함께 띄우는 프로젝트면 아래를 생성한다.
+**Claude 는 컨테이너 밖(호스트 네이티브)에서 docker CLI 로 스택을 제어한다** — Claude 를 컨테이너에 넣지 않는다 (형제 컨테이너 제어가 docker-in-docker 로 꼬이고 GPU 패스스루가 복잡해진다).
+
+1. `docker-compose.yml` — `assets/templates/docker-compose.yml` 골격을 읽어 생성. 사용자가 말한 실제 서비스만 남기고 미사용 블록(예: vLLM 안 쓰면 vllm 서비스)은 삭제한다. vLLM 모델명 등 placeholder(`YOUR_MODEL_HERE`)는 알면 채우고 모르면 그대로 둔다.
+2. `.dockerignore` — `assets/templates/dockerignore` 를 읽어 `.dockerignore` 로 생성.
+3. CLAUDE.md "명령어" 섹션에 compose 명령을 추가한다: `docker compose up -d`, `docker compose logs -f <svc>`, `docker compose down`.
+4. 서비스별 Dockerfile 은 생성하지 않는다 — 필요 시 `@infra` 에게 위임하도록 안내한다 ("@infra 백엔드 Dockerfile 만들어줘"). DB·vLLM 은 보통 공식 이미지라 Dockerfile 불필요.
 
 ### 3단계: CLAUDE.md 생성
 
@@ -528,6 +546,15 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ### tasks/todo.md 템플릿
 
 `assets/templates/tasks/todo.md` 파일을 읽어 사용한다.
+
+### docker-compose.yml 템플릿 (멀티서비스 전용)
+
+`assets/templates/docker-compose.yml` 파일을 읽어 프로젝트 루트 `docker-compose.yml` 로 생성한다. 멀티서비스 응답 시에만.
+
+### .dockerignore 템플릿 (멀티서비스 전용)
+
+`assets/templates/dockerignore` 파일을 읽어 프로젝트 루트 `.dockerignore` 로 생성한다. 멀티서비스 응답 시에만.
+(템플릿 파일명에 점이 없는 것은 이 저장소 자체 git 동작에 영향을 주지 않기 위함 — gitignore 템플릿과 동일 컨벤션)
 
 ---
 

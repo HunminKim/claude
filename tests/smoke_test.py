@@ -568,6 +568,40 @@ def t_done_from_created(base: Path) -> None:
     check("gate done 처리됨", get_gate(p)["state"] == "done", get_gate(p)["state"])
 
 
+def t_cli_closeable_without_verifier(base: Path) -> None:
+    """plan_gate_enabled 있고 verifier.md 없는 디렉토리에서도 게이트를 닫을 수 있다 (리포트 260616).
+
+    강제(plan_gate.py)는 plan_gate_enabled 로 켜지는데 CLI 가 verifier.md 를 요구하면
+    '켜졌지만 못 닫는' 데드락이 된다. is_plan_gate_manageable 로 가드를 통일해 해소.
+    """
+    print("[16b] verifier.md 없이도 게이트 닫힘 (데드락 방지)")
+    cli = HOOKS / "plan_gate_cli.py"
+
+    # (1) plan_gate_enabled 有 + verifier.md 無 → /done 이 exit 2 거부 대신 exit 0 로 닫는다
+    p = make_project(base, "no_verifier_close")  # make_project 는 verifier.md 를 만들지 않는다
+    check("픽스처에 verifier.md 없음", not (p / ".claude" / "agents" / "verifier.md").exists())
+    gate_hook = HOOKS / "plan_gate.py"
+    f = p / "x.py"
+    for _ in range(6):
+        run_hook(gate_hook, edit_payload("Edit", f), p)
+    r = subprocess.run(
+        [sys.executable, str(cli), "done"],
+        capture_output=True, text=True, cwd=str(p),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(p)},
+    )
+    check("verifier.md 없이 /done exit 0 (데드락 해소)", r.returncode == 0, f"rc={r.returncode} err={r.stderr[:120]!r}")
+
+    # (2) plan_gate_enabled 도 verifier.md 도 없으면 CLI 거부 (과완화 방지)
+    bare = base / "bare_no_gate"
+    (bare / ".claude").mkdir(parents=True)
+    r2 = subprocess.run(
+        [sys.executable, str(cli), "status"],
+        capture_output=True, text=True, cwd=str(bare),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(bare)},
+    )
+    check("플래그·verifier 둘 다 없으면 CLI 거부 (exit 2)", r2.returncode == 2, f"rc={r2.returncode}")
+
+
 def t_stop_hook_active_guard(base: Path) -> None:
     """Stop 훅이 stop_hook_active=true 면 재주입 억제 (무한 연장 방지).
 
@@ -1429,6 +1463,7 @@ def main() -> int:
         t_install_python_gate(base)
         t_cleanup_untracked_only(base)
         t_done_from_created(base)
+        t_cli_closeable_without_verifier(base)
         t_stop_hook_active_guard(base)
         t_verifier_advisory_dedup(base)
         t_cp_rollback_nongit(base)
