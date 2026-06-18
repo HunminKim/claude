@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -90,6 +91,51 @@ def format_warning(entries: list) -> str:
     return "\n".join(lines)
 
 
+def _parse_exit_code(error: str | None) -> int:
+    """top-level error 문자열("Exit code 1")에서 종료코드 추출. 못 찾으면 1."""
+    if not error:
+        return 1
+    m = re.search(r"-?\d+", error)
+    return int(m.group()) if m else 1
+
+
+def classify_outcome(data: dict) -> tuple[str, int, str]:
+    """런타임 스키마 차이를 흡수해 (outcome, exit_code, error_tail) 반환.
+
+    outcome ∈ {success, failure, interrupt}. 이 Claude Code 런타임 실측(260619):
+    - 성공: hook_event_name=PostToolUse, tool_response=dict(stdout/stderr/...), **exit_code 키 없음**
+    - 실패: hook_event_name=PostToolUseFailure, tool_response=None, top-level error="Exit code N", is_interrupt
+    구버전 호환: 성공·실패 모두 PostToolUse + tool_response.exit_code 인 런타임도 처리.
+    멀티 신호(event명 / top-level error / exit_code)로 판정 → 런타임 버전에 무관하게 동작.
+    과거 회귀: exit_code 단일 가정 + PostToolUse 단일 구독으로 실패를 영영 못 봐 가드가 죽었음(F-008).
+    """
+    if data.get("is_interrupt"):
+        return "interrupt", 0, ""
+    event = data.get("hook_event_name") or ""
+    tr = data.get("tool_response")
+    top_error = data.get("error")
+
+    # 명시적 실패: 실패 이벤트 또는 top-level error 존재
+    if event == "PostToolUseFailure" or top_error:
+        code = _parse_exit_code(top_error)
+        tail = top_error or ""
+        if isinstance(tr, dict):  # 구버전: 실패에도 tool_response 채워짐
+            code = tr.get("exit_code", code) or code
+            tail = tr.get("stderr") or tr.get("stdout") or tr.get("output") or tail
+        return "failure", code, tail
+
+    # tool_response 에 exit_code 명시(구버전 PostToolUse 성공·실패 공용 경로)
+    if isinstance(tr, dict) and "exit_code" in tr:
+        code = tr.get("exit_code", 0)
+        if code != 0:
+            tail = tr.get("stderr") or tr.get("stdout") or tr.get("output") or ""
+            return "failure", code, tail
+        return "success", 0, ""
+
+    # 그 외(신버전 성공: exit_code 없는 PostToolUse) → 성공
+    return "success", 0, ""
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -99,9 +145,10 @@ def main():
     if data.get("tool_name") != "Bash":
         sys.exit(0)
 
-    tool_response = data.get("tool_response", {})
-    exit_code = tool_response.get("exit_code", 0)
-    output = tool_response.get("output", "")
+    outcome, exit_code, error_tail = classify_outcome(data)
+    # 사용자 중단(interrupt)은 실패 루프 신호가 아니다 — 카운터 불변
+    if outcome == "interrupt":
+        sys.exit(0)
     command = data.get("tool_input", {}).get("command", "")
     working_dir = os.getcwd()
 
@@ -126,7 +173,7 @@ def main():
     log["working_dir"] = working_dir
 
     # 성공 시 리셋
-    if exit_code == 0:
+    if outcome == "success":
         log["consecutive_failures"] = 0
         log["entries"] = []
         log["last_reset"] = datetime.now(timezone.utc).isoformat()
@@ -138,7 +185,7 @@ def main():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "command": command[:120],
         "exit_code": exit_code,
-        "error_tail": output[-ERROR_TAIL_LENGTH:],
+        "error_tail": error_tail[-ERROR_TAIL_LENGTH:],
     }
     log["entries"].append(entry)
     log["entries"] = log["entries"][-MAX_ENTRIES:]
@@ -147,10 +194,12 @@ def main():
     save_log(log_path, log)
 
     # 1회 실패: 소프트 힌트 (advisory, 카운터 유지)
+    # hookEventName 은 실제 발동 이벤트로 맞춘다 — 실패는 PostToolUseFailure 로 온다.
+    # (실측 260619: PostToolUseFailure 의 additionalContext·exit2 둘 다 Claude 에 전달됨)
     if log["consecutive_failures"] == 1:
         payload = {
             "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
+                "hookEventName": data.get("hook_event_name") or "PostToolUse",
                 "additionalContext": format_soft_hint(log["entries"][-1]),
             }
         }

@@ -1339,10 +1339,30 @@ def t_subplan(base: Path) -> None:
     r = run_hook(hook, edit_payload("Edit", p / "src" / "util" / "shared.py"), p)
     check("확장 후: 같은 파일 허용(deny 없음)", '"deny"' not in (r.stdout or ""), f"{r.stdout[:100]!r}")
 
-    # do-not-touch(src/payment/**)는 확장으로도 못 뚫는다 (deny-first)
-    run_cli("subplan", "src/payment/**")
+    # F-009: do-not-touch(src/payment/**)는 입력 단계에서 거부 — expansions 에 안 들어간다
+    rc = run_cli("subplan", "src/payment/**")
+    check(
+        "F-009: do-not-touch 확장은 입력 거부(rc=1 + '거부됨')",
+        rc.returncode == 1 and "거부됨" in (rc.stderr or "") + (rc.stdout or ""),
+        f"rc={rc.returncode} out={rc.stdout[:80]!r} err={rc.stderr[:80]!r}",
+    )
+    check(
+        "F-009: 거부된 패턴은 expansions 에 미추가",
+        "src/payment/**" not in (get_gate(p).get("expansions") or []),
+        f"exp={get_gate(p).get('expansions')}",
+    )
+    # enforcement deny-first 도 여전히 유효 (이중 방어)
     r = run_hook(hook, edit_payload("Edit", p / "src" / "payment" / "charge.py"), p)
-    check("do-not-touch 는 확장으로도 deny", '"deny"' in (r.stdout or ""), f"{r.stdout[:100]!r}")
+    check("do-not-touch 는 확장으로도 deny(enforcement)", '"deny"' in (r.stdout or ""), f"{r.stdout[:100]!r}")
+
+    # F-009 단위: expansion_hits_deny 패턴 오버랩 판정
+    import plan_gate_lib as _pgl
+    check(
+        "expansion_hits_deny: 동일·서브경로 거부 / 무관 허용",
+        _pgl.expansion_hits_deny("src/payment/**", ["src/payment/**"])
+        and _pgl.expansion_hits_deny("src/payment/charge/**", ["src/payment/**"])
+        and not _pgl.expansion_hits_deny("src/util/**", ["src/payment/**"]),
+    )
 
     # 설계 불변식: subplan 은 Claude 호출 가능(disable-model-invocation 없음) + 사용자 토큰 아님
     sub_md = (REPO / "plugins" / "project-init" / "commands" / "subplan.md").read_text()
@@ -1491,6 +1511,107 @@ def t_hook_future_imports() -> None:
     check("PEP604/제네릭 쓰는 훅은 future import 보유", not offenders, f"위반: {offenders}")
 
 
+def t_failure_loop_guard(base: Path) -> None:
+    """F-008 — detect_failure_loop 가 실측 페이로드 스키마에서 실제로 동작.
+
+    이 Claude Code 런타임 실측(260619): 성공=PostToolUse(tool_response dict, exit_code 없음),
+    실패=PostToolUseFailure(tool_response None, top-level error). 과거 가드는 PostToolUse 단독
+    구독 + exit_code 단일 가정이라 실패를 영영 못 봐 죽어 있었다. 멀티스키마 판정 + 실패
+    이벤트 구독을 검증한다(실측 페이로드 모양 그대로 주입).
+    """
+    print("[34] F-008 실패 루프 가드 (멀티스키마 + PostToolUseFailure)")
+    hook = HOOKS / "detect_failure_loop.py"
+    p = make_project(base, "failloop")
+    (p / ".claude").mkdir(exist_ok=True)
+
+    def cf() -> int:
+        fp = p / ".claude" / "failure_log.json"
+        return json.loads(fp.read_text())["consecutive_failures"] if fp.exists() else 0
+
+    success = {
+        "tool_name": "Bash", "hook_event_name": "PostToolUse",
+        "tool_input": {"command": "echo ok"},
+        "tool_response": {"stdout": "ok", "stderr": "", "interrupted": False},
+    }
+    failure = {
+        "tool_name": "Bash", "hook_event_name": "PostToolUseFailure",
+        "tool_input": {"command": "false"}, "tool_response": None,
+        "error": "Exit code 1", "is_interrupt": False,
+    }
+    interrupt = {
+        "tool_name": "Bash", "hook_event_name": "PostToolUseFailure",
+        "tool_input": {"command": "sleep 9"}, "tool_response": None,
+        "error": "Interrupted", "is_interrupt": True,
+    }
+    old_fail = {  # 구버전 런타임 호환: PostToolUse + tool_response.exit_code
+        "tool_name": "Bash", "hook_event_name": "PostToolUse",
+        "tool_input": {"command": "false"},
+        "tool_response": {"exit_code": 1, "stdout": "", "stderr": "boom"},
+    }
+
+    r = run_hook(hook, success, p)
+    check("성공(PostToolUse, exit_code 없음) → 리셋 exit0", r.returncode == 0 and cf() == 0, f"rc={r.returncode} cf={cf()}")
+    r = run_hook(hook, failure, p)
+    check(
+        "실패1(PostToolUseFailure) → cf=1 + soft hint 환기",
+        r.returncode == 0 and cf() == 1 and "failure-loop" in (r.stdout or ""),
+        f"rc={r.returncode} cf={cf()} out={r.stdout[:80]!r}",
+    )
+    r = run_hook(hook, failure, p)
+    check(
+        "실패2 연속 → exit2 차단 + 카운터 리셋",
+        r.returncode == 2 and "FAILURE LOOP DETECTED" in (r.stderr or "") and cf() == 0,
+        f"rc={r.returncode} cf={cf()} err={r.stderr[:80]!r}",
+    )
+    r = run_hook(hook, old_fail, p)
+    check("멀티스키마: 구버전 exit_code=1 도 실패 인식(cf=1)", r.returncode == 0 and cf() == 1, f"rc={r.returncode} cf={cf()}")
+    run_hook(hook, success, p)
+    check("성공이 카운터 리셋 → 0", cf() == 0, f"cf={cf()}")
+    run_hook(hook, failure, p)  # cf=1
+    r = run_hook(hook, interrupt, p)
+    check("interrupt 는 실패 루프 신호 아님(카운터 불변)", r.returncode == 0 and cf() == 1, f"rc={r.returncode} cf={cf()}")
+
+    # hooks.json: detect_failure_loop 가 PostToolUseFailure 에 등록됐는가 (실패 이벤트 구독)
+    hj = json.loads((REPO / "plugins" / "project-init" / "hooks" / "hooks.json").read_text())
+    ptuf = hj["hooks"].get("PostToolUseFailure", [])
+    registered = any(
+        "detect_failure_loop.py" in h.get("command", "")
+        for block in ptuf for h in block.get("hooks", [])
+    )
+    check("hooks.json: detect_failure_loop ∈ PostToolUseFailure(Bash)", registered, f"PostToolUseFailure={ptuf}")
+
+
+def t_command_fallback() -> None:
+    """F-010 — plan_approval UserPromptSubmit fallback 이 scope/subplan/status 도 받는다.
+
+    슬래시 command bash-block 미실행 런타임에서 namespaced scope-enforce 등이 silent
+    no-op 되던 사각지대. 전이 토큰(F-005)에 더해 명령 토큰도 CLI COMMANDS SSOT 로 해소.
+    """
+    print("[35] F-010 명령 토큰 fallback (scope/subplan/status)")
+    sys.path.insert(0, str(HOOKS))
+    import plan_approval as pa
+    import plan_gate_cli as cli
+
+    for slash, action in [
+        ("plan-gate-scope-enforce", "scope-enforce"),
+        ("plan-gate-scope-shadow", "scope-shadow"),
+        ("plan-gate-scope-off", "scope-off"),
+        ("subplan", "subplan"),
+        ("status", "status"),
+    ]:
+        resolved = pa._resolve_command_token(slash)
+        check(
+            f"명령 토큰 {slash!r} → CLI 액션 {action!r} (COMMANDS 검증)",
+            resolved == action and action in cli.COMMANDS,
+            f"resolved={resolved!r}",
+        )
+    check("비명령 토큰은 None (오타·전이토큰 미오인)",
+          pa._resolve_command_token("done") is None and pa._resolve_command_token("nonsense") is None)
+    # 전이 토큰 집합은 prompt-log 동기 유지 — 명령 토큰을 섞지 않았다
+    check("scope/subplan/status 는 _ACTION_TOKENS 에 미혼입(prompt-log 동기 보존)",
+          not ({"subplan", "status", "scope-enforce"} & set(pa._ACTION_TOKENS)))
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -1538,8 +1659,10 @@ def main() -> int:
         t_subplan(base)
         t_preapprove_snapshot(base)
         t_scope_hardening(base)
+        t_failure_loop_guard(base)
     t_scaffold_consistency()
     t_command_files()
+    t_command_fallback()
     t_verifier_spec()
     t_platform_compat()
     t_hook_future_imports()

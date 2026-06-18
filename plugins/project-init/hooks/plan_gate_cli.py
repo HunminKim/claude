@@ -452,16 +452,34 @@ def cmd_subplan(root, state) -> int:
             " (예: src/util/**). 계획 자체를 넓혀야 하면 /replan 을 쓰세요."
         )
         return 1
+    # F-009: deny-first 를 입력 단계에 적용 — do-not-touch 와 겹치는 패턴은 expansions 에
+    # 넣지 않는다. (과거: enforcement 에서만 막아 do-not-touch 도 일단 추가되고 "확장됨"
+    # 으로 오인 출력 + audit 에 죽은 데이터 누적.) 입력 거부가 "추가하되 무력화"보다 명료.
+    dnt = gate.get("do_not_touch") or []
+    denied = [p for p in patterns if lib.expansion_hits_deny(p, dnt)]
+    allowed = [p for p in patterns if p not in denied]
+    if denied:
+        lib.log_audit(root, "subplan_denied", gate_id=gate["id"], denied=denied)
+
     exps = gate.setdefault("expansions", [])
     existing = set(exps) | set(gate.get("scope", []))
-    added = [p for p in patterns if p not in existing]
+    added = [p for p in allowed if p not in existing]
     exps.extend(added)
     lib.save_state(root, state)
-    lib.log_audit(root, "subplan_expand", gate_id=gate["id"], added=added, total=len(exps))
+    if added:
+        lib.log_audit(root, "subplan_expand", gate_id=gate["id"], added=added, total=len(exps))
+
+    if denied and not added:
+        _err(
+            f"[plan-gate subplan] 거부됨(do-not-touch): {', '.join(denied)}\n"
+            "  do-not-touch 패턴은 확장으로 뚫을 수 없습니다. 편집이 필요하면 /replan 으로 계획을 다시 짜세요."
+        )
+        return 1
+    deny_note = f"\n  ⛔ 거부됨(do-not-touch): {', '.join(denied)}" if denied else ""
     _info(
         f"[plan-gate subplan] 스코프 확장: {', '.join(added) if added else '(이미 포함 — 변화 없음)'}\n"
         f"  현재 강제={lib.scope_mode(root)} / 확장 누계 {len(exps)}개. audit 에 기록됨 — "
-        "사용자가 최종 diff 로 검토합니다.\n"
+        "사용자가 최종 diff 로 검토합니다." + deny_note + "\n"
         "  ⚠️  do-not-touch 패턴은 확장으로도 허용되지 않습니다. /replan 시 확장은 초기화됩니다."
     )
     return 0

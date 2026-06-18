@@ -919,6 +919,27 @@ def _path_match(rel: str, pattern: str) -> bool:
         return False
 
 
+def expansion_hits_deny(pattern: str, do_not_touch: list[str]) -> bool:
+    """확장 패턴이 do-not-touch 와 겹치면 True (subplan 입력 단계 deny-first, F-009).
+
+    deny-first 를 enforcement(scope_allows) 시점에만 적용하면 do-not-touch 패턴도
+    일단 expansions 에 들어가 "확장됨" 으로 오인 출력된다(inert 죽은 데이터).
+    입력 시점에 미리 거른다. 패턴 대 패턴 정밀 교집합은 비싸므로 보수적 근사 —
+    겹침을 과탐(거부) 방향으로 기운다(deny-list 안전 방향):
+    - 동일 패턴, 또는
+    - 확장 패턴의 글롭을 벗긴 대표 경로가 do-not-touch 글롭에 매칭(서브경로 포함), 또는
+    - do-not-touch 의 대표 경로가 확장 글롭에 매칭(상위경로 포함)
+    """
+    rep_p = pattern.replace("**", "x").replace("*", "x")
+    for d in do_not_touch:
+        if pattern == d:
+            return True
+        rep_d = d.replace("**", "x").replace("*", "x")
+        if _path_match(rep_p, d) or _path_match(rep_d, pattern):
+            return True
+    return False
+
+
 # ── control-plane allowlist (R2 — 강제 ON 이어도 무조건 허용) ──────────────
 # 매니페스트·게이트 상태·검증결과·ignore 파일을 스코프밖으로 막으면 /replan·
 # subplan·verifier 핸드셰이크가 자멸한다(rev.3 R2). 이 패턴은 계약과 무관하게 허용.

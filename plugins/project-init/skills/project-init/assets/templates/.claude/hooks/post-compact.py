@@ -20,6 +20,7 @@ import json, os, sys
 from pathlib import Path
 
 CRITICAL_SECTIONS = [
+    "## 응답 언어",          # compact 요약 언어로 드리프트하는 지점에서 응답 언어 재고정 (F-006)
     "## 개발 워크플로우",
     "## 서브에이전트 전략",
     "## 알려진 버그 / 제약",
@@ -87,10 +88,16 @@ def main() -> None:
     if not content:
         sys.exit(0)
     div = "━" * 57
+    # 언어 앵커(언어-비특정): compact 요약이 다른 언어로 생성돼 응답 언어가 끌리는
+    # 드리프트를 재고정한다. CLAUDE.md "## 응답 언어" 섹션이 있으면 그 규칙이,
+    # 없어도 이 한 줄이 "직전 사용자 대화 언어 유지"를 보장한다 (F-006).
+    lang_anchor = "[언어 앵커] 직전 사용자 대화 언어를 그대로 유지한다 — compact 요약·코드·로그의 언어에 끌리지 말 것."
     msg = "\n".join([
         "", div,
         "[POST-COMPACT] CLAUDE.md 핵심 규칙 재주입",
         div, "",
+        lang_anchor,
+        "",
         content,
         "", div, "",
     ])

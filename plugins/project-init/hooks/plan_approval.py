@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import plan_gate_cli  # noqa: E402  — COMMANDS SSOT (import 시 main 미실행)
+
 import plan_gate_lib as lib  # noqa: E402
 
 # 슬래시 유무 모두 처리: /approve-plan, approve-plan, /approve 모두 동작
@@ -29,6 +31,8 @@ import plan_gate_lib as lib  # noqa: E402
 #    사용자만 호출 가능 (Claude Skill 도구 자율 호출 차단, 공식 frontmatter).
 #    현행 CLI 는 미등록 슬래시 입력을 거부하므로 커맨드 등록이 필수다.
 # 2. 슬래시 없는 평문 토큰("done" 등) — 이 UserPromptSubmit 훅이 fallback 처리.
+#
+# 전이 토큰(인자 없음) — prompt-log PL_TOKEN_VALUES 와 동기 유지(smoke 가 대조).
 _ACTION_TOKENS = {
     "approve-plan": "approve",
     "approve": "approve",
@@ -41,11 +45,35 @@ _ACTION_TOKENS = {
     "replan": "replan",
 }
 
+# 명령 토큰(슬래시명 → CLI 액션명, 이름이 다른 것만). F-010: 이 런타임에선 슬래시
+# command bash-block 이 자동 실행되지 않아(실측 260619), scope/subplan/status 슬래시가
+# silent no-op 됐다. 전이 토큰처럼 UserPromptSubmit fallback 으로도 동작하게 통일한다.
+# on/off/git 토글은 의도적 제외(enabled 가드 chicken-egg·혼동 방지).
+_COMMAND_ALIASES = {
+    "plan-gate-scope-enforce": "scope-enforce",
+    "plan-gate-scope-shadow": "scope-shadow",
+    "plan-gate-scope-off": "scope-off",
+}
+# fallback 으로 받을 명령 토큰(슬래시명). subplan 은 인자(<패턴>)를 받는다.
+_FALLBACK_COMMANDS = {"status", "subplan", *_COMMAND_ALIASES}
 
-def _run_cli(cli: Path, action: str, root: Path) -> None:
+
+def _resolve_command_token(token: str) -> str | None:
+    """명령 토큰(슬래시명) → CLI 액션명. plan_gate_cli.COMMANDS(SSOT)로 검증.
+
+    하드코딩 목록을 늘리는 게 아니라, alias 해소 후 실제 CLI 액션 집합에 존재할
+    때만 통과시킨다 — 오타·제거된 명령은 None(미동작) 으로 안전 처리.
+    """
+    if token not in _FALLBACK_COMMANDS:
+        return None
+    action = _COMMAND_ALIASES.get(token, token)
+    return action if action in plan_gate_cli.COMMANDS else None
+
+
+def _run_cli(cli: Path, cli_args: list[str], root: Path) -> None:
     try:
         r = subprocess.run(
-            [sys.executable, str(cli), action],
+            [sys.executable, str(cli), *cli_args],
             capture_output=True,
             text=True,
             cwd=str(root),
@@ -57,6 +85,26 @@ def _run_cli(cli: Path, action: str, root: Path) -> None:
             sys.stderr.write(r.stderr)
     except Exception as e:
         sys.stderr.write(f"[plan-gate approval] CLI 실행 실패: {e}\n")
+
+
+def _emit_verified_advisory(root: Path) -> None:
+    """verified ✅ 상태에서 평문 프롬프트 → /done 환기만 (자동 done 금지).
+
+    사용자 질의("결과 어땠지?")와 새 작업을 구분할 수 없으므로 자동 실행하지 않는다.
+    """
+    state = lib.load_state(root)
+    gate = lib.current_gate(state)
+    if gate and gate["state"] == "verified" and gate.get("verifier_status") == "✅":
+        advisory = {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": (
+                    "[plan-gate] 이전 gate verified ✅ — "
+                    "작업이 끝났으면 /done 입력. 이어서 질문 중이면 무시."
+                ),
+            }
+        }
+        sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
 
 def main() -> int:
@@ -73,30 +121,28 @@ def main() -> int:
 
     cli = Path(__file__).parent / "plan_gate_cli.py"
 
+    # 토큰 + 인자 분리 (subplan <패턴> 지원). 첫 단어만 정규화한다.
     # 정규화 SSOT(lib.strip_command_prefix): 슬래시·플러그인 네임스페이스 모두 흡수.
-    # 인라인 lstrip("/") 만으로는 "/project-init:done" 의 네임스페이스 prefix 를
-    # 못 벗겨 전이가 silent 실패하던 drift 를 제거한다 (260618 F-005).
-    normalized = lib.strip_command_prefix(prompt)
-    if normalized in _ACTION_TOKENS:
-        # 슬래시·네임스페이스 무관하게 처리 (/done, done, /project-init:done 모두 동작)
-        _run_cli(cli, _ACTION_TOKENS[normalized], root)
-    elif prompt:
-        # verified ✅ 상태에서 비-슬래시 프롬프트 → 환기만 (자동 done 하지 않음)
-        # 사용자 질의("결과 어땠지?")와 새 작업을 구분할 수 없으므로 자동 실행 금지
-        state = lib.load_state(root)
-        gate = lib.current_gate(state)
-        if gate and gate["state"] == "verified" and gate.get("verifier_status") == "✅":
-            advisory = {
-                "hookSpecificOutput": {
-                    "hookEventName": "UserPromptSubmit",
-                    "additionalContext": (
-                        "[plan-gate] 이전 gate verified ✅ — "
-                        "작업이 끝났으면 /done 입력. 이어서 질문 중이면 무시."
-                    ),
-                }
-            }
-            sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
+    # 인라인 lstrip("/") 만으로는 "/project-init:done" 네임스페이스 prefix 를 못 벗겨
+    # 전이가 silent 실패하던 drift 를 제거한다 (260618 F-005).
+    parts = prompt.split()
+    token = lib.strip_command_prefix(parts[0]) if parts else ""
+    extra_args = parts[1:]
 
+    # 1) 전이 토큰(인자 없음) — /done, done, /project-init:done 모두 동작
+    if token in _ACTION_TOKENS:
+        _run_cli(cli, [_ACTION_TOKENS[token]], root)
+        return 0
+
+    # 2) 명령 토큰(scope/subplan/status) — 슬래시 bash-block 미실행 런타임 fallback (F-010)
+    action = _resolve_command_token(token)
+    if action is not None:
+        _run_cli(cli, [action, *extra_args], root)
+        return 0
+
+    # 3) verified ✅ 상태에서 평문 프롬프트 → 환기만 (자동 done 금지)
+    if prompt:
+        _emit_verified_advisory(root)
     return 0
 
 
