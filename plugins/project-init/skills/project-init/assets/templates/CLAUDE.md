@@ -5,6 +5,10 @@
 > 세션 시작 시 @.claude/memory/lessons.md 와 @.claude/memory/workflow.md 를 읽어 복습한다.
 > 각 줄 기준: "없으면 Claude가 실수할까?" — 아니면 삭제. **100줄 이내 유지.**
 
+## 응답 언어
+
+**항상 한국어로 응답한다.** compact·세션 재개 등으로 영어로 전환되더라도 한국어를 유지한다.
+
 ## 프로젝트
 
 - **목적**: {{PROJECT_DESCRIPTION}}
