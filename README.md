@@ -79,7 +79,7 @@ checklist / completion_report / technical_doc 자동 업데이트
 
 ```
 Claude: 첫 Edit → 게이트 열림 + git 프라이빗 ref 스냅샷(체크포인트) 자동 생성
-    ↓ tasks/todo.md 가 있으면 자동 승인, 없으면 thrash/스코프 강제만
+    ↓ tasks/todo.md 계획 감지 시 /approve-plan 유도 (자동 승인 안 함 — 명시 승인 필수)
 Claude: (필요 시) tasks/todo.md 작성 → 사용자에게 /approve-plan 요청
 사용자: /approve-plan   ← todo.md SHA-256 검증 (gate.state = approved)
     ↓

@@ -69,6 +69,8 @@ Agent(subagent_type="Plan", prompt="""
 3. fallback 분기가 HTML 주석 마커로 별도 게이트 분리됐는가
 4. USER_DECISIONS 가 평문에 섞이지 않고 별도 섹션에 있는가
 5. 직전 위임 사이클에서 효과 본 패턴이 재적용됐는가
+6. 외부 런타임/컨테이너/GPU/하드웨어 사용 시 배포 환경 호환성 preflight 했는가
+   (베이스 이미지 OS·glibc, GPU 드라이버 ↔ 이미지 CUDA 요구, 하드웨어 ABI, 외부 서비스 버전, 이미지 태그 핀)
 
 ⚠️ 항목이 있으면 명시. 통과면 "검증 통과" 한 줄로 종료.
 """)
@@ -212,9 +214,11 @@ verifier ❌  →  /retry         (같은 체크포인트에서 재구현)
 ### 공식 Plan Mode 사용 시
 ```
 Plan Mode로 계획 작성 → tasks/todo.md 작성 → 사용자 Accept
-    → 첫 Edit 시 plan-gate가 tasks/todo.md 감지 → 자동 승인
-    (/approve-plan 불필요)
+    → 첫 Edit 시 plan-gate가 계획 감지 → /approve-plan 유도 (gate: created 유지)
+    → 사용자: /approve-plan  ← 명시 승인해야 구현 게이트가 열림
 ```
+> 자동 승인 안 함: 통제 체크포인트는 todo.md 존재가 아니라 사람의 명시 승인으로만 열린다.
+> (한 번도 검토 안 한 계획이 무인 승인되는 우회 방지 — 명시 /approve-plan 필수)
 
 ### plan-gate 켜기/끄기
 ```

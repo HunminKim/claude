@@ -527,6 +527,22 @@ def log_audit(root: Path, action: str, **kwargs: Any) -> None:
         pass
 
 
+def strip_command_prefix(text: str) -> str:
+    """슬래시·플러그인 네임스페이스 prefix 를 벗긴 토큰 문자열을 반환(정규화 SSOT).
+
+    plan-gate 전이 토큰은 실데이터에서 3가지 형태로 들어온다 (260618 F-005):
+    - 평문:          "done"                 (UserPromptSubmit fallback 경로)
+    - 슬래시:        "/done"
+    - 네임스페이스:  "/project-init:done", "/임의플러그인:done"
+    `lstrip("/")` 만 하던 인라인 정규화가 네임스페이스 형태를 못 벗겨 전이가 silent
+    실패하던 drift 를 제거한다. 네임스페이스 prefix 는 임의 플러그인 호환을 위해
+    일반 정규식(`^<word>:`)으로 제거한다 — 특정 플러그인명을 하드코딩하지 않는다.
+    매칭 가능한 액션 토큰인지의 판정은 호출자 책임(_ACTION_TOKENS 조회).
+    """
+    t = text.strip().lstrip("/")
+    return re.sub(r"^[\w.-]+:", "", t)
+
+
 def make_gate(gate_id: str | None = None) -> dict[str, Any]:
     return {
         "id": gate_id or new_gate_id(),
@@ -1021,11 +1037,11 @@ def format_scope_sweep(
 
 
 def format_broad_glob_hint(manifest: dict[str, list[str]]) -> str:
-    """넓은 글롭 매니페스트 자동승인 보류 안내 (additionalContext 용, D6)."""
+    """넓은 글롭 매니페스트 주의 안내 (additionalContext 용, D6)."""
     broad = ", ".join(p for p in manifest.get("scope", []) if is_broad_glob(p))
     return (
         f"\n{DIVIDER}\n"
-        f"[plan-gate] ⚠️  넓은 글롭 매니페스트 — 자동 승인 보류\n"
+        f"[plan-gate] ⚠️  넓은 글롭 매니페스트 — 사람 검토 필요\n"
         f"{DIVIDER}\n"
         f"  scope 에 넓은 글롭이 있어 사람 검토가 필요합니다: {broad}\n"
         f"  넓은 글롭(`**`·최상위 글롭)은 스코프 계약을 사실상 무력화합니다.\n"
@@ -1456,11 +1472,11 @@ def validate_todo_quality(root: Path) -> tuple[bool, list[str]]:
 
 
 def format_todo_quality_hint(issues: list[str]) -> str:
-    lines = ["", "[plan-gate] ⚠️  tasks/todo.md 자동 승인 보류 — 계획 보강 필요"]
+    lines = ["", "[plan-gate] ⚠️  tasks/todo.md 계획 보강 필요 (승인 전 권장)"]
     for issue in issues:
         lines.append(f"  - {issue}")
     lines += [
-        "  tasks/todo.md를 보강 후 다시 편집하면 자동 승인됩니다.",
+        "  보강 후 /approve-plan 으로 명시 승인하세요 (승인 전까지 구현 게이트는 열리지 않습니다).",
         "  (권장: ## 목표 섹션 + 이유 한 줄 + `- [ ]` 체크리스트 2개 이상)",
         "",
     ]

@@ -73,9 +73,12 @@ def main() -> int:
 
     cli = Path(__file__).parent / "plan_gate_cli.py"
 
-    normalized = prompt.lstrip("/")
+    # 정규화 SSOT(lib.strip_command_prefix): 슬래시·플러그인 네임스페이스 모두 흡수.
+    # 인라인 lstrip("/") 만으로는 "/project-init:done" 의 네임스페이스 prefix 를
+    # 못 벗겨 전이가 silent 실패하던 drift 를 제거한다 (260618 F-005).
+    normalized = lib.strip_command_prefix(prompt)
     if normalized in _ACTION_TOKENS:
-        # 슬래시 유무 무관하게 처리 (/approve-plan, approve-plan 모두 동작)
+        # 슬래시·네임스페이스 무관하게 처리 (/done, done, /project-init:done 모두 동작)
         _run_cli(cli, _ACTION_TOKENS[normalized], root)
     elif prompt:
         # verified ✅ 상태에서 비-슬래시 프롬프트 → 환기만 (자동 done 하지 않음)

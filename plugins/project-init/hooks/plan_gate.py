@@ -3,7 +3,7 @@
 
 출력 채널:
 - 차단 (D1 lock / 트리거 / scope creep): exit 2 + stderr — Claude blocking error 주입
-- 환기 (자동 승인 / stale gate / 24h 잔류 / hot-file / soft hint / multi-edit hint): exit 0 + stdout hookSpecificOutput.additionalContext JSON — Claude context 주입
+- 환기 (계획 감지→승인 유도 / stale gate / 24h 잔류 / hot-file / soft hint / multi-edit hint): exit 0 + stdout hookSpecificOutput.additionalContext JSON — Claude context 주입
 - 사용자 터미널 전용 (.plan-gateignore 자동 추가): exit 0 + stderr
 
 동작 (D1/D2/D5/D7 + UX 풍부화):
@@ -122,21 +122,32 @@ def main() -> int:
                 gate["checkpoint_commit"] = commit
         lib.set_current_gate(state, gate)
 
-        # ── Plan Mode 자동 승인: tasks/todo.md 존재 + 품질 통과 시 즉시 approved (D8) ──
+        # ── 계획 감지 → 명시 승인 유도 (D8: 자동승인 제거, 260618 F-003) ──
+        # 일반 원칙: 통제 체크포인트('approved')는 기계가 만들 수 있는 산출물
+        # (tasks/todo.md 존재·품질)이 아니라 *사람의 명시 행동*(/approve-plan,
+        # 또는 신뢰 가능한 Plan Mode Accept 신호)으로만 충족된다. 과거 D8 은
+        # "품질 좋은 todo.md 존재" 를 곧 "사용자 승인" 으로 간주해, 사용자가 한 번도
+        # 본 적 없는 계획이 무인(無人)으로 approved 되던 우회 경로였다.
+        # → 여기서는 gate 를 created 로 유지하고, 품질 triage 후 /approve-plan 을
+        #   강하게 유도(advisory)만 한다. 스코프 계약 적재는 명시 승인 경로
+        #   (cmd_approve → apply_manifest)가 담당한다.
         # 가드: 직전 사이클 done 시 기록한 archived_todo_sha 와 동일하면
-        #       새 계획이 아닌 잔존 파일 — 자동 승인 스킵 (안티 패턴 C 방지)
+        #       새 계획이 아닌 잔존 파일 — 안내만(안티 패턴 C 방지)
         todo_path = root / "tasks" / "todo.md"
         try:
             todo_text = todo_path.read_text(encoding="utf-8", errors="ignore") if todo_path.exists() else ""
             if todo_text.strip():
-                # 파일을 한 번만 읽어 sha 계산 (TOCTOU 방지)
+                # 파일을 한 번만 읽어 sha 계산 (TOCTOU 방지).
+                # /approve-plan 의 해시 검증이 사용자가 본 스냅샷과 대조하도록 캡처.
                 current_sha = hashlib.sha256(todo_text.encode()).hexdigest()
                 current_mtime = str(todo_path.stat().st_mtime)
+                gate["todo_md_sha256"] = current_sha
+                gate["todo_md_mtime"] = current_mtime
                 prev_sha = lib.last_archived_todo_sha(state)
                 if prev_sha and current_sha == prev_sha:
                     advisories.append(
-                        "[plan-gate] ℹ️  tasks/todo.md가 이전 사이클과 동일 → 자동 승인 스킵.\n"
-                        "  새 계획을 작성하거나 /approve-plan 으로 명시 승인하세요."
+                        "[plan-gate] ℹ️  tasks/todo.md가 이전 사이클과 동일합니다.\n"
+                        "  새 계획을 작성하거나, 이 계획으로 진행하려면 /approve-plan 으로 명시 승인하세요."
                     )
                 else:
                     ok, issues = lib.validate_todo_quality(root)
@@ -144,27 +155,18 @@ def main() -> int:
                     if not ok:
                         advisories.append(lib.format_todo_quality_hint(issues))
                     elif lib.manifest_has_broad_glob(manifest):
-                        # D6: 넓은 글롭은 자동 승인 비활성 → 사람 /approve-plan 강제.
-                        # 자동 승인하지 않고 created 상태로 남긴다(차단 아님 — advisory).
                         advisories.append(lib.format_broad_glob_hint(manifest))
                     else:
-                        lib.transition(gate, "approve_auto")
-                        gate["todo_md_sha256"] = current_sha
-                        gate["todo_md_mtime"] = current_mtime
-                        # 매니페스트 선언 시 스코프 계약 저장 (강제 여부는 scope_mode)
-                        if manifest:
-                            gate["scope"] = manifest["scope"]
-                            gate["do_not_touch"] = manifest["do_not_touch"]
-                            gate["manifest_sha256"] = lib.manifest_sha(todo_text)
                         scope_note = (
                             f"\n  스코프 계약: {len(manifest['scope'])}개 패턴 선언됨"
-                            f" (강제={lib.scope_mode(root)})"
+                            f" (승인 시 강제={lib.scope_mode(root)})"
                             if manifest
                             else ""
                         )
                         advisories.append(
-                            f"[plan-gate] ✅ tasks/todo.md 감지 → 자동 승인: {gate['id']}\n"
-                            f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복" + scope_note
+                            "[plan-gate] 📋 tasks/todo.md 계획 감지 (gate: created).\n"
+                            "  계획을 검토하고, 진행하려면 /approve-plan 을 입력하세요 "
+                            "— 승인 전까지 구현 게이트는 열리지 않습니다." + scope_note
                         )
         except Exception:
             pass

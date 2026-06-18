@@ -466,6 +466,29 @@ def t_platform_compat() -> None:
         ("오늘 뭐했지", None),
     ]:
         check(f"토큰 정규화 {text!r} → {want!r}", pl.pl_normalize_token(text) == want)
+
+    # F-005: plan_approval 의 정규화 SSOT(lib.strip_command_prefix) — prompt-log 비의존.
+    # 인라인 lstrip("/") 가 네임스페이스 prefix 를 못 벗겨 /project-init:done 전이가
+    # silent 실패하던 drift 회귀 방지. plan_approval._ACTION_TOKENS 조회까지 검증.
+    import plan_gate_lib as pg_lib
+
+    for text, want in [
+        ("done", "done"),
+        ("/done", "done"),
+        ("/approve-plan", "approve-plan"),
+        ("/project-init:done", "done"),
+        ("/any-plugin:skip", "skip"),
+    ]:
+        norm = pg_lib.strip_command_prefix(text)
+        check(
+            f"plan_approval 토큰 정규화 {text!r} → {want!r} → _ACTION_TOKENS 매칭",
+            norm == want and norm in plan_approval._ACTION_TOKENS,
+            f"norm={norm!r}",
+        )
+    check(
+        "비-토큰은 _ACTION_TOKENS 매칭 안 됨",
+        pg_lib.strip_command_prefix("오늘 뭐했지") not in plan_approval._ACTION_TOKENS,
+    )
     check("Agent → agent 버킷", pl.pl_tool_bucket("Agent") == "agent")
     check("TaskCreate 는 other (오탐 방지)", pl.pl_tool_bucket("TaskCreate") == "other")
 
@@ -949,22 +972,43 @@ def t_manifest_parse(base: Path) -> None:
         lib.scope_allows("deps.lock", g_scoped, p),
     )
 
-    # ── 통합: 자동 승인 시 스코프 저장 + sha 고정 ─────────────────────────
+    # ── 통합: 계획 감지 → created 유지(자동승인 안 함) + sha 캡처 (260618 F-003) ──
+    # 일반 원칙: 통제 체크포인트(approved)는 todo.md 존재가 아니라 사람의 명시
+    # 행동(/approve-plan)으로만 충족된다. 품질 좋은 매니페스트가 있어도 자동승인 금지.
     gate_hook = HOOKS / "plan_gate.py"
     p = make_project(base, "manifest_auto")
+    (p / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
+    (p / ".claude" / "agents" / "verifier.md").touch()  # CLI is_project_init_managed 통과용
     (p / "tasks").mkdir()
     (p / "tasks" / "todo.md").write_text(_MANIFEST_TODO)
-    run_hook(gate_hook, edit_payload("Edit", p / "src" / "auth" / "x.py"), p)
+    r = run_hook(gate_hook, edit_payload("Edit", p / "src" / "auth" / "x.py"), p)
     g = get_gate(p)
     check(
-        "자동 승인 + 스코프 저장",
+        "계획 감지 → created 유지(자동승인 안 함) + sha 캡처, 스코프 미적재",
+        g["state"] == "created"
+        and bool(g.get("todo_md_sha256"))
+        and not g.get("scope")
+        and not g.get("manifest_sha256"),
+        f"state={g['state']} scope={g.get('scope')} sha256={g.get('manifest_sha256')}",
+    )
+    check("명시 승인 유도 advisory 출력", "/approve-plan" in (r.stdout or ""), f"stdout={r.stdout[:160]!r}")
+
+    # ── 통합: 명시 /approve-plan → approved + 스코프 적재(apply_manifest) ──
+    subprocess.run(
+        [sys.executable, str(HOOKS / "plan_gate_cli.py"), "approve"],
+        capture_output=True, text=True, cwd=str(p),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(p)},
+    )
+    g = get_gate(p)
+    check(
+        "명시 승인 후 approved + 스코프 저장 + sha 고정",
         g["state"] == "approved"
         and g.get("scope") == ["src/auth/**", "src/models/user.py"]
         and bool(g.get("manifest_sha256")),
         f"state={g['state']} scope={g.get('scope')} sha={g.get('manifest_sha256')}",
     )
 
-    # ── 통합: 스코프 밖 편집도 step3 에선 차단 안 함 (추가형, 비강제) ──────
+    # ── 통합: 스코프 밖 편집도 step3(기본 모드)에선 차단 안 함 (추가형, 비강제) ──
     rc = run_hook(gate_hook, edit_payload("Edit", p / "src" / "other.py"), p).returncode
     check("스코프 밖 편집 무차단 (step3 비강제)", rc == 0, f"rc={rc}")
 
@@ -1138,13 +1182,22 @@ def t_scope_unit(base: Path) -> None:
 
 
 def _scoped_gate_project(base: Path, name: str) -> Path:
-    """매니페스트 자동승인 + 스냅샷까지 만든 git 프로젝트 (layer-1/2 부트스트랩)."""
+    """매니페스트 계획 → 명시 /approve-plan 으로 승인된 git 프로젝트 (layer-1/2 부트스트랩).
+
+    260618 F-003: todo.md 존재만으로 자동승인하지 않는다 → 첫 편집(created) 후
+    명시 /approve-plan 으로 approved + 스코프 적재(apply_manifest)까지 거친다.
+    """
     p = make_project(base, name)
     (p / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
     (p / ".claude" / "agents" / "verifier.md").touch()  # CLI is_project_init_managed 통과용
     (p / "tasks").mkdir()
     (p / "tasks" / "todo.md").write_text(_MANIFEST_TODO)
     run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "src" / "auth" / "x.py"), p)
+    subprocess.run(
+        [sys.executable, str(HOOKS / "plan_gate_cli.py"), "approve"],
+        capture_output=True, text=True, cwd=str(p),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(p)},
+    )
     return p
 
 
@@ -1154,7 +1207,7 @@ def t_scope_layer1(base: Path) -> None:
     hook = HOOKS / "plan_gate.py"
     p = _scoped_gate_project(base, "scope_l1")
     g = get_gate(p)
-    check("부트스트랩: 자동승인 + 스코프 저장", g["state"] == "approved" and bool(g.get("scope")), f"{g.get('state')}")
+    check("부트스트랩: 명시 승인 + 스코프 저장", g["state"] == "approved" and bool(g.get("scope")), f"{g.get('state')}")
 
     (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
     r = run_hook(hook, edit_payload("Edit", p / "src" / "other" / "evil.py"), p)
@@ -1392,6 +1445,11 @@ def t_scope_hardening(base: Path) -> None:
     subprocess.run(["git", "-C", str(p3), "add", "-A"], check=True, env=GIT_ENV)
     subprocess.run(["git", "-C", str(p3), "commit", "-q", "-m", "seed"], check=True, env=GIT_ENV)
     run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p3 / "src" / "auth" / "x.py"), p3)  # 게이트 열기(스냅샷)
+    subprocess.run(  # F-003: todo.md 존재만으로 자동승인 안 함 → 명시 승인으로 스코프 적재
+        [sys.executable, str(cli), "approve"],
+        capture_output=True, text=True, cwd=str(p3),
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(p3)},
+    )
     (p3 / ".claude" / "plan_gate_scope").write_text("enforce\n")
     subprocess.run(["git", "-C", str(p3), "mv", "src/auth/a.py", "src/other_b.py"], check=True, env=GIT_ENV)
     run_hook(HOOKS / "plan_gate_bash.py",

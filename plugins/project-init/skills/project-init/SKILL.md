@@ -346,12 +346,13 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 > 같은 코드 파일을 `Edit/Write`로 5회 이상 반복 편집하면
 > PreToolUse 훅이 차단하고 git tag + git stash로 체크포인트를 자동 생성한다.
 >
-> **[공식 Plan Mode 사용 시] 자동 승인 플로우:**
+> **[공식 Plan Mode 사용 시] 명시 승인 플로우:**
 > ```
 > Plan Mode로 계획 → tasks/todo.md 작성 → 사용자 Accept
->   → 첫 Edit 시 plan-gate가 tasks/todo.md 감지 → 자동 승인 (무중단)
->   (/approve-plan 불필요)
+>   → 첫 Edit 시 plan-gate가 계획 감지 → /approve-plan 유도 (gate: created 유지)
+>   → 사용자: /approve-plan  ← 명시 승인해야 구현 게이트가 열림
 > ```
+> (자동 승인 안 함 — 통제 체크포인트는 todo.md 존재가 아니라 사람의 명시 승인으로만 열린다)
 >
 > **[권장] 작업 시작 전 선승인 플로우:**
 > ```

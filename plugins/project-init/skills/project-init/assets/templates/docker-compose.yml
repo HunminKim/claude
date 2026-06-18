@@ -32,8 +32,18 @@ services:
     networks: [appnet]
 
   # ── vLLM 추론 서버 (GPU) ────────────────────
+  # ⚠️ 환경 호환 preflight (pull 전 필수 — mock 테스트로는 못 잡힘):
+  #   1. 호스트 드라이버 CUDA 확인:  nvidia-smi  → "CUDA Version: X.Y"
+  #   2. 이미지 CUDA 요구 ↔ 호스트 드라이버 대조. 부동 :latest 는 어느 날 CUDA 요구가
+  #      올라가면 조용히 깨지므로 **태그를 핀**한다 (아래 PINNED_TAG).
+  #   3. 컨슈머 GPU(GeForce/RTX) 배포 시: vLLM 이미지는 CUDA forward-compat libcuda 를
+  #      번들하는데 컨슈머 GPU 는 forward-compat 미지원 → 호스트 드라이버 < 번들 compat 면
+  #      `Error 804` 기동 실패. 해결: 파생 Dockerfile 에서 compat 디렉토리 제거 후 빌드 —
+  #        FROM vllm/vllm-openai:PINNED_TAG
+  #        RUN rm -rf /usr/local/cuda*/compat   # 호스트 네이티브 libcuda + minor-version compat 사용
+  #      (legacy nvidia-container-toolkit 모드에선 volume-mask 가 toolkit hook 을 깨므로 파생 이미지 strip 이 정답)
   vllm:
-    image: vllm/vllm-openai:latest   # 공식 이미지 — Dockerfile 불필요
+    image: vllm/vllm-openai:PINNED_TAG   # ← 핀 태그로 교체 (위 preflight 후). 부동 :latest 금지
     command: ["--model", "YOUR_MODEL_HERE"]   # 예: meta-llama/Llama-3.1-8B-Instruct
     ports:
       - "8001:8000"
