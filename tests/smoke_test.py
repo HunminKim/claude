@@ -1835,6 +1835,61 @@ def t_version_sync() -> None:
         )
 
 
+def t_scope_auto_revert(base: Path) -> None:
+    """게이트 닫힘 시 enforce → shadow 자동 복귀 (stale enforce 청소).
+
+    enforce 는 프로젝트 단위로 영속해 한 작업용 enforce 가 무관한 다음 작업에서 신규
+    파일을 삭제·차단하는 사고가 가능하다. /done·/skip-verify·/rollback 어느 경로로 닫든
+    enforce 면 shadow 로 안전 복귀(파괴 해제 방향)하고, off 는 명시 선택이라 영속한다.
+    """
+    print("[36] enforce→shadow 게이트 닫힘 자동 복귀")
+    cli = HOOKS / "plan_gate_cli.py"
+
+    def run_cli(p: Path, *a: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(cli), *a], capture_output=True, text=True,
+            cwd=str(p), env={**GIT_ENV, "CLAUDE_PROJECT_DIR": str(p)},
+        )
+
+    def mode(p: Path) -> str:
+        f = p / ".claude" / "plan_gate_scope"
+        return f.read_text().strip() if f.exists() else "(부재)"
+
+    # /done 경로 (verified ✅ 로 닫음)
+    p = _scoped_gate_project(base, "revert_done")
+    set_gate(p, state="verified", verifier_status="✅")
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    r = run_cli(p, "done")
+    check("/done: enforce → shadow 복귀", r.returncode == 0 and mode(p) == "shadow", f"rc={r.returncode} mode={mode(p)}")
+    check("/done: 복귀 환기 출력", "shadow 자동 복귀" in r.stdout, f"out={r.stdout[-160:]!r}")
+
+    # /rollback 경로 (do_gate_done 안 거치는 별도 경로)
+    p = _scoped_gate_project(base, "revert_rb")
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    r = run_cli(p, "rollback")
+    check("/rollback: enforce → shadow 복귀", r.returncode == 0 and mode(p) == "shadow", f"rc={r.returncode} mode={mode(p)}")
+
+    # /skip-verify 경로 (approved 에서 닫음)
+    p = _scoped_gate_project(base, "revert_sv")
+    (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
+    r = run_cli(p, "skip-verify")
+    check("/skip-verify: enforce → shadow 복귀", r.returncode == 0 and mode(p) == "shadow", f"rc={r.returncode} mode={mode(p)}")
+
+    # off 는 닫혀도 영속 (명시 선택 존중 — 자동 변경 안 함)
+    p = _scoped_gate_project(base, "revert_off")
+    set_gate(p, state="verified", verifier_status="✅")
+    (p / ".claude" / "plan_gate_scope").write_text("off\n")
+    r = run_cli(p, "done")
+    check("/done: off 는 복귀 안 함 (명시 선택 영속)", mode(p) == "off", f"mode={mode(p)}")
+
+    # shadow(기본)는 닫혀도 그대로 (no-op)
+    p = _scoped_gate_project(base, "revert_shadow")
+    set_gate(p, state="verified", verifier_status="✅")
+    (p / ".claude" / "plan_gate_scope").write_text("shadow\n")
+    r = run_cli(p, "done")
+    check("/done: shadow 는 변화 없음 + 환기 없음", mode(p) == "shadow" and "shadow 자동 복귀" not in r.stdout, f"mode={mode(p)}")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="harness_smoke_") as td:
         base = Path(td)
@@ -1869,6 +1924,7 @@ def main() -> int:
         t_subplan(base)
         t_preapprove_snapshot(base)
         t_scope_hardening(base)
+        t_scope_auto_revert(base)
         t_failure_loop_guard(base)
     t_scaffold_consistency()
     t_command_files()

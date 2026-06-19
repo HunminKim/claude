@@ -158,6 +158,16 @@ def _recover_verifier_from_file(root, gate, state) -> bool:
     return True
 
 
+def _notify_scope_revert(reverted: bool) -> None:
+    """게이트 닫힘 시 enforce→shadow 자동 복귀가 일어났으면 사용자에게 환기(침묵 금지)."""
+    if reverted:
+        _info(
+            "[plan-gate] 스코프 강제(enforce) → shadow 자동 복귀.\n"
+            "  게이트가 닫혀, 이번 작업용 enforce 가 다음 작업에서 신규 파일을 삭제·차단하는\n"
+            "  stale enforce 사고를 막습니다. 계속 강제하려면 /plan-gate-scope-enforce 재입력."
+        )
+
+
 def _done_from_created(root, state, gate) -> int:
     """created(승인 전) 상태에서 verifier 요구 없이 우아하게 마감.
 
@@ -165,13 +175,14 @@ def _done_from_created(root, state, gate) -> int:
     갭(리포트 260612 #2) 해소. working tree 는 건드리지 않는다(변경 보존).
     """
     has_cp = bool(gate.get("checkpoint_commit") or gate.get("cp_snapshot"))
-    lib.do_gate_done(root, state, gate)
+    _reverted = lib.do_gate_done(root, state, gate)
     tail = (
         "  체크포인트를 정리했습니다."
         if has_cp
         else "  정리할 체크포인트가 없습니다 — 승인·검증 절차 없이 종료합니다."
     )
     _info(f"[plan-gate done] 승인 전(created) 상태에서 마감합니다: {gate['id']}\n{tail}")
+    _notify_scope_revert(_reverted)
     return 0
 
 
@@ -212,8 +223,9 @@ def cmd_done(root, state) -> int:
         )
 
     edit_count = gate.get("edit_count", 0)
-    lib.do_gate_done(root, state, gate)
+    _reverted = lib.do_gate_done(root, state, gate)
     _info(f"[plan-gate done] 작업 완료. 체크포인트 정리됨: {gate['id']}")
+    _notify_scope_revert(_reverted)
 
     # compact 권고: 편집이 5회 이상이면 컨텍스트 관리 안내
     if edit_count >= 5:
@@ -248,8 +260,9 @@ def cmd_skip(root, state) -> int:
         "  발견된 문제는 다음 gate 주기에서 별도 처리하세요.\n"
         "  체크포인트는 정리됩니다."
     )
-    lib.do_gate_done(root, state, gate)
+    _reverted = lib.do_gate_done(root, state, gate)
     _info(f"[plan-gate skip] gate 마감 완료: {gate['id']}")
+    _notify_scope_revert(_reverted)
     return 0
 
 
@@ -285,8 +298,9 @@ def cmd_skip_verify(root, state) -> int:
         "  건너뛴 사실이 gate 기록에 남습니다. 체크포인트는 정리됩니다."
     )
     gate["verifier_status"] = "⏭️"
-    lib.do_gate_done(root, state, gate)
+    _reverted = lib.do_gate_done(root, state, gate)
     _info(f"[plan-gate skip-verify] gate 마감 완료: {gate['id']}")
+    _notify_scope_revert(_reverted)
     return 0
 
 
@@ -318,6 +332,8 @@ def cmd_rollback(root, state) -> int:
         "[plan-gate rollback] 체크포인트로 복원 완료 — 편집 전 상태로 되돌렸습니다.\n"
         f"  gate {gate['id']} → rolled_back."
     )
+    # rollback 은 do_gate_done 을 안 거치므로 여기서 직접 stale enforce 청소
+    _notify_scope_revert(lib.revert_scope_if_enforced(root))
     return 0
 
 

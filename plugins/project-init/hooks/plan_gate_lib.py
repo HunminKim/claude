@@ -173,6 +173,21 @@ def set_scope_mode(root: Path, mode: str) -> None:
     p.write_text(mode + "\n")
 
 
+def revert_scope_if_enforced(root: Path) -> bool:
+    """게이트 닫힘 시 enforce → shadow 자동 복귀 (stale enforce 청소). 복귀했으면 True.
+
+    enforce 는 프로젝트 단위로 영속해 게이트가 닫혀도 남는다 → 한 작업을 위해 켠
+    enforce 가 무관한 다음 작업에서 조용히 신규 파일을 삭제하는 사고(stale enforce)를
+    막는다. '안전한 방향(파괴 해제)'으로만 자동 전환하므로 opt-in 불필요. off 는 사용자
+    명시 선택이라 건드리지 않고, shadow 는 이미 기본이라 변화 없음.
+    """
+    if scope_mode(root) != "enforce":
+        return False
+    set_scope_mode(root, "shadow")
+    log_audit(root, "scope_auto_revert", from_mode="enforce", to_mode="shadow")
+    return True
+
+
 # ── 상태 파일 입출력 ─────────────────────────────────────────────────────
 def state_path(root: Path) -> Path:
     return root / ".claude" / "state" / "plan_gate.json"
@@ -1325,9 +1340,10 @@ def format_thrash_message(gate: dict[str, Any]) -> str:
 # ── gate done 공통 로직 ──────────────────────────────────────────────────
 
 
-def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> None:
-    """gate를 done 상태로 닫고 체크포인트를 정리한다.
+def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
+    """gate를 done 상태로 닫고 체크포인트를 정리한다. enforce였으면 shadow로 복귀.
     plan_gate_cli.cmd_done 과 detect_task_boundary 에서 공유.
+    반환: 스코프 모드가 enforce→shadow 로 자동 복귀했으면 True (호출자가 환기에 사용).
     """
     cleanup_checkpoint(root, gate)  # 프라이빗 ref 삭제 + cp 디렉토리 정리
     gate["state"] = "done"
@@ -1344,6 +1360,7 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> Non
         record_gate_closed(root, gate)
     except Exception:
         pass
+    return revert_scope_if_enforced(root)  # 게이트 닫힘 = 사이클 종료 → stale enforce 청소
 
 
 def last_archived_todo_sha(state: dict[str, Any]) -> str | None:
