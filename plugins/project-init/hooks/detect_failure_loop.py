@@ -157,10 +157,10 @@ def main():
     log_path = None
     for parent in [cwd] + list(cwd.parents):
         if (parent / ".claude").exists():
-            log_path = parent / ".claude" / "failure_log.json"
+            log_path = parent / ".claude" / "state" / "failure_log.json"
             break
     if log_path is None:
-        log_path = cwd / ".claude" / "failure_log.json"
+        log_path = cwd / ".claude" / "state" / "failure_log.json"
 
     log = load_log(log_path)
 

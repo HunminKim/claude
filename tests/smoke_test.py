@@ -1525,7 +1525,7 @@ def t_failure_loop_guard(base: Path) -> None:
     (p / ".claude").mkdir(exist_ok=True)
 
     def cf() -> int:
-        fp = p / ".claude" / "failure_log.json"
+        fp = p / ".claude" / "state" / "failure_log.json"
         return json.loads(fp.read_text())["consecutive_failures"] if fp.exists() else 0
 
     success = {
