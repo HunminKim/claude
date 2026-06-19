@@ -1364,15 +1364,19 @@ def t_scope_unit(base: Path) -> None:
     )
 
     p = make_project(base, "scope_mode")
-    check("mode 기본 off", lib.scope_mode(p) == "off")
-    lib.set_scope_mode(p, "shadow")
-    check("set shadow", lib.scope_mode(p) == "shadow")
+    check("mode 기본 shadow (플래그 부재)", lib.scope_mode(p) == "shadow")
     lib.set_scope_mode(p, "enforce")
     check("set enforce", lib.scope_mode(p) == "enforce")
+    lib.set_scope_mode(p, "shadow")
+    check("set shadow", lib.scope_mode(p) == "shadow")
     (p / ".claude" / "plan_gate_scope").write_text("garbage\n")
-    check("미지값 → off (안전 기본)", lib.scope_mode(p) == "off")
+    check("미지값 → shadow (안전 기본)", lib.scope_mode(p) == "shadow")
     lib.set_scope_mode(p, "off")
-    check("off → 플래그 삭제", not (p / ".claude" / "plan_gate_scope").exists())
+    check(
+        "off → 플래그에 'off' 명시 기록 (삭제 아님 — 부재=shadow 라서)",
+        lib.scope_mode(p) == "off" and (p / ".claude" / "plan_gate_scope").exists(),
+        f"content={(p / '.claude' / 'plan_gate_scope').read_text()!r}",
+    )
 
 
 def _scoped_gate_project(base: Path, name: str) -> Path:
@@ -1402,6 +1406,15 @@ def t_scope_layer1(base: Path) -> None:
     p = _scoped_gate_project(base, "scope_l1")
     g = get_gate(p)
     check("부트스트랩: 명시 승인 + 스코프 저장", g["state"] == "approved" and bool(g.get("scope")), f"{g.get('state')}")
+
+    # 기본값 shadow: 스코프 플래그를 명시하지 않아도 스코프 밖 편집은 차단 없이 환기된다
+    check("기본 모드 = shadow (플래그 부재)", not (p / ".claude" / "plan_gate_scope").exists())
+    r = run_hook(hook, edit_payload("Edit", p / "src" / "other" / "evil0.py"), p)
+    check(
+        "기본 shadow: 스코프 밖 → 허용(deny 없음) + 환기",
+        '"deny"' not in (r.stdout or "") and "shadow" in (r.stdout or ""),
+        f"out={r.stdout[:160]!r}",
+    )
 
     (p / ".claude" / "plan_gate_scope").write_text("enforce\n")
     r = run_hook(hook, edit_payload("Edit", p / "src" / "other" / "evil.py"), p)

@@ -140,27 +140,35 @@ def unset_prefer_no_git(root: Path) -> None:
 # .claude/plan_gate_scope 파일 내용으로 모드를 표현 — 부재/미지값이면 off(기본).
 PLAN_GATE_SCOPE_FLAG = ".claude/plan_gate_scope"
 SCOPE_MODES = ("off", "shadow", "enforce")
+# 기본 모드 = shadow: 매니페스트를 선언했으면 스코프 밖 편집을 기본적으로 *환기*한다
+# (차단·삭제는 안 함 — enforce 만 파괴적). 매니페스트가 없으면 모드 무관 no-op 이라
+# 이 기본값은 "스코프를 선언한 프로젝트"에서만 효력이 생긴다. off 는 명시 선택지로 남는다.
+DEFAULT_SCOPE_MODE = "shadow"
 
 
 def scope_mode(root: Path) -> str:
-    """스코프 강제 모드: off(기본)|shadow(감지·기록만)|enforce(차단·롤백)."""
+    """스코프 강제 모드: off|shadow(기본·감지·기록만)|enforce(차단·롤백).
+
+    플래그 파일 부재·미지값은 모두 DEFAULT_SCOPE_MODE(shadow)로 떨어진다 — shadow 는
+    차단·삭제가 없어(환기만) 기본값으로 안전하다. off 는 파일에 'off' 가 명시됐을 때만.
+    """
     p = root / PLAN_GATE_SCOPE_FLAG
     if not p.exists():
-        return "off"
+        return DEFAULT_SCOPE_MODE
     try:
         val = p.read_text(encoding="utf-8").strip().lower()
     except OSError:
-        return "off"
-    return val if val in SCOPE_MODES else "off"
+        return DEFAULT_SCOPE_MODE
+    return val if val in SCOPE_MODES else DEFAULT_SCOPE_MODE
 
 
 def set_scope_mode(root: Path, mode: str) -> None:
-    """모드 플래그 기록. off 면 파일 삭제(부재=off 와 동치)."""
+    """모드 플래그 기록. 세 모드 모두 리터럴로 기록한다.
+
+    부재=shadow(기본)로 의미가 바뀌었으므로 off 도 파일을 지우지 않고 'off' 를
+    명시 기록해야 한다(안 그러면 /plan-gate-scope-off 가 도로 기본 shadow 가 된다).
+    """
     p = root / PLAN_GATE_SCOPE_FLAG
-    if mode == "off":
-        if p.exists():
-            p.unlink()
-        return
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(mode + "\n")
 

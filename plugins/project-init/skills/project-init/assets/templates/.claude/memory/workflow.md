@@ -226,8 +226,9 @@ Plan Mode로 계획 작성 → tasks/todo.md 작성 → 사용자 Accept
 /plan-gate-off  → .claude/plan_gate_enabled 삭제, 비활성화
 ```
 
-### 스코프 강제 (선택, 기본 off)
-tasks/todo.md 에 이번 작업이 건드릴 파일 패턴을 선언하면 스코프 밖 편집을 막을 수 있다:
+### 스코프 강제 (기본 shadow — 환기만)
+tasks/todo.md 에 이번 작업이 건드릴 파일 패턴을 선언하면 스코프 밖 편집을 관리할 수 있다.
+**스코프를 선언하면 기본값이 shadow** 라 위반 시 차단 없이 환기된다(매니페스트 없으면 no-op):
 ```
 <!-- plan-gate: scope BEGIN -->
 src/auth/**          ← ** = 하위 전체, * = 한 경로 단계
@@ -238,9 +239,9 @@ src/payment/**       ← scope 보다 우선하는 금지 목록
 <!-- plan-gate: do-not-touch END -->
 ```
 ```
-/plan-gate-scope-shadow   → 위반 감지·기록만 (롤백 X, 먼저 관찰 권장)
+/plan-gate-scope-shadow   → 위반 감지·기록만 (기본값, 차단·롤백 없음)
 /plan-gate-scope-enforce  → 스코프 밖 Edit 거부(layer-1) + Bash 변경 롤백(layer-2)
-/plan-gate-scope-off      → 강제 끄기 (매니페스트는 기록만)
+/plan-gate-scope-off      → 강제 완전 끄기 (환기조차 없음, 매니페스트는 기록만)
 ```
 - plan-gate 운영 파일(tasks/todo.md·.claude/**·docs/.verifier_result.json)은 무조건 허용
 - layer-2(Bash 변경 롤백)는 git 저장소에서만 동작 — 비-git 은 감지·경고만
@@ -259,7 +260,7 @@ src/payment/**       ← scope 보다 우선하는 금지 목록
 | `/rollback` | 전체 되돌리기 (체크포인트 필수) | 프라이빗 ref 스냅샷에서 복원 (존재 파일 복구·신규 삭제) |
 | `/plan-gate-scope-shadow` | 스코프 강제 관찰 | 위반 감지·기록만 (롤백 X) |
 | `/plan-gate-scope-enforce` | 스코프 강제 켜기 | 스코프 밖 Edit 거부 + Bash 변경 롤백 |
-| `/plan-gate-scope-off` | 스코프 강제 끄기(기본) | 매니페스트 기록만 |
+| `/plan-gate-scope-off` | 스코프 강제 완전 끄기 | 매니페스트 기록만 (환기도 없음) |
 
 ## lessons.md 관리
 
