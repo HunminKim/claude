@@ -155,7 +155,7 @@ def t_update_docs(base: Path) -> None:
         "feature_name": "login",
         "timestamp": "2026-06-10",
         "verdict": "✅",
-        "test_items": [{"item": "t", "result": "pass"}],
+        "test_items": [{"item": "t", "result": "pass", "method": "isolated_exec"}],
         "issues": [],
         "evidence": "ok",
         "implementation": {"files": []},
@@ -181,6 +181,200 @@ def t_update_docs(base: Path) -> None:
     )
     check("진행 로그는 stderr", "업데이트 완료" in r.stderr, f"stderr[:80]={r.stderr[:80]!r}")
     check("결과 파일 자동 삭제", not rj.exists())
+
+
+def _approved_gate_project(base: Path, name: str) -> Path:
+    """approved 상태 게이트 + verifier.md 를 갖춘 git 프로젝트 (verifier 결과 처리용)."""
+    p = make_project(base, name)
+    (p / ".claude" / "agents").mkdir(parents=True)
+    (p / ".claude" / "agents" / "verifier.md").write_text("# verifier")
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "a.py"), p)
+    set_gate(p, state="approved")
+    return p
+
+
+def _emit_verifier_result(p: Path, result: dict) -> str:
+    """docs/.verifier_result.json 을 쓰고 update_docs 훅을 돌려 stdout 반환."""
+    docs = p / "docs"
+    docs.mkdir(exist_ok=True)
+    rj = docs / ".verifier_result.json"
+    rj.write_text(json.dumps(result, ensure_ascii=False))
+    r = run_hook(
+        HOOKS / "update_docs.py",
+        {"tool_name": "Write", "tool_input": {"file_path": str(rj)}},
+        p,
+    )
+    return r.stdout
+
+
+def _cli(p: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(HOOKS / "plan_gate_cli.py"), *args],
+        capture_output=True, text=True, cwd=str(p),
+        env={**GIT_ENV, "CLAUDE_PROJECT_DIR": str(p)},
+    )
+
+
+def t_verifier_grounding_enforce(base: Path) -> None:
+    """update_docs 가 실행 grounding 을 기계 강제 — 전 항목 static ✅ 는 ❌ 로 강등.
+
+    verifier.md 의 '✅ 는 최소 1개 항목 실제 실행 입증' 규칙이 프로즈로만 있어 '읽고
+    통과시키기'가 새어들던 갭을 막는다. 면제(전 항목 정적만 가능)는 evidence 의
+    '실행 불가' 사유로만 인정한다.
+    """
+    print("[5b] verifier 실행 grounding 강제")
+
+    base_result = {
+        "feature_name": "f", "timestamp": "2026-06-19", "verdict": "✅",
+        "issues": [], "evidence": "코드 확인", "implementation": {"files": []},
+    }
+
+    # (1) 전 항목 static + ✅ + 면제 없음 → ❌ 강등
+    p = _approved_gate_project(base, "ground_static")
+    r = dict(base_result, test_items=[
+        {"item": "정상", "result": "✅", "method": "static"},
+        {"item": "경계", "result": "✅", "method": "static"},
+    ])
+    out = _emit_verifier_result(p, r)
+    g = get_gate(p)
+    check(
+        "전 항목 static ✅ → verified + ❌ 강등",
+        g["state"] == "verified" and g.get("verifier_status") == "❌",
+        f"state={g['state']} vs={g.get('verifier_status')}",
+    )
+    check("강등 사유 advisory 에 grounding 명시", "grounding" in out, f"out={out[:160]!r}")
+
+    # (2) 실행 항목 1개 이상 → ✅ 유지
+    p = _approved_gate_project(base, "ground_exec")
+    r = dict(base_result, test_items=[
+        {"item": "정상", "result": "✅", "method": "static"},
+        {"item": "동작", "result": "✅", "method": "isolated_exec"},
+    ])
+    out = _emit_verifier_result(p, r)
+    g = get_gate(p)
+    check(
+        "실행 입증 1개 → ✅ 유지 + verified",
+        g["state"] == "verified" and g.get("verifier_status") == "✅" and "검증 통과" in out,
+        f"state={g['state']} vs={g.get('verifier_status')} out={out[:80]!r}",
+    )
+
+    # (3) 전 항목 static 이지만 evidence 면제 사유 → ✅ 유지
+    p = _approved_gate_project(base, "ground_exempt")
+    r = dict(
+        base_result, evidence="전 항목 실행 불가 — 외부 GPU 의존성 부재로 정적 분석만 수행",
+        test_items=[{"item": "정상", "result": "✅", "method": "static"}],
+    )
+    out = _emit_verifier_result(p, r)
+    g = get_gate(p)
+    check(
+        "전 항목 static + 면제 사유 → ✅ 유지(예외)",
+        g.get("verifier_status") == "✅" and "검증 통과" in out,
+        f"vs={g.get('verifier_status')} out={out[:80]!r}",
+    )
+
+
+def t_verdict_transitions(base: Path) -> None:
+    """verifier 판정 → verified 전이 → 슬래시 끝단(/done·/retry·/skip) 행위 검증.
+
+    transition() 단위 외에, verdict 가 들어와 게이트가 verified 로 바뀐 뒤 사용자
+    토큰이 CLI 끝단까지 의도대로 전이되는지 end-to-end 로 고정한다.
+    """
+    print("[5c] verdict→verified + /done·/retry·/skip 끝단 전이")
+    pass_items = [{"item": "동작", "result": "✅", "method": "isolated_exec"}]
+
+    # ✅ → verified → /done → done
+    p = _approved_gate_project(base, "vt_done")
+    _emit_verifier_result(p, {
+        "feature_name": "f", "timestamp": "t", "verdict": "✅",
+        "test_items": pass_items, "issues": [], "evidence": "pytest 0 fail",
+        "implementation": {"files": []},
+    })
+    check("✅ 처리 → verified + ✅", get_gate(p).get("verifier_status") == "✅")
+    r = _cli(p, "done")
+    check("verified ✅ → /done exit0 + done", r.returncode == 0 and get_gate(p)["state"] == "done",
+          f"rc={r.returncode} state={get_gate(p)['state']}")
+
+    # ❌ → verified → /retry → approved (시도 카운터 리셋·계획 보존)
+    p = _approved_gate_project(base, "vt_retry")
+    set_gate(p, edit_count_post_approval=5, file_edit_counts={"a.py": 5})
+    _emit_verifier_result(p, {
+        "feature_name": "f", "timestamp": "t", "verdict": "❌",
+        "test_items": [{"item": "동작", "result": "❌", "method": "isolated_exec"}],
+        "issues": ["버그"], "evidence": "fail", "implementation": {"files": []},
+    })
+    check("❌ 처리 → verified + ❌", get_gate(p).get("verifier_status") == "❌")
+    r = _cli(p, "retry")
+    g = get_gate(p)
+    check(
+        "verified ❌ → /retry → approved + 시도 카운터 리셋",
+        r.returncode == 0 and g["state"] == "approved" and g.get("verifier_status") is None
+        and g.get("edit_count_post_approval") == 0 and not g.get("file_edit_counts"),
+        f"rc={r.returncode} g={g.get('state')}/{g.get('verifier_status')}/{g.get('edit_count_post_approval')}",
+    )
+
+    # ❌ → verified → /skip → done (현재 변경 보존)
+    p = _approved_gate_project(base, "vt_skip")
+    keep = p / "a.py"
+    keep.write_text("MODIFIED\n")
+    _emit_verifier_result(p, {
+        "feature_name": "f", "timestamp": "t", "verdict": "❌",
+        "test_items": [{"item": "동작", "result": "❌", "method": "isolated_exec"}],
+        "issues": ["버그"], "evidence": "fail", "implementation": {"files": []},
+    })
+    r = _cli(p, "skip")
+    check(
+        "verified ❌ → /skip → done + 변경 보존",
+        r.returncode == 0 and get_gate(p)["state"] == "done" and keep.read_text() == "MODIFIED\n",
+        f"rc={r.returncode} state={get_gate(p)['state']} keep={keep.read_text()!r}",
+    )
+
+
+def t_rollback_preserves_user_files(base: Path) -> None:
+    """rollback 안전성 — 사용자가 손수 만든 untracked 파일은 /rollback 으로 안 날린다.
+
+    rollback 은 touched 매니페스트 구동이라 Claude 가 훅을 거쳐 편집한 파일만 되돌린다.
+    사용자가 직접 만든(훅 미경유) 파일은 매니페스트에 없어 in/out-scope 무관하게 보존
+    돼야 한다 — '사용자 파일을 날린다'는 신뢰 붕괴 시나리오의 직접 방어 검증.
+    """
+    print("[20b] rollback 안전성 — 사용자 untracked 파일 보존")
+    hook = HOOKS / "plan_gate.py"
+    p = make_project(base, "rb_userfiles")
+    (p / ".claude" / "agents").mkdir(parents=True)
+    (p / ".claude" / "agents" / "verifier.md").write_text("# verifier")
+    (p / "tasks").mkdir()
+    (p / "tasks" / "todo.md").write_text(_MANIFEST_TODO)  # scope=src/auth/**
+
+    # Claude 가 훅을 거쳐 편집한 신규 파일 → 매니페스트 기록됨
+    claude_new = p / "src" / "auth" / "claude.py"
+    run_hook(hook, edit_payload("Edit", claude_new), p)
+    claude_new.parent.mkdir(parents=True, exist_ok=True)
+    claude_new.write_text("CLAUDE\n")
+
+    # 사용자가 손수 만든 untracked 파일 — 훅 미경유 → 매니페스트에 없음
+    user_inscope = p / "src" / "auth" / "user_made.py"  # 스코프 안
+    user_inscope.write_text("USER IN\n")
+    user_outscope = p / "notes.md"  # 스코프 밖
+    user_outscope.write_text("USER OUT\n")
+
+    man = get_gate(p).get("cp_snapshot") or {}
+    check(
+        "Claude 편집 파일만 매니페스트 기록 (사용자 파일 미기록)",
+        "src/auth/claude.py" in man and "src/auth/user_made.py" not in man,
+        f"man={man}",
+    )
+    r = _cli(p, "rollback")
+    check("rollback exit0", r.returncode == 0, f"rc={r.returncode} err={r.stderr[:120]!r}")
+    check("Claude 신규 파일은 삭제", not claude_new.exists(), "claude.py 잔존")
+    check(
+        "사용자 in-scope untracked 보존",
+        user_inscope.exists() and user_inscope.read_text() == "USER IN\n",
+        "user_made.py 유실",
+    )
+    check(
+        "사용자 out-scope untracked 보존",
+        user_outscope.exists() and user_outscope.read_text() == "USER OUT\n",
+        "notes.md 유실",
+    )
 
 
 def t_dangerous_bash(base: Path) -> None:
@@ -1634,6 +1828,8 @@ def main() -> int:
         t_plan_gate(base)
         t_skip_verify(base)
         t_update_docs(base)
+        t_verifier_grounding_enforce(base)
+        t_verdict_transitions(base)
         t_dangerous_bash(base)
         t_secret_read_guard()
         t_channel_shapes(base)
@@ -1646,6 +1842,7 @@ def main() -> int:
         t_stop_hook_active_guard(base)
         t_verifier_advisory_dedup(base)
         t_cp_rollback_nongit(base)
+        t_rollback_preserves_user_files(base)
         t_plan_gate_no_git_optout(base)
         t_checkpoint_backend(base)
         t_green_bash_reset(base)

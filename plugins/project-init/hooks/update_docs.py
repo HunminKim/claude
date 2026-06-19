@@ -82,6 +82,26 @@ def main() -> int:
     evidence = result.get("evidence", "")
     impl = result.get("implementation", {})
 
+    # ── 실행 grounding 강제 (✅ 의 최소 조건 — verifier.md 규칙의 기계 강제) ──
+    # verifier.md 는 "✅ 는 최소 1개 항목이 실제 실행으로 입증" 을 프로즈로만 요구했다.
+    # 강제가 없으면 전 항목 static(코드만 읽음)인데 ✅ 를 줘도 그대로 통과해 '읽고
+    # 통과시키기'가 새어든다. 여기서 기계 강제: 실행 입증이 없고 면제 사유도 없으면
+    # ✅ 를 신뢰 불가로 보고 ❌ 로 강등한다 — 이후 checklist/보고서/advisory 가 전부
+    # ❌ 단일 경로로 흐른다. 면제(전 항목 정적 확인만 가능)는 evidence 의 '실행 불가'
+    # 사유로만 인정한다(verifier.md 가 명시한 '전 항목 실행 불가 — 사유' 마커).
+    _EXEC_METHODS = {"mocked", "isolated_exec", "production_exec"}
+    if verdict == "✅":
+        grounded = any((t.get("method") or "").strip() in _EXEC_METHODS for t in test_items)
+        exempt = "실행 불가" in (evidence or "")
+        if not grounded and not exempt:
+            verdict = "❌"
+            issues = list(issues) + [
+                "실행 grounding 위반: 전 검증 항목이 static 이고 실행 입증도 면제 사유도 "
+                "없어 ✅ 를 신뢰할 수 없습니다 — ❌ 로 강등. 최소 1개 항목을 실제 실행"
+                "(mocked/isolated_exec/production_exec)으로 재검증하거나, 실행이 정말 "
+                "불가능하면 evidence 에 '전 항목 실행 불가 — 사유' 를 명시하세요."
+            ]
+
     # ── checklist.md 업데이트 ──────────────────────────────────────────────
     checklist_path = docs_dir / "checklist.md"
     checklist_phase = result.get("checklist_phase", "")
