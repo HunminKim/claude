@@ -2,7 +2,7 @@
 
 > 이 문서는 저장소의 **세 플러그인(project-init / harness-check / prompt-log)** 과
 > 핵심 기능인 **plan-gate** 의 동작·명령·상태 흐름을 코드 기준으로 정리한 사용 설명서다.
-> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.8.0**, harness-check **v1.0.1**, prompt-log **v1.1.1**)
+> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.8.1**, harness-check **v1.0.1**, prompt-log **v1.1.1**)
 >
 > ⚠️ 이 문서는 *마켓플레이스를 쓰는 사용자*용 매뉴얼이다. 저장소 자체를 개발할 때의 규칙은 루트 `CLAUDE.md` 를 본다.
 
@@ -56,7 +56,7 @@
 
 | 플러그인 | 버전 | 한 줄 요약 |
 |---------|------|----------|
-| **project-init** | v2.8.0 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 21개 훅 + 18개 명령 |
+| **project-init** | v2.8.1 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 18개 훅 + 18개 명령 |
 | **harness-check** | v1.0.1 | 진단. 독립 서브에이전트가 하네스 건강 상태를 점검·리포트 |
 | **prompt-log** | v1.1.1 | 옵트인 프롬프트 통계 수집 (기본 비활성 = default deny) |
 
@@ -340,7 +340,7 @@ secrets/**
 
 ## 5. 훅 전체 지도 (언제 무엇이 뜨나)
 
-project-init 의 21개 훅이 이벤트별로 묶여 있다. **출력 채널**은 의도와 1:1:
+project-init 의 18개 훅이 이벤트별로 묶여 있다(`detect_failure_loop` 는 PostToolUse·PostToolUseFailure 두 이벤트에 등록돼 표에선 2회 나타난다). **출력 채널**은 의도와 1:1:
 `차단`=exit2+stderr, `환기`=additionalContext JSON(Claude 가 봄), `사용자전용`=stderr.
 
 | 이벤트 | 매처 | 훅 | 역할 | 채널 |

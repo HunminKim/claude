@@ -137,7 +137,7 @@ def unset_prefer_no_git(root: Path) -> None:
 
 # ── 스코프 강제 모드 (R4 — 단일 3상태 플래그) ─────────────────────────────
 # 불리언 하나로는 {off, shadow, enforce} 직교 축을 표현 못 한다(롤아웃 ↔ on/off).
-# .claude/plan_gate_scope 파일 내용으로 모드를 표현 — 부재/미지값이면 off(기본).
+# .claude/plan_gate_scope 파일 내용으로 모드를 표현 — 부재/미지값이면 shadow(기본).
 PLAN_GATE_SCOPE_FLAG = ".claude/plan_gate_scope"
 SCOPE_MODES = ("off", "shadow", "enforce")
 # 기본 모드 = shadow: 매니페스트를 선언했으면 스코프 밖 편집을 기본적으로 *환기*한다
@@ -784,7 +784,7 @@ def auto_add_gate_ignore(file_path: str, root: Path, existing_patterns: list[str
 # tasks/todo.md 안의 짝 마커 블록에서 scope / do-not-touch 파일 패턴을 읽는다.
 # 짝 마커(BEGIN/END)로 단일 마커의 "어디서 끝나는가" 모호성을 제거한다.
 # 파싱 결과는 승인 시 gate.scope/do_not_touch 에 저장되고, 강제 여부는
-# scope_mode(off|shadow|enforce) 가 결정한다(기본 off — 부재=off). 미선언/파싱
+# scope_mode(off|shadow|enforce) 가 결정한다(기본 shadow — 부재=shadow). 미선언/파싱
 # 실패 → fail-open: 스코프 없음 = thrash-only 모드. 절대 default-deny 금지(결정 Q1).
 MANIFEST_MARKERS: dict[str, tuple[str, str]] = {
     "scope": (

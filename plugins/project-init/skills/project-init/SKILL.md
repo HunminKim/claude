@@ -393,16 +393,17 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 > | `/retry` | verifier ❌ 후 재구현 | approved 복귀, 카운터 누적 |
 > | `/skip-verify` | verifier 판정 전, 검증 없이 마감 | 검증 생략 마감 (⏭️ 기록) |
 > | `/rollback` | 전체 되돌릴 때 | git reset → checkpoint |
-> | `/plan-gate-scope-shadow` | 스코프 강제 관찰 모드 | 위반 감지·기록만 (롤백 X) |
-> | `/plan-gate-scope-enforce` | 스코프 강제 켜기 | 스코프 밖 Edit 거부 + Bash 변경 롤백 |
-> | `/plan-gate-scope-off` | 스코프 강제 끄기(기본) | 매니페스트 기록만 |
+> | `/plan-gate-scope-shadow` | 스코프 강제 관찰 모드 (기본) | 위반 감지·기록만 (롤백 X) |
+> | `/plan-gate-scope-enforce` | 스코프 강제 켜기 | 스코프 밖 Edit 거부 + Bash 변경 롤백 (게이트 닫히면 shadow 자동 복귀) |
+> | `/plan-gate-scope-off` | 스코프 강제 완전 끄기 | 매니페스트 기록만 (환기도 없음) |
 > | `/subplan <패턴>` | enforce 중 예상 밖 인접 파일 진행 | audit 남기며 스코프 확장 (do-not-touch 불가침, Claude 호출 가능) |
 >
-> **스코프 강제 (선택, 기본 off):** tasks/todo.md 에 `<!-- plan-gate: scope BEGIN/END -->`
-> 블록으로 이번 작업이 건드릴 파일 패턴을 선언하면, `/plan-gate-scope-enforce` 로
-> 스코프 밖 편집을 차단할 수 있다. `*`=한 경로 단계, `**`=하위 전체. enforce 전에
-> `/plan-gate-scope-shadow` 로 위반을 먼저 관찰하는 것을 권장한다(audit log). git
-> 저장소에서만 Bash 변경 롤백(layer-2)이 동작한다.
+> **스코프 강제 (기본 shadow):** tasks/todo.md 에 `<!-- plan-gate: scope BEGIN/END -->`
+> 블록으로 이번 작업이 건드릴 파일 패턴을 선언하면, 스코프 밖 편집이 기본적으로
+> 환기된다(shadow). `/plan-gate-scope-enforce` 로 올리면 차단까지 한다. `*`=한 경로
+> 단계, `**`=하위 전체. enforce 는 게이트가 닫히면 shadow 로 자동 복귀하며, 자동으로
+> enforce 를 켜지는 않는다(파괴적 강제는 명시 opt-in). git 저장소에서만 Bash 변경
+> 롤백(layer-2)이 동작한다.
 
 ---
 
