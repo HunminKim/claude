@@ -5,6 +5,8 @@
 > (작성 시점 버전: marketplace `hunminkim`, project-init **v2.8.1**, harness-check **v1.0.1**, prompt-log **v1.1.1**)
 >
 > ⚠️ 이 문서는 *마켓플레이스를 쓰는 사용자*용 매뉴얼이다. 저장소 자체를 개발할 때의 규칙은 루트 `CLAUDE.md` 를 본다.
+>
+> 🚀 **처음이거나 "언제 뭘 입력하나"만 빠르게 보고 싶으면** → [QUICKSTART.md](QUICKSTART.md) (사용자 관점 짧은 가이드). 이 문서는 내부 동작까지 담은 상세 레퍼런스다.
 
 ---
 
