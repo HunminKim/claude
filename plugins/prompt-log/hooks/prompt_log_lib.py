@@ -16,7 +16,7 @@ V1 범위 (V2_TODO.md 참고):
 
 from __future__ import annotations
 
-import fcntl
+import contextlib
 import hashlib
 import json
 import os
@@ -26,6 +26,39 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl  # POSIX 전용 파일 락 — Windows 엔 없다
+except ImportError:  # Windows: fcntl 부재 → 락 생략 (아래 _pl_file_lock 참고)
+    fcntl = None  # type: ignore[assignment]
+
+
+@contextlib.contextmanager
+def _pl_file_lock(lock_path: Path):
+    """크로스플랫폼 배타적 파일 락 컨텍스트.
+
+    POSIX 는 fcntl.flock(LOCK_EX) 로 동시 쓰기를 막는다. Windows 처럼 fcntl 이
+    없는 환경에서는 락을 생략한다 — prompt-log V1 은 단일 에이전트 직렬 실행을
+    전제하고 상태 파일은 atomic-rename 으로 일관성을 유지하므로 무락이 안전하다
+    (멀티세션 동시 쓰기 보호는 V2 보류 — design 260613 D8). 무락이라도 모듈
+    import 자체가 죽지 않아 Windows 종료 시 ImportError 가 사라진다.
+    """
+    if fcntl is None:
+        yield
+        return
+    with open(lock_path, "w") as lock_f:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+
+
+def _pl_fchmod_600(fd: int) -> None:
+    """파일 디스크립터를 0600 으로 — POSIX 전용. Windows 엔 os.fchmod 가 없어
+    graceful skip 한다 (윈도우 권한 모델은 chmod 비트와 무관)."""
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
 
 # ── [prompt-log] paths ──────────────────────────────────────────────────
 PL_GLOBAL_DIRNAME = "prompt-log"  # ~/.claude/prompt-log/
@@ -86,14 +119,10 @@ def pl_save_allowed(allowed: list[dict[str, Any]]) -> None:
     p = pl_allowed_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     lock_file = p.parent / ".allowed.lock"
-    with open(lock_file, "w") as lock_f:
-        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
-        try:
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps(allowed, ensure_ascii=False, indent=2))
-            tmp.replace(p)
-        finally:
-            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+    with _pl_file_lock(lock_file):
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(allowed, ensure_ascii=False, indent=2))
+        tmp.replace(p)
 
 
 def pl_is_consented(project_root: Path) -> bool:
@@ -220,19 +249,15 @@ def pl_save_active(project_root: Path, active: dict[str, Any]) -> None:
     p = pl_active_state_path(project_root)
     p.parent.mkdir(parents=True, exist_ok=True)
     lock_file = p.parent / ".active.lock"
-    with open(lock_file, "w") as lock_f:
-        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
-        try:
-            tmp = p.with_suffix(".tmp")
-            # 내용 기록 전에 0600 확보 — 기록 후 chmod 하면 그 사이
-            # prompt 본문이 group/other readable 로 노출되는 race 발생
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            os.fchmod(fd, 0o600)  # tmp 잔존물이 0644 였던 경우 강제 교정
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(json.dumps(active, ensure_ascii=False, indent=2))
-            tmp.replace(p)
-        finally:
-            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+    with _pl_file_lock(lock_file):
+        tmp = p.with_suffix(".tmp")
+        # 내용 기록 전에 0600 확보 — 기록 후 chmod 하면 그 사이
+        # prompt 본문이 group/other readable 로 노출되는 race 발생
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        _pl_fchmod_600(fd)  # tmp 잔존물이 0644 였던 경우 강제 교정 (POSIX)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(active, ensure_ascii=False, indent=2))
+        tmp.replace(p)
 
 
 def pl_clear_active(project_root: Path) -> None:
@@ -379,16 +404,12 @@ def pl_append_record(record: dict[str, Any]) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False) + "\n"
     lock_file = p.parent / ".records.lock"
-    with open(lock_file, "w") as lock_f:
-        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
-        try:
-            # append 전에 0600 으로 생성 — 기록 후 chmod 의 노출 race 방지
-            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "a", encoding="utf-8") as f:
-                f.write(line)
-        finally:
-            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+    with _pl_file_lock(lock_file):
+        # append 전에 0600 으로 생성 — 기록 후 chmod 의 노출 race 방지
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        _pl_fchmod_600(fd)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(line)
 
 
 # ── [prompt-log] tool counting helpers ──────────────────────────────────
