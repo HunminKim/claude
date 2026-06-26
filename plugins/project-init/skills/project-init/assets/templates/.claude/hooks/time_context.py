@@ -10,10 +10,13 @@ Claude는 학습 데이터 기준 시간만 알고 실시간 시각을 모른다
 from __future__ import annotations
 
 import json
-import os
 import re
-import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
+
+# KST(한국 표준시)는 DST 없이 항상 UTC+9 고정 — 외부 `date` 명령(Unix 전용) 대신
+# 순수 파이썬 고정 오프셋으로 계산해 Windows 포함 모든 OS 에서 동일 동작.
+_KST = timezone(timedelta(hours=9))
 
 _TIME_PAT = re.compile(
     # 명확한 시간 단어 (단독으로도 시간 질문)
@@ -37,14 +40,7 @@ def main() -> int:
     if not _TIME_PAT.search(prompt):
         return 0
 
-    try:
-        kst = subprocess.check_output(
-            ["date", "+%Y-%m-%d(%a) %H:%M:%S KST"],
-            env={**os.environ, "TZ": "Asia/Seoul"},
-            text=True,
-        ).strip()
-    except Exception:
-        return 0
+    kst = datetime.now(_KST).strftime("%Y-%m-%d(%a) %H:%M:%S KST")
 
     advisory = {
         "hookSpecificOutput": {
