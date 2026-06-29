@@ -29,6 +29,16 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Windows cp949 등 비UTF-8 로캘에서 (1) ✔/✘ 결과 기호 출력, (2) UTF-8 을 뱉는 자식 훅의
+# text=True 디코딩이 모두 UnicodeError 로 죽는다 — 정작 cp949 회귀를 검증하는 러너가 cp949
+# 에서 못 도는 자기모순. UTF-8 모드가 아니면 -X utf8 로 자식을 띄워 stdout·locale 기반 subprocess
+# 디코딩·자식 프로세스를 한 번에 UTF-8 로 고정한다 (3.15+ 는 기본 UTF-8 → 스킵).
+# subprocess+sys.exit 로 종료코드를 전파한다 — Windows os.execv 는 원본을 분리시켜 exit code 를
+# 잃어버려(항상 0) 실패가 녹색으로 보고되므로 쓰면 안 된다.
+if not sys.flags.utf8_mode and os.environ.get("PYTHONUTF8") != "1":
+    os.environ["PYTHONUTF8"] = "1"
+    sys.exit(subprocess.run([sys.executable, "-X", "utf8", *sys.argv]).returncode)
+
 REPO = Path(__file__).resolve().parents[1]
 HOOKS = REPO / "plugins" / "project-init" / "hooks"
 TEMPLATES = REPO / "plugins" / "project-init" / "skills" / "project-init" / "assets" / "templates"
