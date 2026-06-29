@@ -1781,7 +1781,7 @@ def t_stdio_utf8_guard(base: Path) -> None:
         for f in sorted(d.glob("*.py")):
             if f.name in libs:
                 continue
-            if 'reconfigure(encoding="utf-8")' not in f.read_text(encoding="utf-8"):
+            if 'reconfigure(encoding="utf-8"' not in f.read_text(encoding="utf-8"):
                 missing.append(f.name)
     check("엔트리포인트 훅 전부 stdio UTF-8 reconfigure 보유", not missing, f"누락: {missing}")
 
@@ -1801,6 +1801,70 @@ def t_stdio_utf8_guard(base: Path) -> None:
         "UnicodeEncodeError" not in r.stderr and r.returncode == 2,
         f"rc={r.returncode} err={r.stderr[:200]!r}",
     )
+
+
+def _io_encoding_offenders(path: Path) -> list:
+    """파일 텍스트 I/O 호출 중 encoding= 누락분을 AST 로 수집한다.
+
+    대상: Path.write_text/read_text, builtin open(), Path.open(), os.fdopen().
+    제외: os.open(저수준 fd — encoding 인자 없음), 바이너리 모드('b' 포함).
+    정규식이 아니라 AST 라 주석·문자열·멀티라인 호출 오탐이 원천 차단된다.
+    """
+
+    def text_mode(call: ast.Call) -> bool:
+        if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant):
+            return "b" not in str(call.args[1].value or "")
+        for kw in call.keywords:
+            if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                return "b" not in str(kw.value.value or "")
+        return True  # 기본 'r' = 텍스트
+
+    out = []
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        has_enc = any(kw.arg == "encoding" for kw in node.keywords)
+        if isinstance(fn, ast.Attribute):
+            if fn.attr in {"write_text", "read_text"} and not has_enc:
+                out.append((node.lineno, fn.attr))
+            elif fn.attr == "open":
+                # os.open 은 저수준 fd — encoding 무관. Path(...).open() 만 텍스트.
+                if isinstance(fn.value, ast.Name) and fn.value.id == "os":
+                    continue
+                if text_mode(node) and not has_enc:
+                    out.append((node.lineno, "open"))
+            elif fn.attr == "fdopen" and text_mode(node) and not has_enc:
+                out.append((node.lineno, "fdopen"))
+        elif isinstance(fn, ast.Name) and fn.id == "open" and text_mode(node) and not has_enc:
+            out.append((node.lineno, "open"))
+    return out
+
+
+def t_file_io_encoding_guard(base: Path) -> None:
+    """모든 훅의 파일 텍스트 I/O 가 encoding= 를 명시 — cp949 파일 I/O 크래시 회귀 방지.
+
+    리포트(20260629_v2.8.4 §1): write_text/read_text/open 이 encoding 미지정이면 Windows
+    locale(cp949) 기본으로 동작 → 비-ASCII(한글·이모지 ✅) 파일을 쓰면 UnicodeEncodeError,
+    구버전이 cp949 로 쓴 파일을 utf-8 strict 로 읽으면 UnicodeDecodeError. stdio reconfigure([17])
+    는 출력 스트림만 덮어 파일 I/O 는 못 잡는다 — 이 가드가 그 사각을 정적으로 봉인한다.
+    [17] 과 달리 lib(plan_gate_lib/prompt_log_lib)도 포함한다 — 파일 I/O 가 거기 있다.
+    """
+    print("[37] 파일 I/O encoding 명시 (cp949 파일쓰기/읽기 크래시 방지)")
+    hook_dirs = [
+        HOOKS,
+        REPO / "plugins" / "prompt-log" / "hooks",
+        REPO / ".claude" / "hooks",
+        TEMPLATES / ".claude" / "hooks",
+        TEMPLATES / "scripts",
+    ]
+    offenders = []
+    for d in hook_dirs:
+        for f in sorted(d.glob("*.py")):
+            for lineno, kind in _io_encoding_offenders(f):
+                offenders.append(f"{f.name}:{lineno}({kind})")
+    check("훅 파일 I/O 전부 encoding 명시", not offenders, f"누락: {offenders}")
 
 
 def t_failure_loop_guard(base: Path) -> None:
@@ -2018,6 +2082,7 @@ def main() -> int:
     t_platform_compat()
     t_hook_future_imports()
     t_stdio_utf8_guard(base)
+    t_file_io_encoding_guard(base)
     t_version_sync()
     print(f"\n결과: {PASS} 통과, {FAIL} 실패, {SKIP} 스킵")
     return 1 if FAIL else 0

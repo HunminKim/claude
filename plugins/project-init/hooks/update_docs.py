@@ -26,7 +26,7 @@ from typing import Any
 # Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
-        _s.reconfigure(encoding="utf-8")
+        _s.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
 
@@ -72,7 +72,7 @@ def main() -> int:
 
     # 3. 결과 파일 읽기
     try:
-        with open(result_path) as f:
+        with open(result_path, encoding="utf-8", errors="ignore") as f:
             result: dict[str, Any] = json.load(f)
     except Exception as e:
         _log(f"[update_docs] 결과 파일 읽기 실패: {e}")
@@ -115,7 +115,7 @@ def main() -> int:
     checklist_row = result.get("checklist_row", None)
 
     if checklist_path.exists():
-        content = checklist_path.read_text()
+        content = checklist_path.read_text(encoding="utf-8", errors="ignore")
         lines = content.splitlines()
         updated = False
 
@@ -151,7 +151,7 @@ def main() -> int:
                         break
 
         if updated:
-            checklist_path.write_text("\n".join(lines))
+            checklist_path.write_text("\n".join(lines), encoding="utf-8")
             _log(f"[update_docs] checklist.md 업데이트 완료: {feature_name}")
         else:
             hint = f"{checklist_phase} #{checklist_row}" if checklist_phase else feature_name
@@ -160,7 +160,7 @@ def main() -> int:
     # ── completion_report.md 업데이트 ─────────────────────────────────────
     report_path = docs_dir / "completion_report.md"
     if report_path.exists():
-        content = report_path.read_text()
+        content = report_path.read_text(encoding="utf-8", errors="ignore")
 
         # 테이블 마지막 행 다음에 항목 추가
         issues_text = "\n".join(f"- {i}" for i in issues) if issues else "없음"
@@ -192,13 +192,13 @@ def main() -> int:
             _log(f"[update_docs] completion_report.md 이미 등록됨: '{feature_name}', 건너뜀")
         else:
             content += section
-            report_path.write_text(content)
+            report_path.write_text(content, encoding="utf-8")
             _log(f"[update_docs] completion_report.md 업데이트 완료: {feature_name}")
 
     # ── technical_doc.md 업데이트 ─────────────────────────────────────────
     tech_path = docs_dir / "technical_doc.md"
     if tech_path.exists():
-        content = tech_path.read_text()
+        content = tech_path.read_text(encoding="utf-8", errors="ignore")
 
         files_text = (
             "\n".join(f"- `{f['path']}` — {f['role']}" for f in impl.get("files", [])) or "- 없음"
@@ -224,14 +224,14 @@ def main() -> int:
 ---"""
 
         content += section
-        tech_path.write_text(content)
+        tech_path.write_text(content, encoding="utf-8")
         _log(f"[update_docs] technical_doc.md 업데이트 완료: {feature_name}")
 
     # ── CLAUDE.md 알려진 버그/제약 업데이트 ──────────────────────────────
     if critical_constraints:
         claude_path = docs_dir.parent / "CLAUDE.md"
         if claude_path.exists():
-            content = claude_path.read_text()
+            content = claude_path.read_text(encoding="utf-8", errors="ignore")
             section_header = "## 알려진 버그 / 제약"
             new_items = "\n".join(f"- {c}" for c in critical_constraints)
 
@@ -251,11 +251,11 @@ def main() -> int:
                     lines.insert(insert_at, new_items)
                 else:
                     lines.append(new_items)
-                claude_path.write_text("\n".join(lines))
+                claude_path.write_text("\n".join(lines), encoding="utf-8")
             else:
                 # 섹션 자체가 없으면 파일 끝에 추가
                 content += f"\n\n{section_header}\n\n{new_items}\n"
-                claude_path.write_text(content)
+                claude_path.write_text(content, encoding="utf-8")
 
             _log(f"[update_docs] CLAUDE.md 알려진 버그/제약 업데이트: {len(critical_constraints)}건")
 

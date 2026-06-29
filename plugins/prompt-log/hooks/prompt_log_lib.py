@@ -46,7 +46,7 @@ def _pl_file_lock(lock_path: Path):
     if fcntl is None:
         yield
         return
-    with open(lock_path, "w") as lock_f:
+    with open(lock_path, "w", encoding="utf-8") as lock_f:
         fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -110,7 +110,7 @@ def pl_load_allowed() -> list[dict[str, Any]]:
     if not p.exists():
         return []
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8", errors="ignore"))
     except Exception:
         return []
 
@@ -121,7 +121,7 @@ def pl_save_allowed(allowed: list[dict[str, Any]]) -> None:
     lock_file = p.parent / ".allowed.lock"
     with _pl_file_lock(lock_file):
         tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(allowed, ensure_ascii=False, indent=2))
+        tmp.write_text(json.dumps(allowed, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(p)
 
 
@@ -142,7 +142,7 @@ def pl_grant_consent(project_root: Path) -> None:
     """marker 생성 + whitelist 등록. /project-init 또는 사용자 수동 호출."""
     marker = pl_project_marker_path(project_root)
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(pl_now_iso() + "\n")
+    marker.write_text(pl_now_iso() + "\n", encoding="utf-8")
 
     abs_path = str(project_root.resolve())
     allowed = pl_load_allowed()
@@ -240,7 +240,7 @@ def pl_load_active(project_root: Path) -> dict[str, Any] | None:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8", errors="ignore"))
     except Exception:
         return None
 
@@ -382,7 +382,7 @@ def pl_read_plan_gate_meta(project_root: Path) -> dict[str, Any] | None:
     if not pg_state.exists():
         return None
     try:
-        data = json.loads(pg_state.read_text())
+        data = json.loads(pg_state.read_text(encoding="utf-8", errors="ignore"))
     except Exception:
         return None
     current_id = data.get("current_gate_id")

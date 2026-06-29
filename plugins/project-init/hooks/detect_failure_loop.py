@@ -21,7 +21,7 @@ from pathlib import Path
 # Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
-        _s.reconfigure(encoding="utf-8")
+        _s.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
 
@@ -34,7 +34,7 @@ ERROR_TAIL_LENGTH = 200
 def load_log(log_path: Path) -> dict:
     if log_path.exists():
         try:
-            return json.loads(log_path.read_text())
+            return json.loads(log_path.read_text(encoding="utf-8", errors="ignore"))
         except Exception:
             pass
     return {
@@ -47,7 +47,7 @@ def load_log(log_path: Path) -> dict:
 
 def save_log(log_path: Path, log: dict) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_text(json.dumps(log, ensure_ascii=False, indent=2))
+    log_path.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def is_expired(log: dict) -> bool:

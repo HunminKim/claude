@@ -29,9 +29,16 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 - stdin: `{"tool_name", "tool_input", "session_id", ...}` JSON
 - 모든 메시지는 한국어
 - stdin 파싱 실패는 silent exit 0 (훅이 흐름을 막지 않는다)
-- **stdio UTF-8 고정 필수** (import 직후): `for _s in (sys.stdin, sys.stdout, sys.stderr): try: _s.reconfigure(encoding="utf-8") except (AttributeError, ValueError): pass`.
+- **stdio UTF-8 고정 필수** (import 직후): `for _s in (sys.stdin, sys.stdout, sys.stderr): try: _s.reconfigure(encoding="utf-8", errors="replace") except (AttributeError, ValueError): pass`.
   Windows cp949(한국어) 콘솔에서 이모지·em-dash(—) 입출력 시 UnicodeError 로 훅이 죽는다
-  (PyYAML 미설치 `— 검증 스킵` 안내문까지 깨져 'pyyaml 에러'로 오인됨). smoke_test `[17]` 가 강제.
+  (PyYAML 미설치 `— 검증 스킵` 안내문까지 깨져 'pyyaml 에러'로 오인됨). `errors="replace"` 는
+  stdin 으로 들어온 cp949/깨진 바이트의 디코드 크래시까지 막는다. smoke_test `[17]` 가 강제.
+- **파일 텍스트 I/O 는 encoding 명시 필수**: `write_text`/`read_text`/`open()`(텍스트 모드)은
+  항상 `encoding="utf-8"` 를 단다 — 미지정 시 Windows locale(cp949) 기본으로 동작해 비-ASCII
+  파일쓰기가 UnicodeEncodeError 로 죽는다. POSIX 는 기본이 utf-8 이라 명시해도 no-op(회귀 0).
+  **읽기는 `encoding="utf-8", errors="ignore"`** — 구버전이 cp949 로 쓴 기존 파일을 utf-8 strict
+  로 읽다 죽는 마이그레이션 크래시를 피한다(쓰기엔 errors 금지 — 데이터 손상 은폐). stdio 가드와
+  별개 사각(파일 I/O 는 reconfigure 가 못 덮음)이라 smoke_test `[37]` 가 AST 로 누락을 강제한다.
 - 루트 settings.json: `python3 "$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>.py`
 - 플러그인 hooks.json: `python3 ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.py`
 - 서브에이전트 matcher 는 `Agent|Task` (v2.1.63에서 Task→Agent 개명, 구버전 호환).

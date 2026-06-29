@@ -19,7 +19,7 @@ from datetime import datetime
 # Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
-        _s.reconfigure(encoding="utf-8")
+        _s.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
 
@@ -60,7 +60,9 @@ def _warn_missing_yaml(constraints: Path) -> None:
     이 silent 폴백이 "constraints.yaml 을 고쳐도 안 먹힘" 사고의 원인이었다.
     커스텀이 실제로 있는 경우만 경고한다 (Stop 훅 stderr — 사용자전용 채널).
     """
-    if constraints.exists() and "temp_patterns:" in constraints.read_text(errors="ignore"):
+    if constraints.exists() and "temp_patterns:" in constraints.read_text(
+        encoding="utf-8", errors="ignore"
+    ):
         sys.stderr.write(
             "[cleanup-suggest] PyYAML 미설치 — docs/constraints.yaml 의 temp_patterns 를 "
             "읽지 못해 기본 패턴으로 폴백합니다. `pip install pyyaml` 후 커스텀이 적용됩니다.\n"
@@ -75,7 +77,7 @@ def load_patterns(root: Path) -> dict:
         _warn_missing_yaml(constraints)
         return DEFAULT_PATTERNS
     try:
-        with open(constraints) as f:
+        with open(constraints, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return data.get("temp_patterns") or DEFAULT_PATTERNS
     except Exception:

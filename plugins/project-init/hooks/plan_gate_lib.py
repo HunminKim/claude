@@ -101,7 +101,7 @@ def is_plan_gate_manageable(root: Path) -> bool:
 def enable_plan_gate(root: Path) -> None:
     p = root / PLAN_GATE_FLAG
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(now_iso() + "\n")
+    p.write_text(now_iso() + "\n", encoding="utf-8")
 
 
 def disable_plan_gate(root: Path) -> None:
@@ -126,7 +126,7 @@ def prefers_no_git(root: Path) -> bool:
 def set_prefer_no_git(root: Path) -> None:
     p = root / PREFER_NO_GIT_FLAG
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(now_iso() + "\n")
+    p.write_text(now_iso() + "\n", encoding="utf-8")
 
 
 def unset_prefer_no_git(root: Path) -> None:
@@ -170,7 +170,7 @@ def set_scope_mode(root: Path, mode: str) -> None:
     """
     p = root / PLAN_GATE_SCOPE_FLAG
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(mode + "\n")
+    p.write_text(mode + "\n", encoding="utf-8")
 
 
 def revert_scope_if_enforced(root: Path) -> bool:
@@ -198,7 +198,7 @@ def load_state(root: Path) -> dict[str, Any]:
     if not p.exists():
         return {"current_gate_id": None, "gates": {}}
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8", errors="ignore"))
     except Exception:
         return {"current_gate_id": None, "gates": {}}
 
@@ -207,7 +207,7 @@ def save_state(root: Path, state: dict[str, Any]) -> None:
     p = state_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
 
 
@@ -1136,7 +1136,7 @@ def intro_seen(root: Path) -> bool:
 def mark_intro_seen(root: Path) -> None:
     p = intro_flag_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(now_iso())
+    p.write_text(now_iso(), encoding="utf-8")
 
 
 # ── git diff 요약 (Claude에게 컨텍스트 + 사용자에게 진행 상황 정보) ──────
@@ -1401,7 +1401,7 @@ def _load_patch_history(root: Path) -> dict[str, Any]:
     if not p.exists():
         return {"file_edits": {}}
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8", errors="ignore"))
     except Exception:
         return {"file_edits": {}}
 
@@ -1410,7 +1410,7 @@ def _save_patch_history(root: Path, history: dict[str, Any]) -> None:
     p = patch_history_path(root)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(history, ensure_ascii=False, indent=2))
+    tmp.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
 
 
