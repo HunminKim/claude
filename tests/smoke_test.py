@@ -641,8 +641,23 @@ def t_install_python_gate(base: Path) -> None:
 
     가짜 python3(3.6 흉내) stub 을 PATH 앞에 두고 install.sh 를 실행한다.
     0단계에서 exit 1 로 끝나므로 claude(마켓플레이스 등록)는 호출되지 않아 부작용이 없다.
+
+    ⚠️ 네이티브 Windows(Git Bash)에서는 skip 한다 — 안전상 필수.
+    Git Bash 의 bash 는 (1) `C:\\...` 드라이브레터 경로를 스크립트 인자로 못 열고
+    (rc=127), (2) `C:/...` 형식 PATH 항목을 무시해 stub 주입이 실패한다. 경로만
+    POSIX 로 고치면 stub 이 안 먹혀 *진짜* python3(3.10+)가 게이트를 통과 →
+    install.sh 가 step1 부터 실제 `claude` 마켓플레이스 등록·설치를 수행하는
+    부작용이 난다. shebang stub + `:`-PATH + 실행비트는 POSIX 전용 메커니즘이라
+    ubuntu CI 가 권위 검증을 담당한다. 이 skip 을 푸는 건 진짜 설치 실행 위험 —
+    풀려면 stub 주입을 MSYS(`/c/...`)로 충실히 재현했는지 먼저 검증할 것.
     """
     print("[13] install.sh Python 버전 게이트")
+    if os.name == "nt":
+        skip(
+            "install.sh Python 게이트",
+            "네이티브 Windows Git Bash 는 shebang stub·PATH 주입 미재현(stub 무시 시 진짜 설치 위험) — ubuntu CI 가 검증",
+        )
+        return
     if not _has_working_bash():
         skip("install.sh Python 게이트", "작동하는 POSIX bash 없음 — CI(ubuntu/Git-Bash)가 검증")
         return
