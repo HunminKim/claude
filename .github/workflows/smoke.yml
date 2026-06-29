@@ -1,0 +1,31 @@
+name: smoke
+
+# 하네스 행위 검증(tests/smoke_test.py)을 두 OS 에서 자동 실행.
+# - ubuntu: 권위 신호 (CLAUDE.md "커밋 전 smoke 필수"를 CI 로 강제)
+# - windows + Git Bash: 실제 Windows 훅 런타임(sh + 네이티브 python)을 그대로 재현하는 카나리아.
+#   Claude Code 는 Windows 에서 훅을 Git Bash 로 띄우고 그 안의 python3 는 네이티브 python 이라
+#   os.sep='\\'·CRLF 가 그대로 노출된다 — 이 잡이 그 환경을 직접 검증한다.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # windows-latest 의 bash 는 Git Bash → 실제 훅 런타임과 동일.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: smoke_test
+        run: python tests/smoke_test.py

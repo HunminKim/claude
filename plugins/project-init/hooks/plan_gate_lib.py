@@ -329,12 +329,17 @@ def create_snapshot(root: Path, gate: dict[str, Any]) -> str | None:
 
 
 def _rel_to_root(root: Path, target: str) -> str | None:
-    """target(상대/절대)을 루트 상대경로로 정규화. 루트 밖이면 None."""
+    """target(상대/절대)을 루트 상대경로로 정규화. 루트 밖이면 None.
+
+    forward-slash 로 반환한다(as_posix). str() 은 Windows 에서 백슬래시를 내어
+    스냅샷 manifest 키가 'sub\\new.py' 처럼 OS 종속·비포터블해진다 — 매처(_path_match)는
+    이미 정규화하지만 manifest/audit 키 자체를 POSIX 로 고정해 OS 간 일관성을 보장한다.
+    """
     p = Path(target)
     if not p.is_absolute():
         p = root / p
     try:
-        return str(p.resolve().relative_to(root.resolve()))
+        return p.resolve().relative_to(root.resolve()).as_posix()
     except (ValueError, OSError):
         return None
 
@@ -516,13 +521,19 @@ def todo_md_path(root: Path) -> Path:
 
 
 def hash_todo_md(root: Path) -> tuple[str | None, float | None]:
-    """todo.md의 sha256과 mtime. 없으면 (None, None)."""
+    """todo.md의 sha256과 mtime. 없으면 (None, None).
+
+    개행을 universal-newline 으로 정규화(read_text)한 뒤 해시한다 — plan_gate.py 의
+    캡처측이 read_text().encode() 로 LF 기준 해시를 만들므로, 여기서 read_bytes 로
+    원본 CRLF 를 해시하면 Windows(CRLF todo.md)에서 두 해시가 어긋나 /approve-plan 이
+    'todo.md 변경됨' 으로 첫 시도부터 부당 거부된다. 양측을 LF 기준으로 통일한다.
+    """
     p = todo_md_path(root)
     if not p.exists():
         return None, None
     try:
-        content = p.read_bytes()
-        return hashlib.sha256(content).hexdigest(), p.stat().st_mtime
+        content = p.read_text(encoding="utf-8", errors="ignore")
+        return hashlib.sha256(content.encode()).hexdigest(), p.stat().st_mtime
     except Exception:
         return None, None
 

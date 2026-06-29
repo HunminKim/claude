@@ -56,6 +56,7 @@ GIT_ENV = {
 
 PASS = 0
 FAIL = 0
+SKIP = 0
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -66,6 +67,32 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     else:
         FAIL += 1
         print(f"  ✘ {name}  {detail}")
+
+
+def skip(name: str, reason: str) -> None:
+    """환경 미충족으로 행위 검증이 불가한 항목 — 실패가 아닌 skip 으로 표기.
+
+    예: POSIX bash 없는 네이티브 Windows 에서 `bash install.sh` 테스트. CI(ubuntu +
+    Git-Bash-on-Windows)가 실제로 돌려 검증하므로 로컬에서 false-fail 시키지 않는다.
+    """
+    global SKIP
+    SKIP += 1
+    print(f"  ⏭ {name} (skip: {reason})")
+
+
+def _has_working_bash() -> bool:
+    """작동하는 POSIX bash 가 PATH 에 있나 — Windows 의 깨진 WSL bash 스텁은 False.
+
+    `where bash` 가 System32\\bash.exe(WSL 런처)를 먼저 잡으면 execvpe 로 죽으므로,
+    존재(which)만으로는 부족하다. 실제로 `bash -c` 를 돌려 정상 동작을 확인한다.
+    """
+    try:
+        r = subprocess.run(
+            ["bash", "-c", "echo ok"], capture_output=True, text=True, timeout=10
+        )
+        return r.returncode == 0 and r.stdout.strip() == "ok"
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def run_hook(hook: Path, payload: dict, project: Path) -> subprocess.CompletedProcess[str]:
@@ -616,6 +643,9 @@ def t_install_python_gate(base: Path) -> None:
     0단계에서 exit 1 로 끝나므로 claude(마켓플레이스 등록)는 호출되지 않아 부작용이 없다.
     """
     print("[13] install.sh Python 버전 게이트")
+    if not _has_working_bash():
+        skip("install.sh Python 게이트", "작동하는 POSIX bash 없음 — CI(ubuntu/Git-Bash)가 검증")
+        return
     bindir = base / "fakebin"
     bindir.mkdir()
     stub = bindir / "python3"
@@ -1989,7 +2019,7 @@ def main() -> int:
     t_hook_future_imports()
     t_stdio_utf8_guard(base)
     t_version_sync()
-    print(f"\n결과: {PASS} 통과, {FAIL} 실패")
+    print(f"\n결과: {PASS} 통과, {FAIL} 실패, {SKIP} 스킵")
     return 1 if FAIL else 0
 
 
