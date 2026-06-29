@@ -10,6 +10,13 @@ from __future__ import annotations
 import json, os, re, sys
 from pathlib import Path
 
+# Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 KO_DESIGN = [
     r"설계", r"아키텍처", r"구조\s*[를을]?\s*잡", r"어떻게\s*만들",
     r"어떻게\s*구현", r"접근\s*방식", r"패턴\s*선택", r"모듈\s*나누",

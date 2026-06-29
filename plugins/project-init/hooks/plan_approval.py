@@ -24,6 +24,13 @@ import plan_gate_cli  # noqa: E402  — COMMANDS SSOT (import 시 main 미실행
 
 import plan_gate_lib as lib  # noqa: E402
 
+# Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 # 슬래시 유무 모두 처리: /approve-plan, approve-plan, /approve 모두 동작
 #
 # 전이 경로는 2개이며 둘 다 사용자 게이트키퍼를 지킨다 (CLI 가 idempotent 라 중복 안전):

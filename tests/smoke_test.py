@@ -1718,6 +1718,51 @@ def t_hook_future_imports() -> None:
     check("PEP604/제네릭 쓰는 훅은 future import 보유", not offenders, f"위반: {offenders}")
 
 
+def t_stdio_utf8_guard(base: Path) -> None:
+    """모든 훅 엔트리포인트가 stdio 를 UTF-8 로 고정 — cp949 콘솔 크래시 회귀 방지.
+
+    리포트: Windows cp949(한국어) 콘솔에서 훅이 이모지·em-dash(—) 를 출력/입력하면
+    UnicodeEncodeError 로 죽었다. 특히 PyYAML 미설치 시 `— 검증 스킵` graceful 안내문의
+    em-dash 가 cp949 에서 깨져 'pyyaml 에러'처럼 보였다. 두 증상 모두 stdio 인코딩이
+    근본 원인 — 엔트리포인트마다 sys.std{in,out,err}.reconfigure(encoding="utf-8") 필수.
+    라이브러리(plan_gate_lib/prompt_log_lib)는 출력 주체가 아니므로 제외.
+    """
+    print("[17] stdio UTF-8 고정 (cp949 콘솔 호환)")
+    libs = {"plan_gate_lib.py", "prompt_log_lib.py"}
+    hook_dirs = [
+        HOOKS,
+        REPO / "plugins" / "prompt-log" / "hooks",
+        REPO / ".claude" / "hooks",
+        TEMPLATES / ".claude" / "hooks",
+        TEMPLATES / "scripts",
+    ]
+    missing = []
+    for d in hook_dirs:
+        for f in sorted(d.glob("*.py")):
+            if f.name in libs:
+                continue
+            if 'reconfigure(encoding="utf-8")' not in f.read_text(encoding="utf-8"):
+                missing.append(f.name)
+    check("엔트리포인트 훅 전부 stdio UTF-8 reconfigure 보유", not missing, f"누락: {missing}")
+
+    # 행위 검증: cp949 강제(PYTHONIOENCODING) 환경에서 이모지(🚨) 출력 훅이 크래시하지 않는다.
+    # reconfigure 가 PYTHONIOENCODING 보다 우선하므로 UnicodeEncodeError 가 사라져야 한다.
+    p = make_project(base, "cp949")
+    r = subprocess.run(
+        [sys.executable, str(HOOKS / "dangerous_bash_check.py")],
+        input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}),
+        capture_output=True,
+        text=True,
+        cwd=str(p),
+        env={**GIT_ENV, "CLAUDE_PROJECT_DIR": str(p), "PYTHONIOENCODING": "cp949"},
+    )
+    check(
+        "cp949 강제 환경에서 이모지 차단 메시지 출력 — UnicodeError 없음",
+        "UnicodeEncodeError" not in r.stderr and r.returncode == 2,
+        f"rc={r.returncode} err={r.stderr[:200]!r}",
+    )
+
+
 def t_failure_loop_guard(base: Path) -> None:
     """F-008 — detect_failure_loop 가 실측 페이로드 스키마에서 실제로 동작.
 
@@ -1932,6 +1977,7 @@ def main() -> int:
     t_verifier_spec()
     t_platform_compat()
     t_hook_future_imports()
+    t_stdio_utf8_guard(base)
     t_version_sync()
     print(f"\n결과: {PASS} 통과, {FAIL} 실패")
     return 1 if FAIL else 0

@@ -23,6 +23,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 
 def _log(msg: str) -> None:
     """진행 로그 — 사용자 터미널 전용 (stderr). stdout 오염 금지."""

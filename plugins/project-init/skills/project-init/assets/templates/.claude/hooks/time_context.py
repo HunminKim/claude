@@ -14,6 +14,13 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 
+# Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 # KST(한국 표준시)는 DST 없이 항상 UTC+9 고정 — 외부 `date` 명령(Unix 전용) 대신
 # 순수 파이썬 고정 오프셋으로 계산해 Windows 포함 모든 OS 에서 동일 동작.
 _KST = timezone(timedelta(hours=9))

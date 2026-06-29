@@ -10,6 +10,13 @@ import sys
 import subprocess
 from pathlib import Path
 
+# Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
 PROJECT_ROOT = Path(__file__).parent.parent
 
 # 언어별 (대상 확장자들, import 패턴 템플릿). {name} 에 banned 의존성명이 들어간다.
