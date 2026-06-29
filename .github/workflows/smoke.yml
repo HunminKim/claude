@@ -23,8 +23,8 @@ jobs:
         # windows-latest 의 bash 는 Git Bash → 실제 훅 런타임과 동일.
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: smoke_test
