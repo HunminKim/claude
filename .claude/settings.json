@@ -2,6 +2,11 @@
   "env": {
     "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1"
   },
+  "enabledPlugins": {
+    "project-init@hunminkim": false,
+    "harness-check@hunminkim": false,
+    "prompt-log@hunminkim": false
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
