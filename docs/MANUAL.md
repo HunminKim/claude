@@ -2,7 +2,7 @@
 
 > 이 문서는 저장소의 **세 플러그인(project-init / harness-check / prompt-log)** 과
 > 핵심 기능인 **plan-gate** 의 동작·명령·상태 흐름을 코드 기준으로 정리한 사용 설명서다.
-> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.12.0**, harness-check **v1.0.1**, prompt-log **v1.1.4**)
+> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.14.0**, harness-check **v1.0.1**, prompt-log **v1.1.4**)
 >
 > ⚠️ 이 문서는 *마켓플레이스를 쓰는 사용자*용 매뉴얼이다. 저장소 자체를 개발할 때의 규칙은 루트 `CLAUDE.md` 를 본다.
 >
@@ -58,7 +58,7 @@
 
 | 플러그인 | 버전 | 한 줄 요약 |
 |---------|------|----------|
-| **project-init** | v2.12.0 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 18개 훅 + 18개 명령 |
+| **project-init** | v2.14.0 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 18개 훅 + 18개 명령 |
 | **harness-check** | v1.0.1 | 진단. 독립 서브에이전트가 하네스 건강 상태를 점검·리포트 |
 | **prompt-log** | v1.1.4 | 옵트인 프롬프트 통계 수집 (기본 비활성 = default deny) |
 
@@ -91,7 +91,7 @@ bash install.sh
 1. **기술스택 감지** (`package.json`, `pyproject.toml`, `go.mod` 등) 후 맞춤 스캐폴딩
 2. **기존 문서 분류** (CLAUDE.md/docs 가 있으면 keep / transform / discard 로 나눠 사용자 승인)
 3. **4계층 규칙 구조** 생성 (아래)
-4. **5개 도메인 서브에이전트** + 6개 로컬 훅 + `.githooks/` 생성
+4. **6개 도메인 서브에이전트** + 6개 로컬 훅 + `.githooks/` 생성
 5. **plan-gate 활성화** (`.claude/plan_gate_enabled` 를 *마지막에* 생성 — 초기화 도중 plan-gate 가 켜지지 않도록)
 
 ### 생성되는 4계층 규칙 (토큰 효율 설계)

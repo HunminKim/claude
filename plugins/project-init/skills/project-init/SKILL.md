@@ -166,7 +166,7 @@ scripts/
 
 각 문서 파일 내용은 아래 **템플릿 섹션**을 참고한다. 프로젝트 이름, 날짜(KST 기준), 기술 스택을 템플릿에 채워 넣는다.
 
-`.claude/agents/` 6종(`verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md`, `llm-agent.md`)은 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/` 의 동명 템플릿을 읽어 생성한다. CLAUDE.md 위임 표가 6종 전부를 전제하므로 일부만 생성하면 `@frontend` 등의 호출이 "agent not found" 로 실패한다.
+`.claude/agents/` 6종(`verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md`, `llm-agent.md`)은 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/` 의 동명 템플릿을 읽어 생성한다. workflow.md 위임 표가 6종 전부를 전제하므로 일부만 생성하면 `@frontend` 등의 호출이 "agent not found" 로 실패한다.
 
 `.claude/plan_gate_enabled` 파일은 **모든 파일 생성이 완료된 가장 마지막 단계**에 생성한다. 이 파일 존재 여부가 plan-gate 활성화 트리거이므로, 반드시 가장 마지막에 생성해야 project-init 실행 중 plan-gate가 조기 발동되지 않는다.
 
