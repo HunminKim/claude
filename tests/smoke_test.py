@@ -1956,6 +1956,15 @@ def t_llm_agent_template() -> None:
     wf = (TEMPLATES / ".claude" / "memory" / "workflow.md").read_text(encoding="utf-8")
     check("workflow 위임 표에 @llm-agent 행", "`@llm-agent`" in wf)
     check("@llm-agent vs @backend 트랙 분리 경계 명시", "트랙 분리" in wf)
+    # 제어권 배치(축2) 레버 — 4개 채널에 박혔는지. 빠지면 LLM 품질문제를 하드 로직으로만 푸는
+    # 편향(8도메인 probe 7/8 하드 리드)이 재발한다. 기획(todo/workflow)이 주력, llm-agent=백스톱.
+    todo = (TEMPLATES / "tasks" / "todo.md").read_text(encoding="utf-8")
+    check("todo 템플릿(기획 주력)에 제어권 배치 표면화", "제어권 배치" in todo)
+    check("workflow Plan 게이트에 제어권 배치 체크", "제어권 배치" in wf)
+    check("llm-agent 백스톱에 제어권 배치 단계", "제어권 배치" in spec)
+    check("llm-agent 완료보고에 제어권 배치 필수칸", "제어권 배치 결정 (필수" in spec)
+    ver = (TEMPLATES / "agents" / "verifier.md").read_text(encoding="utf-8")
+    check("verifier 가 agentic 불이익 금지 명시", "agentic 산출물을" in ver and "제어권 배치 결정" in ver)
 
 
 def t_hook_future_imports() -> None:
