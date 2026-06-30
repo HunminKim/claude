@@ -448,10 +448,12 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ### .claude/memory/lessons.md 템플릿
 
 `assets/templates/.claude/memory/lessons.md` 파일을 읽어 `.claude/memory/lessons.md`로 생성한다.
+**생성 직후 헤더의 `{{PROJECT_NAME}}`·`{{DATE}}` 를 실제 값(프로젝트명·오늘 KST 날짜)으로 치환한다 — CLAUDE.md 뿐 아니라 이 파일도 치환 대상이다. raw `{{...}}` 가 남으면 안 된다.**
 
 ### .claude/memory/workflow.md 템플릿
 
 `assets/templates/.claude/memory/workflow.md` 파일을 읽어 `.claude/memory/workflow.md`로 생성한다.
+**생성 직후 헤더의 `{{PROJECT_NAME}}` 를 실제 프로젝트명으로 치환한다 — raw `{{...}}` 가 남으면 안 된다.**
 
 ### .claude/hooks/time_context.py 템플릿
 
