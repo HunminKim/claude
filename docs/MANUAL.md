@@ -2,7 +2,7 @@
 
 > 이 문서는 저장소의 **세 플러그인(project-init / harness-check / prompt-log)** 과
 > 핵심 기능인 **plan-gate** 의 동작·명령·상태 흐름을 코드 기준으로 정리한 사용 설명서다.
-> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.8.1**, harness-check **v1.0.1**, prompt-log **v1.1.1**)
+> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.12.0**, harness-check **v1.0.1**, prompt-log **v1.1.4**)
 >
 > ⚠️ 이 문서는 *마켓플레이스를 쓰는 사용자*용 매뉴얼이다. 저장소 자체를 개발할 때의 규칙은 루트 `CLAUDE.md` 를 본다.
 >
@@ -58,9 +58,9 @@
 
 | 플러그인 | 버전 | 한 줄 요약 |
 |---------|------|----------|
-| **project-init** | v2.8.1 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 18개 훅 + 18개 명령 |
+| **project-init** | v2.12.0 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 18개 훅 + 18개 명령 |
 | **harness-check** | v1.0.1 | 진단. 독립 서브에이전트가 하네스 건강 상태를 점검·리포트 |
-| **prompt-log** | v1.1.1 | 옵트인 프롬프트 통계 수집 (기본 비활성 = default deny) |
+| **prompt-log** | v1.1.4 | 옵트인 프롬프트 통계 수집 (기본 비활성 = default deny) |
 
 세 플러그인은 독립적이다. project-init 만 써도 되고, prompt-log 는 명시 동의 전엔 아무것도 수집하지 않는다.
 
@@ -300,7 +300,7 @@ secrets/**
 
 | 백엔드 | 저장 방식 | 롤백 |
 |--------|----------|------|
-| **git** (기본, git 저장소) | private ref 에 워킹트리 스냅샷 + touched 매니페스트 | `git reset` + 스냅샷 복원 안내 |
+| **git** (기본, git 저장소) | private ref 에 워킹트리 스냅샷 + touched 매니페스트 | 스냅샷에서 존재 파일 복구·신규 삭제 (실패 시 reflog 안내) |
 | **cp** (비-git 또는 `/plan-gate-no-git`) | `.claude/state/checkpoints/<gate>/` 에 파일 복사 | 복사본으로 복원 |
 
 `/rollback` 동작:
@@ -531,8 +531,8 @@ API 키(sk-ant-, ghp_, AKIA), JWT, URL 자격증명, 이메일, 한국 주민번
 **Q. 비밀파일을 읽어야 하는데 차단된다.**
 - 의도된 보호. `.env.example` 같은 예시 파일은 허용된다. 실제 비밀이 필요하면 환경변수 경로를 쓰도록 설계.
 
-**Q. 롤백했는데 stash 가 안 돌아왔다.**
-- git 백엔드 롤백은 `git reset` + 스냅샷 복원까지 자동, stash 복원은 *안내*만 한다(데이터 안전). 안내대로 수동 복원.
+**Q. 롤백이 일부만 복원된 것 같다.**
+- 롤백은 체크포인트 스냅샷 기준 touched 파일만 복구(존재 파일)·신규 파일 삭제한다(v1 의 tag/stash 백엔드는 데이터 유실로 폐기, 현재는 프라이빗 ref/cp 스냅샷). 스냅샷 이전 변경·추적 밖 파일은 대상이 아니다 — 더 되돌리려면 `git reflog` 로 직전 상태를 찾는다.
 
 ---
 

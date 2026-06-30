@@ -40,7 +40,7 @@ def find_project_root() -> Path:
     return Path.cwd()
 
 def extract_sections(claude_md: Path) -> str:
-    lines = claude_md.read_text(encoding="utf-8").splitlines()
+    lines = claude_md.read_text(encoding="utf-8", errors="ignore").splitlines()
     result = []
     capturing = False
     for line in lines:

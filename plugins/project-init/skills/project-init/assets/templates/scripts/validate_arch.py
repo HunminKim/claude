@@ -37,7 +37,7 @@ def load_constraints() -> dict:
         return {}
     try:
         import yaml
-        with open(constraints_path, encoding="utf-8") as f:
+        with open(constraints_path, encoding="utf-8", errors="ignore") as f:
             return yaml.safe_load(f) or {}
     except ImportError:
         print("[validate_arch] PyYAML 미설치 — 검증 스킵")

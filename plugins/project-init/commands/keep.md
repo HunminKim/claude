@@ -9,3 +9,5 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/plan_gate_cli.py" skip
 ```
 
 사용자 전용 커맨드 — Claude가 자율 호출할 수 없다 (disable-model-invocation). 슬래시 없이 `keep` 또는 `skip` 평문 입력도 동일하게 동작한다.
+
+> `/skip` 과 100% 동일한 별칭이다 (같은 `skip` 백엔드). 마감 4종 구분은 `/done` 설명 참조.

@@ -53,10 +53,10 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 
 - **차단/강제** (편집 거부·중단·위반 차단): `exit 2 + stderr`
   - Claude 에게 blocking error 로 주입 → 다음 턴에 행동 보정
-  - 예: `plan_gate`, `dangerous_bash_check`, `detect_failure_loop`(2회 분기), `delegation_due_diligence`
+  - 예: `plan_gate`, `dangerous_bash_check`, `detect_failure_loop`(2회 분기), `delegation_prompt_check`(블록 누락 분기 — PreToolUse)
 - **비차단 환기** (Claude 행동 환기·정보 주입·advisory): `exit 0 + stdout` 으로 `hookSpecificOutput.additionalContext` JSON 출력
   - 차단 없이 Claude context 에 메시지 주입 → Claude 가 자기 응답에 반영
-  - 예: `delegation_prompt_check` 통과 분기, `time_context`, `detect_bug_report`, `verifier_remind`, `plan_gate_session_start`(SessionStart)
+  - 예: `delegation_prompt_check` 통과 분기, `delegation_due_diligence`(UserPromptSubmit — exit 2 는 프롬프트를 지워 환기가 무효라 환기 채널 사용), `time_context`, `detect_bug_report`, `verifier_remind`, `plan_gate_session_start`(SessionStart)
   - ⚠️ **Stop 훅 예외 — additionalContext 는 비차단이 아니다**: Stop 이벤트에서
     `additionalContext`/`decision:block` 은 **대화를 강제로 잇는다**(공식 문서: decision:block 과
     동일한 "대화 계속" 효과, transcript 표기만 hook feedback). 매 종료마다 무조건 주입하면

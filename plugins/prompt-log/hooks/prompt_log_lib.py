@@ -209,7 +209,7 @@ def _pl_load_custom_patterns() -> list[tuple[re.Pattern[str], str]]:
             return []
         import yaml  # type: ignore[import]
 
-        data = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or []
+        data = yaml.safe_load(rules_path.read_text(encoding="utf-8", errors="ignore")) or []
         result: list[tuple[re.Pattern[str], str]] = []
         for entry in data:
             if isinstance(entry, dict) and "pattern" in entry and "replacement" in entry:

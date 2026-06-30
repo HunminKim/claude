@@ -77,7 +77,7 @@ def load_patterns(root: Path) -> dict:
         _warn_missing_yaml(constraints)
         return DEFAULT_PATTERNS
     try:
-        with open(constraints, encoding="utf-8") as f:
+        with open(constraints, encoding="utf-8", errors="ignore") as f:
             data = yaml.safe_load(f) or {}
         return data.get("temp_patterns") or DEFAULT_PATTERNS
     except Exception:

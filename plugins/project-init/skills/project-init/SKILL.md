@@ -343,8 +343,9 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 > **plan-gate — 슬래시 커맨드 가이드**
 >
 > plan-gate는 큰 변경이 검토 없이 진행되는 것을 막는 자동 게이트다.
-> 같은 코드 파일을 `Edit/Write`로 5회 이상 반복 편집하면
-> PreToolUse 훅이 차단하고 git tag + git stash로 체크포인트를 자동 생성한다.
+> 같은 코드 파일을 `Edit/Write`로 5회 이상 반복 편집하면 PreToolUse 훅이
+> 계획 작성·`/approve-plan` 을 유도한다. 체크포인트는 게이트가 열릴 때
+> 프라이빗 ref(비-git 은 cp 파일) 스냅샷으로 만들어진다.
 >
 > **[공식 Plan Mode 사용 시] 명시 승인 플로우:**
 > ```
@@ -387,15 +388,17 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 > |--------|------|------|
 > | `/plan-gate-on` | plan-gate 켜기 | `.claude/plan_gate_enabled` 생성 |
 > | `/plan-gate-off` | plan-gate 끄기 | `.claude/plan_gate_enabled` 삭제 |
-> | `/approve-plan` | 계획 확정 후 (시작 전 or 차단 후) | gate → approved |
+> | `/approve-plan` (별칭 `/approve`) | 계획 확정 후 (시작 전 or 차단 후) | gate → approved |
 > | `/replan` | 계획 재작성 필요 시 | 카운터 리셋, 체크포인트 유지 |
-> | `/done` | 작업 완료 시 | 체크포인트 삭제, gate 종료 |
+> | `/done` | 작업 정상 완료 시 (✅ 후/검증 불필요) | 체크포인트 삭제, gate 종료 |
 > | `/retry` | verifier ❌ 후 재구현 | approved 복귀, 카운터 누적 |
-> | `/skip-verify` | verifier 판정 전, 검증 없이 마감 | 검증 생략 마감 (⏭️ 기록) |
-> | `/rollback` | 전체 되돌릴 때 | git reset → checkpoint |
+> | `/skip` (별칭 `/keep`) | verifier ❌ 인지 후 변경 보존 마감 | 문제 인지 채 gate 마감 |
+> | `/skip-verify` | verifier 판정 *전*, 검증 없이 마감 | 검증 생략 마감 (⏭️ 기록, 판정 후 불가) |
+> | `/rollback` | 전체 되돌릴 때 | 프라이빗 ref(비-git=cp) 스냅샷 복원 |
 > | `/plan-gate-scope-shadow` | 스코프 강제 관찰 모드 (기본) | 위반 감지·기록만 (롤백 X) |
 > | `/plan-gate-scope-enforce` | 스코프 강제 켜기 | 스코프 밖 Edit 거부 + Bash 변경 롤백 (게이트 닫히면 shadow 자동 복귀) |
 > | `/plan-gate-scope-off` | 스코프 강제 완전 끄기 | 매니페스트 기록만 (환기도 없음) |
+> | `/plan-gate-no-git` / `/plan-gate-use-git` | 체크포인트 백엔드 전환 | cp 파일 스냅샷 ↔ git 프라이빗 ref |
 > | `/subplan <패턴>` | enforce 중 예상 밖 인접 파일 진행 | audit 남기며 스코프 확장 (do-not-touch 불가침, Claude 호출 가능) |
 >
 > **스코프 강제 (기본 shadow):** tasks/todo.md 에 `<!-- plan-gate: scope BEGIN/END -->`

@@ -615,7 +615,7 @@ def t_delegation_guard(base: Path) -> None:
     특정 에이전트 이름(backend 등) 하드코딩을 제거하고 프로젝트 정의 에이전트에
     일반화한 변경의 회귀 방지. 어떤 이름(@data 등)이든 .claude/agents 에 있으면 검사한다.
     """
-    print("[12] 위임 가드 일반화")
+    print("[40] 위임 가드 일반화")
     hook = HOOKS / "delegation_prompt_check.py"
     proj = make_project(base, "deleg")
     (proj / ".claude" / "agents").mkdir(parents=True)
@@ -637,6 +637,20 @@ def t_delegation_guard(base: Path) -> None:
     check("커스텀 @data 에이전트도 가드 발화 (일반화)", run("data", "x").returncode == 2)
     check("유틸 Plan 에이전트는 통과", run("Plan", "x").returncode == 0)
     check("미정의 에이전트는 통과", run("nonexistent", "x").returncode == 0)
+
+    # SSOT: 두 위임 훅은 유틸-에이전트 집합/도메인 판정을 delegation_common 한 곳에서만
+    # 가져온다 — 어느 한쪽이 _UTILITY_SUBAGENTS 를 로컬 재정의하면 재분기(M2 회귀)다.
+    dd = (HOOKS / "delegation_due_diligence.py").read_text(encoding="utf-8", errors="ignore")
+    dp = (HOOKS / "delegation_prompt_check.py").read_text(encoding="utf-8", errors="ignore")
+    for name, src in (("due_diligence", dd), ("prompt_check", dp)):
+        check(
+            f"delegation_{name}: delegation_common import (SSOT)",
+            "from delegation_common import" in src,
+        )
+        check(
+            f"delegation_{name}: _UTILITY_SUBAGENTS 로컬 재정의 없음",
+            "_UTILITY_SUBAGENTS = frozenset" not in src,
+        )
 
 
 def t_install_python_gate(base: Path) -> None:
@@ -884,7 +898,7 @@ def t_stop_hook_active_guard(base: Path) -> None:
     가드 없으면 해소되지 않는 조건(verifier 미호출 등)에서 매 종료마다 최대 8회
     (Claude Code 하드캡) 턴이 연장된다.
     """
-    print("[17] Stop 훅 stop_hook_active 가드")
+    print("[39] Stop 훅 stop_hook_active 가드")
     p = make_project(base, "stopguard")
     (p / "docs").mkdir()
     (p / "docs" / "constraints.yaml").write_text("temp_patterns: {}\n")
@@ -1951,7 +1965,7 @@ def t_stdio_utf8_guard(base: Path) -> None:
     라이브러리(plan_gate_lib/prompt_log_lib)는 출력 주체가 아니므로 제외.
     """
     print("[17] stdio UTF-8 고정 (cp949 콘솔 호환)")
-    libs = {"plan_gate_lib.py", "prompt_log_lib.py"}
+    libs = {"plan_gate_lib.py", "prompt_log_lib.py", "delegation_common.py"}
     hook_dirs = [
         HOOKS,
         REPO / "plugins" / "prompt-log" / "hooks",
@@ -1987,20 +2001,44 @@ def t_stdio_utf8_guard(base: Path) -> None:
 
 
 def _io_encoding_offenders(path: Path) -> list:
-    """파일 텍스트 I/O 호출 중 encoding= 누락분을 AST 로 수집한다.
+    """파일 텍스트 I/O 호출의 encoding=/errors= 규약 위반을 AST 로 수집한다.
 
+    규약(CLAUDE.md):
+    - 모든 텍스트 I/O 는 encoding="utf-8" 명시.
+    - 읽기(read_text·open/fdopen 읽기 모드)는 errors="ignore" 추가 — 구버전이 cp949 로
+      쓴 파일을 utf-8 strict 로 읽다 죽는 마이그레이션 크래시 방지.
+    - 쓰기(write_text·open/fdopen 쓰기 모드)는 errors 금지 — 데이터 손상 은폐 방지.
     대상: Path.write_text/read_text, builtin open(), Path.open(), os.fdopen().
     제외: os.open(저수준 fd — encoding 인자 없음), 바이너리 모드('b' 포함).
     정규식이 아니라 AST 라 주석·문자열·멀티라인 호출 오탐이 원천 차단된다.
     """
 
-    def text_mode(call: ast.Call) -> bool:
-        if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant):
-            return "b" not in str(call.args[1].value or "")
+    def _mode(call: ast.Call, idx: int) -> str:
+        # mode 의 positional 위치는 호출 종류별로 다르다: 빌트인 open(file, mode)=1,
+        # os.fdopen(fd, mode)=1, 메서드 Path.open(mode)=0.
+        if len(call.args) > idx and isinstance(call.args[idx], ast.Constant):
+            return str(call.args[idx].value or "")
         for kw in call.keywords:
             if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
-                return "b" not in str(kw.value.value or "")
-        return True  # 기본 'r' = 텍스트
+                return str(kw.value.value or "")
+        return ""  # 기본 'r'
+
+    def text_mode(call: ast.Call, idx: int) -> bool:
+        return "b" not in _mode(call, idx)
+
+    def is_write(call: ast.Call, idx: int) -> bool:
+        return any(c in _mode(call, idx) for c in "wax+")
+
+    def verdict(call: ast.Call, label: str, *, write: bool) -> str | None:
+        has_enc = any(kw.arg == "encoding" for kw in call.keywords)
+        has_err = any(kw.arg == "errors" for kw in call.keywords)
+        if not has_enc:
+            return f"{label}:no-encoding"
+        if write and has_err:
+            return f"{label}:write-has-errors"
+        if not write and not has_err:
+            return f"{label}:read-no-errors"
+        return None
 
     out = []
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -2008,33 +2046,39 @@ def _io_encoding_offenders(path: Path) -> list:
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
-        has_enc = any(kw.arg == "encoding" for kw in node.keywords)
+        r = None
         if isinstance(fn, ast.Attribute):
-            if fn.attr in {"write_text", "read_text"} and not has_enc:
-                out.append((node.lineno, fn.attr))
+            if fn.attr == "read_text":
+                r = verdict(node, "read_text", write=False)
+            elif fn.attr == "write_text":
+                r = verdict(node, "write_text", write=True)
             elif fn.attr == "open":
-                # os.open 은 저수준 fd — encoding 무관. Path(...).open() 만 텍스트.
+                # os.open 은 저수준 fd — encoding 무관. Path(...).open() 만 텍스트(mode=arg0).
                 if isinstance(fn.value, ast.Name) and fn.value.id == "os":
                     continue
-                if text_mode(node) and not has_enc:
-                    out.append((node.lineno, "open"))
-            elif fn.attr == "fdopen" and text_mode(node) and not has_enc:
-                out.append((node.lineno, "fdopen"))
-        elif isinstance(fn, ast.Name) and fn.id == "open" and text_mode(node) and not has_enc:
-            out.append((node.lineno, "open"))
+                if text_mode(node, 0):
+                    r = verdict(node, "open", write=is_write(node, 0))
+            elif fn.attr == "fdopen" and text_mode(node, 1):  # os.fdopen(fd, mode)
+                r = verdict(node, "fdopen", write=is_write(node, 1))
+        elif isinstance(fn, ast.Name) and fn.id == "open" and text_mode(node, 1):
+            r = verdict(node, "open", write=is_write(node, 1))  # open(file, mode)
+        if r:
+            out.append((node.lineno, r))
     return out
 
 
 def t_file_io_encoding_guard(base: Path) -> None:
-    """모든 훅의 파일 텍스트 I/O 가 encoding= 를 명시 — cp949 파일 I/O 크래시 회귀 방지.
+    """모든 훅의 파일 텍스트 I/O 가 encoding=/errors= 규약 준수 — cp949 크래시 회귀 방지.
 
     리포트(20260629_v2.8.4 §1): write_text/read_text/open 이 encoding 미지정이면 Windows
     locale(cp949) 기본으로 동작 → 비-ASCII(한글·이모지 ✅) 파일을 쓰면 UnicodeEncodeError,
     구버전이 cp949 로 쓴 파일을 utf-8 strict 로 읽으면 UnicodeDecodeError. stdio reconfigure([17])
     는 출력 스트림만 덮어 파일 I/O 는 못 잡는다 — 이 가드가 그 사각을 정적으로 봉인한다.
     [17] 과 달리 lib(plan_gate_lib/prompt_log_lib)도 포함한다 — 파일 I/O 가 거기 있다.
+    encoding 만 보던 과거 가드는 errors="ignore" 누락(읽기)·errors 오용(쓰기)을 못 잡아
+    6개 read 사이트가 조용히 드리프트했다 — 이제 read=errors 필수, write=errors 금지까지 검사.
     """
-    print("[37] 파일 I/O encoding 명시 (cp949 파일쓰기/읽기 크래시 방지)")
+    print("[37] 파일 I/O encoding/errors 규약 (read=errors필수·write=errors금지, cp949 크래시 방지)")
     hook_dirs = [
         HOOKS,
         REPO / "plugins" / "prompt-log" / "hooks",
@@ -2058,7 +2102,7 @@ def t_failure_loop_guard(base: Path) -> None:
     구독 + exit_code 단일 가정이라 실패를 영영 못 봐 죽어 있었다. 멀티스키마 판정 + 실패
     이벤트 구독을 검증한다(실측 페이로드 모양 그대로 주입).
     """
-    print("[34] F-008 실패 루프 가드 (멀티스키마 + PostToolUseFailure)")
+    print("[41] F-008 실패 루프 가드 (멀티스키마 + PostToolUseFailure)")
     hook = HOOKS / "detect_failure_loop.py"
     p = make_project(base, "failloop")
     (p / ".claude").mkdir(exist_ok=True)
@@ -2222,6 +2266,52 @@ def t_scope_auto_revert(base: Path) -> None:
     check("/done: shadow 는 변화 없음 + 환기 없음", mode(p) == "shadow" and "shadow 자동 복귀" not in r.stdout, f"mode={mode(p)}")
 
 
+def t_prompt_log_consent_sanitize(base: Path) -> None:
+    """[prompt-log] default-deny 동의 판정 + PII/시크릿 마스킹 — 보안 핵심 경로 행위 검증.
+
+    누더기 검토: 동의 게이트(pl_is_consented)와 비밀 마스킹(pl_sanitize)은 plugin 의
+    가장 위험한 코드인데 smoke_test 에 행위 테스트가 0개였다(순수 토큰 함수만 검증).
+    동의는 marker AND whitelist 둘 다 있어야 True(한쪽만이면 default deny), sanitize 는
+    키/JWT/URL 자격증명을 가려야 한다. HOME 을 임시로 돌려 글로벌 whitelist 오염 방지.
+    """
+    print("[38] prompt-log 동의 default-deny + PII 마스킹 (보안 경로 행위 검증)")
+    sys.path.insert(0, str(REPO / "plugins" / "prompt-log" / "hooks"))
+    import prompt_log_lib as pl
+
+    # ── pl_sanitize: 순수 함수 ──
+    for raw, needle in [
+        ("key sk-ant-" + "a" * 30 + " end", "[REDACTED:anthropic_key]"),
+        ("token ghp_" + "b" * 36 + " x", "[REDACTED:github_pat]"),
+        ("jwt eyJabc.eyJdef.ghijk z", "[REDACTED:jwt]"),
+        ("db https://user:pass@host/d", "[REDACTED:url_creds]"),
+    ]:
+        out = pl.pl_sanitize(raw)
+        check(f"pl_sanitize → {needle}", needle in out, f"out={out!r}")
+    check("pl_sanitize 빈 입력 통과", pl.pl_sanitize("") == "")
+    check("pl_sanitize 일반 텍스트 무변경", pl.pl_sanitize("그냥 보통 한국어 문장") == "그냥 보통 한국어 문장")
+
+    # ── pl_is_consented: default-deny (marker AND whitelist) ──
+    old_home = os.environ.get("HOME")
+    home_tmp = base / "pl_home"
+    home_tmp.mkdir(parents=True, exist_ok=True)
+    proj = base / "pl_proj"
+    (proj / ".claude").mkdir(parents=True, exist_ok=True)
+    try:
+        os.environ["HOME"] = str(home_tmp)
+        check("동의: marker·whitelist 둘 다 없음 → deny", pl.pl_is_consented(proj) is False)
+        pl.pl_project_marker_path(proj).write_text("x\n", encoding="utf-8")
+        check("동의: marker 만 (whitelist 없음) → deny", pl.pl_is_consented(proj) is False)
+        pl.pl_grant_consent(proj)
+        check("동의: grant 후 marker+whitelist → allow", pl.pl_is_consented(proj) is True)
+        pl.pl_project_marker_path(proj).unlink()
+        check("동의: whitelist 만 (marker 제거) → deny", pl.pl_is_consented(proj) is False)
+    finally:
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="harness_smoke_") as td:
         base = Path(td)
@@ -2262,6 +2352,7 @@ def main() -> int:
         t_scope_hardening(base)
         t_scope_auto_revert(base)
         t_failure_loop_guard(base)
+        t_prompt_log_consent_sanitize(base)
     t_scaffold_consistency()
     t_command_files()
     t_command_fallback()

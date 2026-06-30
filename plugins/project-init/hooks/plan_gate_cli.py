@@ -153,7 +153,7 @@ def _recover_verifier_from_file(root, gate, state) -> bool:
     if not result_path.exists():
         return False
     try:
-        verdict = json.loads(result_path.read_text(encoding="utf-8")).get("verdict")
+        verdict = json.loads(result_path.read_text(encoding="utf-8", errors="ignore")).get("verdict")
     except Exception:
         return False
     if verdict not in ("✅", "❌"):
@@ -412,7 +412,7 @@ def cmd_no_git(root, state) -> int:
         _info(
             "[plan-gate no-git] git 체크포인트를 끄고 cp 스냅샷 모드로 전환했습니다.\n"
             "  (.claude/plan_gate_no_git 생성) 이후 체크포인트는 .claude/state/checkpoints/ 에\n"
-            "  파일 복사로 만들어지며 git tag/stash 를 쓰지 않습니다. 되돌리려면 /plan-gate-use-git."
+            "  파일 복사로 만들어지며 git 에 스냅샷을 만들지 않습니다. 되돌리려면 /plan-gate-use-git."
         )
     return 0
 

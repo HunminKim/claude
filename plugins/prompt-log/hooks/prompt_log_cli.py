@@ -37,7 +37,7 @@ def cmd_status() -> int:
     total_bytes = 0
     for f in jsonl_files:
         try:
-            lines = f.read_text(encoding="utf-8").splitlines()
+            lines = f.read_text(encoding="utf-8", errors="ignore").splitlines()
             total_records += len([ln for ln in lines if ln.strip()])
             total_bytes += f.stat().st_size
         except Exception:

@@ -7,14 +7,15 @@
 - 사용자 터미널 전용 (.plan-gateignore 자동 추가): exit 0 + stderr
 
 동작 (D1/D2/D5/D7 + UX 풍부화):
-  1. 첫 Edit 직전: working tree clean이면 lightweight tag 생성 (롤백 지점)
+  1. 첫 Edit 직전: 체크포인트 스냅샷 캡처 — git(opt-out 아님)이면 프라이빗
+     ref(refs/plan-gate/<id>), 아니면 cp 디렉토리 백엔드 (clean/dirty 무관)
   2. 호출마다 edit_count / unique_files 누적
   3. created 상태에서 임계값 직전(soft hint): advisory 환기
   4. created 상태에서 임계값 도달:
-       - 현재 dirty 변경을 stash (gate_id 마커)
-       - clean tag 확보, todo.md 해시 캡처
+       - todo.md 해시 캡처 (TOCTOU 기준점)
        - exit 2 + stderr 풍부한 한국어 안내 (차단)
        - 첫 차단이면 plan-gate 소개도 함께 표시 (dismissable)
+       (체크포인트는 1번에서 이미 캡처 — 트리거 시점 별도 stash/tag 없음)
   5. approved 상태에서 scope creep(post_approval limit) 도달 시 차단
   6. verified+❌ 미해결 상태에서 새 Edit 시도하면 D1 lock으로 차단
 

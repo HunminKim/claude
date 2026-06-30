@@ -167,7 +167,7 @@ def scope_mode(root: Path) -> str:
     if not p.exists():
         return DEFAULT_SCOPE_MODE
     try:
-        val = p.read_text(encoding="utf-8").strip().lower()
+        val = p.read_text(encoding="utf-8", errors="ignore").strip().lower()
     except OSError:
         return DEFAULT_SCOPE_MODE
     return val if val in SCOPE_MODES else DEFAULT_SCOPE_MODE
@@ -610,7 +610,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "scope": [],                           # 매니페스트 scope 패턴 (빈 목록 = thrash-only)
         "expansions": [],                      # subplan 으로 audit 하에 추가된 스코프 패턴 (replan 시 리셋)
         "do_not_touch": [],                    # 매니페스트 do-not-touch 패턴 (deny-first)
-        "manifest_sha256": None,               # 매니페스트 블록 원문 sha256 (TOCTOU 고정)
+        "manifest_sha256": None,               # 매니페스트 블록 sha256 (저장만 — 미소비. 실 TOCTOU 가드는 todo_md_sha256)
         "verifier_status": None,
         "large_advisory_seen": False,          # 큰 미승인 변경 환기 1회 dedup
     }
@@ -869,7 +869,7 @@ def auto_add_gate_ignore(file_path: str, root: Path, existing_patterns: list[str
         if fnmatch.fnmatch(name, pattern):
             ignore_file = root / ".plan-gateignore"
             try:
-                existing = ignore_file.read_text(encoding="utf-8") if ignore_file.exists() else ""
+                existing = ignore_file.read_text(encoding="utf-8", errors="ignore") if ignore_file.exists() else ""
                 if existing and not existing.endswith("\n"):
                     existing += "\n"
                 ignore_file.write_text(existing + pattern + "\n", encoding="utf-8")
@@ -934,10 +934,11 @@ def parse_manifest(text: str | None) -> dict[str, list[str]] | None:
 
 
 def manifest_sha(text: str | None) -> str | None:
-    """매니페스트 블록 원문(마커 포함)의 sha256 — 런 중 TOCTOU 고정용.
+    """매니페스트 블록 원문(마커 포함)의 sha256.
 
-    todo.md 전체가 아니라 매니페스트 영역만 해시해 무관한 계획 본문 편집과 분리한다.
-    매니페스트 없으면 None.
+    주의: 현재 이 값을 비교하는 가드는 없다(gate 에 저장만 됨). 런 중 TOCTOU 검증은
+    todo_md_sha256(cmd_approve 에서 비교)이 담당한다 — 이 함수는 매니페스트 영역만
+    해시해 무관한 계획 본문 편집과 분리하는 용도로 남아 있다. 매니페스트 없으면 None.
     """
     if not text:
         return None

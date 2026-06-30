@@ -7,4 +7,4 @@ allowed-tools: Bash
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/plan_gate_cli.py" status
 ```
 
-plan-gate가 활성화된 프로젝트에서 현재 gate 상태(created/approved/verified/done)와 edit 카운터, 체크포인트 tag/stash 정보를 출력한다.
+plan-gate가 활성화된 프로젝트에서 현재 gate 상태(created/approved/verified/done)와 edit 카운터, 체크포인트(커밋 SHA 또는 cp 스냅샷) 정보를 출력한다.

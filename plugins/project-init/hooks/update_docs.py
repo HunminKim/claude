@@ -165,7 +165,8 @@ def main() -> int:
         # 테이블 마지막 행 다음에 항목 추가
         issues_text = "\n".join(f"- {i}" for i in issues) if issues else "없음"
         test_rows = "\n".join(
-            f"| {t['item']} | {t['result']} | {t.get('note', '')} |" for t in test_items
+            f"| {t.get('item', '?')} | {t.get('result', '')} | {t.get('note', '')} |"
+            for t in test_items
         )
         smells_section = ""
         if code_smells:
@@ -201,7 +202,7 @@ def main() -> int:
         content = tech_path.read_text(encoding="utf-8", errors="ignore")
 
         files_text = (
-            "\n".join(f"- `{f['path']}` — {f['role']}" for f in impl.get("files", [])) or "- 없음"
+            "\n".join(f"- `{f.get('path', '?')}` — {f.get('role', '')}" for f in impl.get("files", [])) or "- 없음"
         )
         interface = impl.get("interface", {})
 

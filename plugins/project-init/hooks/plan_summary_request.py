@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """PostToolUse Write hook — tasks/todo.md 작성 직후 계획 요약·승인 요청 주입.
 
+출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 tasks/todo.md 가 새로 작성되면 파일 내용을 읽어 Claude 컨텍스트에 주입한다.
 Claude는 이 컨텍스트를 받아 계획을 사용자에게 요약해서 보여준 뒤
 /approve-plan 을 요청한다.

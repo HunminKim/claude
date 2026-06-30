@@ -1,5 +1,5 @@
 ---
-description: 체크포인트로 전체를 되돌린다 (git reset → clean tag, stash 복원 안내).
+description: 체크포인트 스냅샷에서 되돌린다 (존재 파일 복구·신규 파일 삭제, 실패 시 git reflog 안내).
 allowed-tools: Bash
 disable-model-invocation: true
 ---

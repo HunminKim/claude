@@ -50,7 +50,7 @@ def _find_project_root() -> Path | None:
 def _load_prod_paths(root: Path) -> list[str]:
     try:
         import yaml
-        with open(root / "docs" / "constraints.yaml", encoding="utf-8") as f:
+        with open(root / "docs" / "constraints.yaml", encoding="utf-8", errors="ignore") as f:
             data = yaml.safe_load(f) or {}
         paths = data.get("production_paths", [])
         if paths:
