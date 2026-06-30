@@ -535,7 +535,7 @@ def t_scaffold_consistency() -> None:
     for ref in sorted(set(re.findall(r"assets/templates/[\w./-]+", skill))):
         rel = ref.removeprefix("assets/templates/")
         check(f"SKILL.md 참조 실존: {ref}", (TEMPLATES / rel).exists())
-    for agent in ["verifier", "infra", "backend", "frontend", "deeplearning"]:
+    for agent in ["verifier", "infra", "backend", "frontend", "deeplearning", "llm-agent"]:
         check(f"agents/{agent}.md: SKILL.md 생성 배선", f"{agent}.md" in skill)
 
 
@@ -1935,6 +1935,27 @@ def t_verifier_spec() -> None:
         "실행 grounding" in text and "전 항목이 `static` 인데 `✅` 는 금지" in text,
     )
     check("method enum 보유", "isolated_exec" in text and "production_exec" in text)
+    # @llm-agent 작업 품질 조항 — A2 재현으로 입증된 레버(배관 mocked 테스트만으로 ✅ 금지).
+    # 이 문장이 사라지면 LLM 에이전트 산출물이 다시 mocked 배관 테스트로 완료 처리된다.
+    check(
+        "LLM 에이전트 품질 검증 조항 — 배관 통과 ≠ 품질",
+        "@llm-agent" in text and "배관 통과 ≠" in text and "eval 자산" in text,
+    )
+
+
+def t_llm_agent_template() -> None:
+    """step 6 — llm-agent 템플릿 + 라우팅 배선: 트랙 분리 경계가 SSOT(workflow.md)에 존재.
+
+    @llm-agent 행이 위임 표에서 빠지면 메인이 LLM 에이전트 작업을 @backend 로 투기한다
+    (A1/A2 재현 사고). 경계 한 줄(LLM 호출·평가=llm-agent / 앱 배선=backend)이 단일 진실 원천.
+    """
+    print("[42] llm-agent 템플릿 + 라우팅 배선")
+    spec = (TEMPLATES / "agents" / "llm-agent.md").read_text(encoding="utf-8")
+    check("llm-agent model: sonnet", "model: sonnet" in spec)
+    check("코드보다 행동·평가 먼저 원칙", "코드보다 행동" in spec or "행동 명세 먼저" in spec)
+    wf = (TEMPLATES / ".claude" / "memory" / "workflow.md").read_text(encoding="utf-8")
+    check("workflow 위임 표에 @llm-agent 행", "`@llm-agent`" in wf)
+    check("@llm-agent vs @backend 트랙 분리 경계 명시", "트랙 분리" in wf)
 
 
 def t_hook_future_imports() -> None:
@@ -2357,6 +2378,7 @@ def main() -> int:
     t_command_files()
     t_command_fallback()
     t_verifier_spec()
+    t_llm_agent_template()
     t_platform_compat()
     t_hook_future_imports()
     t_stdio_utf8_guard(base)

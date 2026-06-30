@@ -46,12 +46,19 @@
 | `@frontend` | UI/컴포넌트 구현 | 컴포넌트, 스타일, 프론트 유틸 |
 | `@backend` | API/DB 구현 | 라우터, 서비스, 스키마, 마이그레이션, 인증·인가 *로직* |
 | `@deeplearning` | 모델/학습 구현 | 모델 정의, 학습 스크립트, 데이터 파이프라인 |
+| `@llm-agent` | LLM 에이전트 설계·구현 | 시스템 프롬프트·행동 명세, 툴/MCP 스키마, 오케스트레이션·RAG, LLM 호출·파싱 로직, eval 하네스·루브릭 |
 | `@infra` | 인프라 구현 | IaC, 컨테이너 이미지·오케스트레이션, CI/CD, 클라우드 리소스·IAM·시크릿·모니터링 IaC |
 | `@verifier` | 구현 완료 후 항상 | 기능 동작 검증 (통과/실패 판정) |
 
 `@backend` vs `@infra` 경계: `agents/infra.md` 의 "도메인 경계" 표가 단일 진실 원천.
 - Dockerfile, k8s manifest, CI workflow 파일, IAM 정책 = `@infra`
 - 컨테이너 안에서 실행되는 애플리케이션 코드, DB 스키마 마이그레이션 파일, 권한 검증 미들웨어 = `@backend`
+
+`@llm-agent` vs `@backend` 경계 (트랙 분리): **LLM을 호출·파싱·평가하는 코드 = `@llm-agent` / 그 결과를 앱의 API·DB·큐에 배선하는 코드 = `@backend`.**
+- 시스템 프롬프트, 출력/툴 스키마, eval 골든셋·루브릭, LLM 호출·파싱·임계 판정 로직 = `@llm-agent`
+- API 엔드포인트, DB 스키마·마이그레이션·결과 로깅 테이블, 큐 라우팅 배선 = `@backend`
+- 보통 `@llm-agent` 가 출력 스키마·프롬프트를 먼저 확정 → `@backend` 가 그 산출물을 받아 통합 (순차 의존)
+- `@llm-agent`(사전학습 모델 *호출*) vs `@deeplearning`(모델 *학습*): fine-tuning·학습 파이프라인이면 `@deeplearning`, 프롬프트·eval·호출이면 `@llm-agent`
 
 ### 위임 전 due diligence 체크리스트 (Plan subagent 호출 의무)
 
@@ -93,7 +100,7 @@ Agent(subagent_type="Plan", prompt="""
 
 ### 서브에이전트 보고 신뢰성 (변경 증거 강제)
 
-도메인 에이전트(@frontend/@backend/@deeplearning) 보고를 받으면:
+도메인 에이전트(@frontend/@backend/@deeplearning/@llm-agent) 보고를 받으면:
 
 - 보고에 "변경 증거" 섹션이 있는지 확인 (위임 직전 기준점 + git status + diff 원문)
 - 기준점 = **위임 직전 working tree 상태** (베이스 커밋 아님):

@@ -158,14 +158,15 @@ scripts/
 ├── infra.md                    ← 인프라 전문 구현 서브에이전트 (IaC/컨테이너/CI/CD/클라우드)
 ├── backend.md                  ← 백엔드 구현 서브에이전트 (API/DB/비즈니스 로직)
 ├── frontend.md                 ← 프론트엔드 구현 서브에이전트 (UI/상태/스타일)
-└── deeplearning.md             ← 딥러닝 구현 서브에이전트 (모델/학습/데이터)
+├── deeplearning.md             ← 딥러닝 구현 서브에이전트 (모델/학습/데이터)
+└── llm-agent.md                ← LLM 에이전트 구현 서브에이전트 (프롬프트/툴/오케스트레이션/eval)
 .claude/
 └── plan_gate_enabled           ← plan-gate 활성화 플래그 (반드시 마지막에 생성)
 ```
 
 각 문서 파일 내용은 아래 **템플릿 섹션**을 참고한다. 프로젝트 이름, 날짜(KST 기준), 기술 스택을 템플릿에 채워 넣는다.
 
-`.claude/agents/` 5종(`verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md`)은 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/` 의 동명 템플릿을 읽어 생성한다. CLAUDE.md 위임 표가 5종 전부를 전제하므로 일부만 생성하면 `@frontend` 등의 호출이 "agent not found" 로 실패한다.
+`.claude/agents/` 6종(`verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md`, `llm-agent.md`)은 모든 문서 파일 생성이 완료된 후 `assets/templates/agents/` 의 동명 템플릿을 읽어 생성한다. CLAUDE.md 위임 표가 6종 전부를 전제하므로 일부만 생성하면 `@frontend` 등의 호출이 "agent not found" 로 실패한다.
 
 `.claude/plan_gate_enabled` 파일은 **모든 파일 생성이 완료된 가장 마지막 단계**에 생성한다. 이 파일 존재 여부가 plan-gate 활성화 트리거이므로, 반드시 가장 마지막에 생성해야 project-init 실행 중 plan-gate가 조기 발동되지 않는다.
 
@@ -178,7 +179,7 @@ scripts/
 3. `.claude/rules/code-style.md` — 코드 스타일 규칙
 4. `.claude/memory/lessons.md`, `.claude/memory/workflow.md` — 메모리 파일
 5. `.claude/hooks/` 6종 — `time_context.py`, `design-precheck.py`, `post-compact.py`, `cleanup_suggest.py`, `git_hooks_setup.py`, `verifier_sandbox.py` (settings.json 등록 대상 전부 — 일부만 생성하면 매 세션 file-not-found 에러 발생)
-6. `.claude/agents/` 5종 — `verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md` — 모든 hook 스크립트 생성 후 생성
+6. `.claude/agents/` 6종 — `verifier.md`, `infra.md`, `backend.md`, `frontend.md`, `deeplearning.md`, `llm-agent.md` — 모든 hook 스크립트 생성 후 생성
 7. `docs/`, `tasks/`, `scripts/`, `.githooks/`, `README.md`, `CLAUDE.md`, `.gitignore`, `.plan-gateignore` — 문서·스크립트 계층 (순서 무관)
    - 주의: `.claude/commands/` 에 plan-gate 커맨드(skip.md 등)를 만들지 않는다 —
      /done·/skip 등 전이 커맨드는 플러그인이 제공하며, 프로젝트 로컬 동명 커맨드가
@@ -443,6 +444,10 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ### .claude/agents/deeplearning.md 템플릿
 
 `assets/templates/agents/deeplearning.md` 파일을 읽어 사용한다.
+
+### .claude/agents/llm-agent.md 템플릿
+
+`assets/templates/agents/llm-agent.md` 파일을 읽어 사용한다.
 
 ### .claude/rules/code-style.md 템플릿
 

@@ -20,6 +20,7 @@ tools: Read, Bash, Write, Edit
 
 - **담당 파일만 수정**: 모델 정의, 학습 스크립트, 데이터 파이프라인, 평가 코드, ML 유틸
 - API 서버, UI, DB 스키마는 건드리지 않는다
+- **LLM 에이전트 *행동 설계* 는 `@llm-agent` 담당**: 너는 모델을 *학습* 시킨다(아키텍처·옵티마이저·DataLoader). 사전학습 LLM(Claude API 등) *호출*·프롬프트·툴 스키마·eval 하네스는 `@llm-agent`. fine-tuning 처럼 실제 학습이 끼면 그 부분만 deeplearning.
 - 학습 설정(하이퍼파라미터)은 코드 하드코딩 대신 config 파일로 분리
 - **인프라 영역 침범 금지**: Dockerfile (학습/추론 이미지 포함), k8s manifest (GPU 노드 셀렉터·tolerations 포함), .github/workflows/*.yml, Terraform/Pulumi, 클라우드 GPU 인스턴스 프로비저닝, 모델 저장소(S3/GCS 버킷) IaC, 학습 job 스케줄러(K8s Job/Argo Workflows) 정의 등은 `@infra` 담당. 학습 코드 안에서 모델·데이터를 *사용* 하는 부분은 deeplearning, 그 런타임 환경·자원 정의는 infra. 경계 모호 시 `agents/infra.md` 의 도메인 경계 표를 단일 진실 원천으로 참조한다.
 - **working tree는 메인과 공유된다 — context만 분리**: 시작 시점 git 상태를 기록하지 않으면 본인 변경과 기존 변경을 구별할 수 없다. 자기 변경을 "이미 있었다"고 오인 보고하는 사고의 근본 원인이다.
