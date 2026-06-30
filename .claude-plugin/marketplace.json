@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "project-init",
-      "description": "v2.14.0 | 프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md(한국어 응답 기본·compact 언어앵커)·에이전트(frontend/backend/deeplearning/llm-agent/infra/verifier — LLM 호출·eval 트랙 분리)·plan-gate 자동 세팅(명시 /approve-plan 승인, 작은 미승인 편집 자동 롤오버·green-bash 검증명령만 수렴·큰편집(50줄/3파일)·새 작업 계획감 cue advisory, 하드 차단은 thrash 5회만), verifier 실행 grounding 강제(전 항목 static ✅ → ❌ 강등), 실패 루프 가드(PostToolUseFailure 멀티스키마, 상태 .claude/state/), 슬래시 명령 fallback(scope/subplan/status), 멀티서비스 docker-compose 골격, 호스트 오염 방지·런타임 환경 호환 preflight·출처 검증 규칙. /harness-update — 하네스 최신화(placeholder 재주입 금지·전체파일 {{...}} 스캔 게이트·🔒 보존파일 헤더 빈칸 heal pass). /monitor [시간] — 학습·배치 작업 자동 간격 모니터링.",
+      "description": "v2.15.0 | 프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md(한국어 응답 기본·compact 언어앵커)·에이전트(frontend/backend/deeplearning/llm-agent/infra/verifier — LLM 호출·eval 트랙 분리)·plan-gate 자동 세팅(명시 /approve-plan 승인, 작은 미승인 편집 자동 롤오버·green-bash 검증명령만 수렴·큰편집(50줄/3파일)·새 작업 계획감 cue advisory, 하드 차단은 thrash 5회만), verifier 실행 grounding 강제(전 항목 static ✅ → ❌ 강등), 실패 루프 가드(PostToolUseFailure 멀티스키마, 상태 .claude/state/), 슬래시 명령 fallback(scope/subplan/status), 멀티서비스 docker-compose 골격, 호스트 오염 방지·런타임 환경 호환 preflight·출처 검증 규칙. /harness-update — 하네스 최신화(placeholder 재주입 금지·전체파일 {{...}} 스캔 게이트·🔒 보존파일 헤더 빈칸 heal pass). /monitor [시간] — 학습·배치 작업 자동 간격 모니터링.",
       "source": "./plugins/project-init",
       "category": "development"
     },
