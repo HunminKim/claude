@@ -10,7 +10,9 @@ compact)를 권장한다 (PostCompact 는 decision control 없는 side-effect
 이벤트). settings.json 배선도 SessionStart.compact 로 등록돼 있다.
 
 동작 단계:
-1. CLAUDE.md 핵심 섹션을 additionalContext 로 Claude context 에 재주입 (워크플로우 규칙 소실 방지)
+1. CLAUDE.md 핵심 섹션(응답 언어 · 알려진 버그/제약 · 규칙 분산 구조)을 additionalContext 로
+   Claude context 에 재주입. 워크플로우/서브에이전트 규칙 본문은 workflow.md 로 분리됐으므로,
+   여기서는 그 인덱스("규칙 분산 구조")를 재주입해 workflow.md 재참조를 유도한다(소실 방지)
 2. .claude/plan_gate_enabled 자동 복구 — /compact 도중 마커가 휘발돼 plan-gate가 침묵하는 사고 방지
    단, 사용자가 명시 비활성화한 경우(`.claude/plan_gate_off_explicit` 마커)는 복구하지 않는다.
 """
@@ -27,10 +29,9 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 
 CRITICAL_SECTIONS = [
-    "## 응답 언어",          # compact 요약 언어로 드리프트하는 지점에서 응답 언어 재고정 (F-006)
-    "## 개발 워크플로우",
-    "## 서브에이전트 전략",
-    "## 알려진 버그 / 제약",
+    "## 응답 언어",            # compact 요약 언어로 드리프트하는 지점에서 응답 언어 재고정 (F-006)
+    "## 알려진 버그 / 제약",   # 프로젝트 고유 제약 — compact 후 소실 시 같은 버그 재발
+    "## 규칙 분산 구조",       # workflow.md/code-style.md 로 분리된 규칙의 위치 인덱스 — 재참조 유도
 ]
 
 def find_project_root() -> Path:
@@ -45,7 +46,9 @@ def extract_sections(claude_md: Path) -> str:
     capturing = False
     for line in lines:
         if line.startswith("## "):
-            capturing = line.strip() in CRITICAL_SECTIONS
+            # 접두 매칭 — 헤딩에 괄호 부연("## 규칙 분산 구조 (…)")이 붙어도 잡는다.
+            # (정확 일치를 쓰면 헤딩 문구가 조금만 바뀌어도 조용히 매칭 실패하는 드리프트 발생)
+            capturing = any(line.strip().startswith(s) for s in CRITICAL_SECTIONS)
         if capturing:
             result.append(line)
     return "\n".join(result).strip()

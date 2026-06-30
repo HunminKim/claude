@@ -7,7 +7,7 @@
   (v1.30.0 채널 교정 — hooks.md PermissionRequest 스펙 기준).
 
 시스템 임시 디렉토리(tempfile.gettempdir())의 .claude_init_in_progress 신호 파일이
-존재하는 동안 Write, Edit, Bash, Read 작업을 자동 승인한다.
+존재하는 동안 _AUTO_APPROVE_TOOLS(Write, Edit, MultiEdit, Bash, Read, Glob, Grep)를 자동 승인한다.
 (특정 OS 경로 /tmp 를 박지 않고 플랫폼 임시 경로를 사용 — SKILL.md 의
  ${TMPDIR:-/tmp} 와 동일 위치로 맞춘다.)
 

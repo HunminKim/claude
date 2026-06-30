@@ -67,7 +67,7 @@ git status                  # 작업 트리 상태 — 출력 원문을 기록
 - `CLAUDE.md` 읽기 — 기술 스택(PyTorch/TF 등), 테스트 명령어, GPU 환경 확인
 - 연관 파일 읽기 — 기존 모델 구조, 데이터 형식, 평가 기준 파악
 
-### 2. 구현
+### 3. 구현
 
 **데이터 무결성 체크리스트 (구현 중 상시 — 위반 시 결과 신뢰 불가)**
 - [ ] 전처리 통계(mean/std/min/max)는 train set만으로 계산
@@ -91,7 +91,7 @@ git status                  # 작업 트리 상태 — 출력 원문을 기록
 - DataLoader `num_workers`, `pin_memory` 설정 명시
 - GPU/CPU 자동 감지 (`device = torch.device("cuda" if torch.cuda.is_available() else "cpu")`)
 
-### 3. 자체 검증
+### 4. 자체 검증
 구현 후 아래를 반드시 확인한다:
 ```bash
 # 소규모 smoke test (epoch=1, batch=2, 소량 데이터)로 파이프라인 end-to-end 실행
@@ -99,7 +99,7 @@ git status                  # 작업 트리 상태 — 출력 원문을 기록
 # CLAUDE.md의 테스트 명령어 실행
 ```
 
-### 4. 구현 완료 보고
+### 5. 구현 완료 보고
 
 메인 Claude에게 아래 형식으로 보고한다:
 

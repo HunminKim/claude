@@ -67,11 +67,12 @@ try:
     with open(root / 'docs' / 'constraints.yaml') as f:
         data = yaml.safe_load(f) or {}
     p = data.get('temp_patterns', {})
-    prefixes = p.get('prefixes', ['tmp_', 'scratch_', 'debug_'])
-    suffixes = p.get('suffixes', ['_tmp', '_scratch', '_debug'])
+    # debug_/_debug 는 기본 제외 — 정식 소스(*_debug.h 등)와 오탐. 잡으려면 constraints.yaml 에 opt-in.
+    prefixes = p.get('prefixes', ['tmp_', 'scratch_'])
+    suffixes = p.get('suffixes', ['_tmp', '_scratch'])
 except Exception:
-    prefixes = ['tmp_', 'scratch_', 'debug_']
-    suffixes = ['_tmp', '_scratch', '_debug']
+    prefixes = ['tmp_', 'scratch_']
+    suffixes = ['_tmp', '_scratch']
 
 staged = subprocess.run(
     ['git', 'diff', '--cached', '--name-only'],

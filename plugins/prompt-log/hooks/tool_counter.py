@@ -4,7 +4,7 @@
 
 출력 채널: 사용자전용 (exit 0 + stderr — 저장 실패 경고만. 평시 무출력)
 
-matcher: Edit|Write|MultiEdit|Bash|Task
+matcher: Edit|Write|MultiEdit|Bash|Agent|Task
 
 동작:
 1. 동의 검사. 미동의면 exit 0

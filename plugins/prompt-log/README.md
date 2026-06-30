@@ -101,7 +101,7 @@
 | 훅 이벤트 | 스크립트 | 역할 |
 |---|---|---|
 | UserPromptSubmit | `prompt_logger.py` | 새 prompt 도착 → 이전 active flush + 새 active 시작 |
-| PreToolUse (Edit\|Write\|MultiEdit\|Bash\|Task) | `tool_counter.py` | tools 카운터 누적, 영향 파일 추가 |
+| PreToolUse (Edit\|Write\|MultiEdit\|Bash\|Agent\|Task) | `tool_counter.py` | tools 카운터 누적, 영향 파일 추가 |
 | SessionEnd | `session_finalize.py` | 마지막 active flush |
 
 ## 동의 후 활성화

@@ -74,16 +74,16 @@ rm .claude/plan_gate_enabled
 | `.claude/hooks/verifier_sandbox.py` | `.claude/hooks/verifier_sandbox.py` | diff 확인 후 업데이트 (없으면 신규 생성) |
 | `.plan-gateignore` | `.plan-gateignore` | 없으면 신규 생성 (있으면 보존 — 사용자 편집 파일) |
 | `.gitignore` | `gitignore` | 없으면 신규 생성. 있으면 비밀 차단 패턴(.env 계열, *.pem/*.key, credentials.json, .claude/state/) 누락분만 append |
-
-> **잔존물 정리**: 프로젝트에 `.claude/commands/skip.md` 가 있으면 **삭제를 권고**한다
-> (구버전 스캐폴드 산물). v1.29.0부터 /done·/skip 등 전이 커맨드는 플러그인이 제공하며,
-> 프로젝트 로컬 동명 커맨드는 플러그인 커맨드를 가려(shadow) 무력화할 수 있다.
 | `.githooks/pre-commit` | `.githooks/pre-commit` | diff 확인 후 업데이트 |
 | `.githooks/pre-push` | `.githooks/pre-push` | diff 확인 후 업데이트 |
 | `.githooks/post-checkout` | `.githooks/post-checkout` | diff 확인 후 업데이트 |
 | `scripts/validate_arch.py` | `scripts/validate_arch.py` | diff 확인 후 업데이트 |
 | `.claude/settings.json` | `.claude/settings.json` | diff 확인 후 업데이트 |
 | `.claude/rules/code-style.md` | `.claude/rules/code-style.md` | diff 확인 후 업데이트 |
+
+> **잔존물 정리**: 프로젝트에 `.claude/commands/skip.md` 가 있으면 **삭제를 권고**한다
+> (구버전 스캐폴드 산물). v1.29.0부터 /done·/skip 등 전이 커맨드는 플러그인이 제공하며,
+> 프로젝트 로컬 동명 커맨드는 플러그인 커맨드를 가려(shadow) 무력화할 수 있다.
 
 > **처리 방식 설명**
 > - **diff 확인 후 업데이트**: 현재 파일과 새 템플릿을 비교한다. 내용이 같으면 "(변경 없음)" 으로 스킵한다. 다르면 3단계 보고에서 "사용자 결정 필요" 로 분류한다.

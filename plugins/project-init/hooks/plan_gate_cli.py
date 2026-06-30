@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """plan-gate CLI — 슬래시 커맨드 백엔드 + UserPromptSubmit dispatcher 공용.
 
-usage: plan_gate_cli.py {approve|done|rollback|retry|replan|status}
+usage: plan_gate_cli.py {approve|done|skip|skip-verify|rollback|retry|replan|status
+                         |on|off|no-git|use-git|scope-off|scope-shadow|scope-enforce|subplan}
+(실제 액션 목록은 COMMANDS dict 가 단일 진실 원천 — usage 문자열은 거기서 생성된다)
 
 출력 채널: 사용자전용 (훅이 아닌 CLI — stdout 사람용 메시지.
 UserPromptSubmit 경유 시 plan_approval.py 가 출력을 그대로 전달)
 
 각 액션은 idempotent하게 동작한다 (같은 결과를 반복 호출해도 안전).
-exit 0: 성공, exit 1: 잘못된 상태 전이.
+exit 0: 성공, exit 2: usage 오류 / 프로젝트 루트 없음 / plan-gate 관리 대상 아님.
 """
 
 from __future__ import annotations

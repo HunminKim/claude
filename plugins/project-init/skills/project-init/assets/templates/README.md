@@ -13,7 +13,7 @@
 ```bash
 # Git hook 활성화 (최초 1회)
 git config core.hooksPath .githooks
-chmod +x .githooks/pre-commit .githooks/pre-push
+chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ```
 
 ## 기능

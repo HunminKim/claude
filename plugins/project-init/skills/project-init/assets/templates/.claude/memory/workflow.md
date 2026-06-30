@@ -271,7 +271,7 @@ src/payment/**       ← scope 보다 우선하는 금지 목록
 /plan-gate-scope-off      → 강제 완전 끄기 (환기조차 없음, 매니페스트는 기록만)
 ```
 - plan-gate 운영 파일(tasks/todo.md·.claude/**·docs/.verifier_result.json)은 무조건 허용
-- layer-2(Bash 변경 롤백)는 git 저장소에서만 동작 — 비-git 은 감지·경고만
+- layer-2(Bash 변경 롤백)는 git 저장소에서만 동작 — 비-git 은 layer-2 no-op. 단 layer-1(스코프 밖 Edit 거부)은 git 무관 항상 작동
 - **enforce 는 게이트가 닫히면(`/done`·`/skip`·`/rollback`) 자동으로 shadow 로 복귀**한다 (한 작업용 enforce 가 다음 작업에서 신규 파일을 삭제하는 stale 사고 방지). 계속 강제하려면 다음 사이클에서 다시 `/plan-gate-scope-enforce`. 자동으로 enforce 를 *켜는* 규칙은 없다 — 파괴적 강제는 명시 opt-in 만.
 
 ### 커맨드 요약표

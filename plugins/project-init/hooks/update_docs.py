@@ -9,9 +9,12 @@
   못해 환기가 무효가 된다 (v1.28.0 채널 분리 수정)
 
 동작 단계:
-verifier가 docs/.verifier_result.json 을 생성하면
-자동으로 checklist.md, completion_report.md, technical_doc.md 를 업데이트한다.
-이 파일은 verifier 외에 아무도 건드려서는 안 된다.
+verifier가 `*.verifier_result.json`(파일명 suffix 매칭 — docs/ 위치 무관)을 생성하면:
+1. 실행 근거(evidence)가 없으면 verdict ✅→❌ 격하
+2. checklist.md, completion_report.md, technical_doc.md 자동 갱신
+3. ❌ 이슈가 있으면 CLAUDE.md "알려진 버그 / 제약" 섹션에 반영
+4. plan-gate gate 상태 갱신 + 사용자 결정 유도 advisory(환기) 출력
+이 결과 파일은 verifier 외에 아무도 건드려서는 안 된다.
 """
 
 from __future__ import annotations

@@ -2,8 +2,9 @@
 """PreToolUse hook (matcher: Edit|Write|MultiEdit|NotebookEdit) — plan-gate 강제.
 
 출력 채널:
-- 차단 (D1 lock / 트리거 / scope creep): exit 2 + stderr — Claude blocking error 주입
-- 환기 (계획 감지→승인 유도 / stale gate / 24h 잔류 / hot-file / soft hint / multi-edit hint): exit 0 + stdout hookSpecificOutput.additionalContext JSON — Claude context 주입
+- 차단 (D1 lock / 임계 트리거 / approved thrash): exit 2 + stderr — Claude blocking error 주입
+- deny (scope enforce layer-1 — 스코프 밖 Edit 거부): exit 0 + stdout hookSpecificOutput.permissionDecision="deny" JSON
+- 환기 (계획 감지→승인 유도 / stale gate / 24h 잔류 / hot-file / soft hint / multi-edit hint / scope shadow 위반): exit 0 + stdout hookSpecificOutput.additionalContext JSON — Claude context 주입
 - 사용자 터미널 전용 (.plan-gateignore 자동 추가): exit 0 + stderr
 
 동작 (D1/D2/D5/D7 + UX 풍부화):
@@ -16,7 +17,9 @@
        - exit 2 + stderr 풍부한 한국어 안내 (차단)
        - 첫 차단이면 plan-gate 소개도 함께 표시 (dismissable)
        (체크포인트는 1번에서 이미 캡처 — 트리거 시점 별도 stash/tag 없음)
-  5. approved 상태에서 scope creep(post_approval limit) 도달 시 차단
+  5. approved 상태에서 같은 파일 thrash(수렴 없는 반복 편집) 도달 시 차단
+     (post-approval 볼륨 scope-creep 차단(v1)은 제거됨 — edit_count_post_approval 은
+      이제 verifier_remind 트리거로만 쓰인다)
   6. verified+❌ 미해결 상태에서 새 Edit 시도하면 D1 lock으로 차단
 
 환기 메시지는 list 에 누적했다가 통과 분기에서 한 번에 JSON 출력한다.

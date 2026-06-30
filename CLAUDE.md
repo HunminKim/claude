@@ -5,6 +5,11 @@
 > `plugins/project-init/skills/.../templates/CLAUDE.md` (생성될 프로젝트용
 > placeholder)와 혼동 금지.
 
+## 응답 언어
+
+이 저장소에서 작업할 때 사용자에게 보내는 모든 응답은 **한국어**로 작성한다.
+(코드·식별자·로그 문자열 등 기술적으로 영어가 필요한 부분은 예외.)
+
 ## 디렉토리
 
 ```
@@ -63,7 +68,7 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
     해소되지 않는 조건에서 stdin `stop_hook_active` 미체크 시 **최대 8회**(Claude Code 하드캡)까지
     턴이 연장된다 — 자리 비운 사용자에게 토큰·시간 낭비 + 의도치 않은 행동. 따라서 **Stop 훅은
     반드시 `stop_hook_active == true` 면 아무 JSON 없이 `exit 0` 으로 억제**하고, 조건 충족 시에만
-    주입한다. (`plan_gate_stop_alert`·`cleanup_suggest` 가 이 가드를 가진 참조 구현.)
+    주입한다. (참조 구현: 활성 훅 `plan_gate_stop_alert`, 그리고 템플릿 측 `skills/.../templates/.claude/hooks/cleanup_suggest.py` — 후자는 활성 hooks 디렉토리엔 없으니 grep 시 주의.)
 - **사용자 터미널 전용** (Claude 행동 영향 없음, 사용자 정보 알림): `exit 0 + stderr`
   - 사용자 터미널에만 보임 — Claude 는 못 봄
   - 예: `plan_gate_gc` (SessionEnd 시점 정보 — Claude 주입 불가 이벤트)
@@ -76,9 +81,8 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 ## 코드 품질 (PostToolUse 자동)
 
 `.claude/hooks/ruff_check.py`가 Edit/Write/MultiEdit 직후 자동 실행:
-1. `ruff format <file>` 정렬
-2. `ruff check --fix <file>` 자동 수정
-3. 잔존 위반은 stderr + exit 2 → Claude가 다음 턴에 수정
+1. `ruff check --fix <file>` 자동 수정 (import 정렬 등). `ruff format`은 Surgical Changes 원칙에 따라 비활성화 — 인접 코드 재포맷 금지
+2. 잔존 위반은 stderr + exit 2 → Claude가 다음 턴에 수정
 
 ruff 미설치 시 graceful skip(세션당 1회 안내). 설정은 `pyproject.toml [tool.ruff]`.
 룰셋은 보수적 — `E/W/F/I/B`만. 새 룰 추가 전 기존 훅에 폭격 가는지 측정.

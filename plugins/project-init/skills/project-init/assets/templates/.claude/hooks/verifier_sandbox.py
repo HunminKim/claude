@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """PreToolUse hook — production 경로 쓰기 의심 명령 경고.
 
+출력 채널: 비차단 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
+
 Bash 명령이 production 경로(runs/, outputs/ 등)에 직접 쓰기를 시도하면
-stderr에 경고를 출력하고 exit 2로 Claude 컨텍스트에 주입한다.
+경고를 additionalContext 로 Claude 컨텍스트에 주입한다.
 차단하지 않는다 — 메인이 인지하고 판단하도록 알리는 것이 목적이다.
+(PreToolUse 에서 exit 2 는 명령을 deny 하므로, 비차단 환기는 exit 0 + additionalContext 로 한다.)
 
 감지 범위: shell redirect, Python open(쓰기 모드), 주요 직렬화 함수.
 간접 쓰기(project 내부 함수 경유)는 감지 불가 — verifier.md 원칙으로 보완.
@@ -86,14 +89,21 @@ def main() -> int:
         return 0
 
     preview = command[:200] + ("..." if len(command) > 200 else "")
-    sys.stderr.write(
-        "\n[verifier-sandbox] ⚠️  production 경로 쓰기 의심 명령 감지\n"
+    msg = (
+        "[verifier-sandbox] ⚠️  production 경로 쓰기 의심 명령 감지\n"
         f"  감지: {', '.join(matched)}\n"
         f"  명령: {preview}\n"
         "  verifier라면 /tmp/verifier_$$/ 격리 디렉토리를 사용하세요.\n"
-        "  메인 Claude의 정상 호출이라면 무시하세요.\n\n"
+        "  메인 Claude의 정상 호출이라면 무시하세요."
     )
-    return 2
+    advisory = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": msg,
+        }
+    }
+    sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
