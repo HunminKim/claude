@@ -3,6 +3,11 @@
 
 출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
 
+Layer 0 — 새 요청 진입(열린 게이트 없음) 시 '계획 필요 여부 자가 판단' cue:
+  게이트가 없거나 닫힌 상태에서 새 프롬프트가 들어오면, 클로드가 작업 성격을
+  스스로 판단하도록 가벼운 환기를 1회 주입한다(slash·짧은 프롬프트·스로틀 제외).
+  정책 본문은 workflow.md 상주 — 여기선 재무장만. 강제 아님(클로드 판단이 1차).
+
 Layer 1 — 시간 기반 자동 done (신뢰도 높음):
   approved/created 게이트의 last_edit_ts로부터 BOUNDARY_TIMEOUT_MINUTES 이상 경과하면
   자동으로 done 처리한다. (점심·자리 비움 등 긴 공백 후 새 작업 복귀 대응)
@@ -41,6 +46,20 @@ def emit_advisory(msg: str) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False))
 
 
+def _cue_due(state: dict) -> bool:
+    """plan-worthiness cue 스로틀: 직전 cue 로부터 임계 분(分) 경과했으면 True."""
+    ts = state.get("last_semantic_cue_ts")
+    if not ts:
+        return True
+    try:
+        last = datetime.fromisoformat(ts)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - last) >= timedelta(minutes=lib.SEMANTIC_CUE_THROTTLE_MIN)
+    except Exception:
+        return True
+
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -54,7 +73,20 @@ def main() -> int:
     state = lib.load_state(root)
     gate = lib.current_gate(state)
 
-    if gate is None or gate["state"] not in ("approved", "created"):
+    prompt_text = (payload.get("message") or payload.get("prompt") or "").strip()
+    is_slash = prompt_text.startswith("/")
+
+    # ── 새 요청 진입 (열린 게이트 없음) → 계획 필요 여부 자가 판단 cue ──────
+    # 게이트가 없거나 이미 닫힌(새 작업) 상태에서만. slash·짧은 프롬프트·스로틀로
+    # 매 프롬프트 도배를 막는다. 강제 아닌 환기 — 클로드 판단이 1차, 정책은 workflow.md.
+    if gate is None or gate["state"] in ("done", "rolled_back"):
+        if not is_slash and len(prompt_text) >= lib.MIN_PROMPT_CHARS and _cue_due(state):
+            state["last_semantic_cue_ts"] = lib.now_iso()
+            lib.save_state(root, state)
+            emit_advisory(lib.format_plan_worthiness_cue())
+        return 0
+
+    if gate["state"] not in ("approved", "created"):
         return 0
 
     edit_count = gate.get("edit_count", 0)
@@ -96,8 +128,7 @@ def main() -> int:
         return 0
 
     # 커맨드 입력(/done, /replan 등)이면 사용자 의도 명확 — 스킵
-    prompt_text = payload.get("message") or payload.get("prompt") or ""
-    if prompt_text.strip().startswith("/"):
+    if is_slash:
         return 0
 
     if gate["state"] == "approved":
@@ -116,13 +147,9 @@ def main() -> int:
             f'   2) 완료 우선 — 지금 작업 끝낸 뒤 /done, 그다음 새 요청 시작"\n\n'
             f"  답변 전 코드 작성·파일 수정을 시작하지 마세요.\n\n"
         )
-    else:
-        # state == "created": 트리거 전이지만 편집이 쌓인 상태
-        emit_advisory(
-            f"[gate] created — 편집 {edit_count}회 누적 중\n"
-            f"  ★ 이전 작업이 완료됐으면 반드시 /done 을 입력하세요. 입력하지 않으면\n"
-            f"    카운트가 계속 누적되어 새 작업이 차단될 수 있습니다.\n\n"
-        )
+    # state == "created": 미승인 게이트엔 /done 을 강요하지 않는다 — 작은 편집은
+    # approve·done 둘 다 불요. 닫기는 자동 롤오버(green Bash 수렴 / 위 Layer 1 idle)가
+    # 담당한다. 수렴 없는 반복만 plan_gate 의 5회 트리거가 차단한다.
 
     return 0
 

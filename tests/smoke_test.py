@@ -120,8 +120,11 @@ def make_project(base: Path, name: str) -> Path:
     return p
 
 
-def edit_payload(tool: str, file: Path) -> dict:
-    return {"tool_name": tool, "tool_input": {"file_path": str(file)}}
+def edit_payload(tool: str, file: Path, **content) -> dict:
+    """기본은 file_path 만. content kwargs(new_string/old_string/content/edits)로
+    편집 규모 신호를 주입할 수 있다 (큰 변경 환기 테스트용)."""
+    ti = {"file_path": str(file), **content}
+    return {"tool_name": tool, "tool_input": ti}
 
 
 def set_gate(project: Path, **fields) -> None:
@@ -1106,6 +1109,171 @@ def t_green_bash_reset(base: Path) -> None:
     check("실패 Bash는 리셋 안 함", before is not None and before == after, f"before={before} after={after}")
 
 
+def t_created_rollover(base: Path) -> None:
+    """created 게이트 자동 롤오버 — green Bash 수렴 후 다음 편집에서 조용히 닫고 새로 연다.
+
+    작은 미승인 편집은 approve·done 둘 다 불요. 편집→통과 Bash→새 편집 경계에서
+    이전 게이트가 자동 done 되고 새 게이트가 열린다(/done 강요 제거). 수렴 신호가
+    없으면 롤오버하지 않고(동일 게이트 누적), created /done 환기도 더는 뜨지 않는다.
+    """
+    print("[25b] created 자동 롤오버 (green Bash 수렴) + /done 환기 제거")
+    gate_hook = HOOKS / "plan_gate.py"
+    bash_hook = HOOKS / "plan_gate_bash.py"
+
+    p = make_project(base, "created_rollover")
+    run_hook(gate_hook, edit_payload("Edit", p / "a.py"), p)
+    g1 = get_gate(p)
+    old_id = g1["id"]
+    check("created 게이트 생성", g1["state"] == "created" and g1["edit_count"] == 1,
+          f"state={g1['state']} edits={g1['edit_count']}")
+
+    bash_ok = {"tool_name": "Bash", "tool_response": {"exit_code": 0}, "tool_input": {"command": "pytest"}}
+    run_hook(bash_hook, bash_ok, p)
+
+    run_hook(gate_hook, edit_payload("Edit", p / "b.py"), p)
+    sp = json.loads((p / ".claude" / "state" / "plan_gate.json").read_text())
+    old_gate = sp["gates"][old_id]
+    new_gate = get_gate(p)
+    check("수렴 후 이전 created 게이트 자동 done", old_gate["state"] == "done", f"old={old_gate['state']}")
+    check("새 게이트 열림 + edit_count=1",
+          new_gate["id"] != old_id and new_gate["edit_count"] == 1,
+          f"new_id={new_gate['id']!r} edits={new_gate['edit_count']}")
+
+    # 음성 대조: 수렴 신호 없으면 롤오버 안 함 (동일 게이트 누적)
+    p2 = make_project(base, "created_no_rollover")
+    run_hook(gate_hook, edit_payload("Edit", p2 / "a.py"), p2)
+    keep_id = get_gate(p2)["id"]
+    run_hook(gate_hook, edit_payload("Edit", p2 / "b.py"), p2)
+    g2 = get_gate(p2)
+    check("수렴 없으면 롤오버 안 함 (동일 게이트 누적)",
+          g2["id"] == keep_id and g2["edit_count"] == 2, f"id={g2['id']!r} edits={g2['edit_count']}")
+
+    # /done 환기 제거: created 가 3회 누적돼도 stale-gate 환기 미출력
+    out = run_hook(gate_hook, edit_payload("Edit", p2 / "c.py"), p2).stdout
+    check("created /done 환기 제거됨", "닫히지 않았습니다" not in out, f"out={out[-160:]!r}")
+
+
+def t_large_edit_advisory(base: Path) -> None:
+    """큰 미승인 변경 → /approve-plan 권장 (비차단 환기, 게이트당 1회).
+
+    규모는 차단 기준이 아니라 환기 기준이다(과거 볼륨 차단 v1 오탐 회피). created +
+    비자동승인에서 단일 편집 코드량(>=50) 또는 코드파일 fan-out(>=3)이면 1회 환기.
+    주석/공백만·작은 편집·approved 게이트는 환기하지 않는다.
+    """
+    print("[25c] 큰 미승인 변경 → /approve-plan 권장 (비차단 환기)")
+    hook = HOOKS / "plan_gate.py"
+    MSG = "변경 규모가 큽니다"
+    big = "\n".join(f"x{i} = {i}" for i in range(100))  # 100 코드 줄
+
+    p = make_project(base, "large_edit")
+    r = run_hook(hook, edit_payload("Write", p / "big.py", content=big), p)
+    check("큰 단일 편집 → 환기 출력 (비차단)", r.returncode == 0 and MSG in r.stdout,
+          f"rc={r.returncode} out={r.stdout[-160:]!r}")
+    check("large_advisory_seen 기록", get_gate(p).get("large_advisory_seen") is True, "flag 미설정")
+    r2 = run_hook(hook, edit_payload("Write", p / "big2.py", content=big), p)
+    check("환기 1회 dedup (재출력 없음)", MSG not in r2.stdout, f"out={r2.stdout[-120:]!r}")
+
+    pc = make_project(base, "large_comment")
+    comments = "\n".join(f"# note line {i}" for i in range(120))
+    r = run_hook(hook, edit_payload("Write", pc / "c.py", content=comments), pc)
+    check("주석-only 큰 편집 → 환기 없음", MSG not in r.stdout, f"out={r.stdout[-120:]!r}")
+
+    ps = make_project(base, "small_edit")
+    r = run_hook(hook, edit_payload("Edit", ps / "s.py", new_string="a = 1\nb = 2\n"), ps)
+    check("작은 편집 → 환기 없음", MSG not in r.stdout, f"out={r.stdout[-120:]!r}")
+
+    pf = make_project(base, "fanout")
+    outs = [run_hook(hook, edit_payload("Edit", pf / f"m{i}.py", new_string="z = 1\n"), pf).stdout
+            for i in range(3)]
+    check("코드 파일 fan-out 3개 → 3번째 환기",
+          MSG in outs[2] and all(MSG not in o for o in outs[:2]), f"out3={outs[2][-120:]!r}")
+
+    pa = make_project(base, "large_approved")
+    run_hook(hook, edit_payload("Edit", pa / "a.py", new_string="q=1\n"), pa)
+    set_gate(pa, state="approved", large_advisory_seen=False)
+    r = run_hook(hook, edit_payload("Write", pa / "a.py", content=big), pa)
+    check("approved 게이트 큰 편집 → 환기 없음 (created 전용)", MSG not in r.stdout, f"out={r.stdout[-120:]!r}")
+
+
+def t_verification_reset(base: Path) -> None:
+    """green-bash 수렴 신호 = '검증 명령'(테스트/빌드/린트)의 성공만 인정.
+
+    ls·git status 같은 읽기전용 성공은 thrash 카운터를 리셋하지 않는다 — 아무 exit-0
+    명령이 수렴으로 인정돼 thrash·롤오버가 무력화되던 누수를 막는다.
+    """
+    print("[25d] green-bash 수렴 = 검증 명령만 (읽기전용 제외)")
+    gate_hook = HOOKS / "plan_gate.py"
+    bash_hook = HOOKS / "plan_gate_bash.py"
+
+    def green(proj: Path, cmd: str) -> None:
+        run_hook(bash_hook, {"tool_name": "Bash", "tool_response": {"exit_code": 0},
+                             "tool_input": {"command": cmd}}, proj)
+
+    p = make_project(base, "verify_noreset")
+    f = p / "app.py"
+    for _ in range(3):
+        run_hook(gate_hook, edit_payload("Edit", f), p)
+    green(p, "ls -la")
+    g = get_gate(p)
+    check("비검증 green(ls) → 카운터 유지",
+          (g.get("file_edit_counts") or {}).get(str(f)) == 3, f"counts={g.get('file_edit_counts')}")
+    check("비검증 green(ls) → 수렴 ts 미기록", not g.get("last_successful_bash_ts"),
+          f"ts={g.get('last_successful_bash_ts')}")
+    rcs = [run_hook(gate_hook, edit_payload("Edit", f), p).returncode for _ in range(2)]
+    check("ls 리셋 안 됨 → 5회째 thrash 차단", rcs[-1] == 2, f"rcs={rcs}")
+
+    p2 = make_project(base, "verify_reset")
+    f2 = p2 / "svc.py"
+    for _ in range(3):
+        run_hook(gate_hook, edit_payload("Edit", f2), p2)
+    green(p2, "python -m pytest tests/")
+    g2 = get_gate(p2)
+    check("검증 green(pytest) → 카운터 리셋", not (g2.get("file_edit_counts") or {}),
+          f"counts={g2.get('file_edit_counts')}")
+    check("검증 green(pytest) → 수렴 ts 기록", bool(g2.get("last_successful_bash_ts")), "ts 없음")
+
+
+def t_plan_worthiness_cue(base: Path) -> None:
+    """새 요청 진입(열린 게이트 없음) → 계획 필요 여부 자가 판단 cue (비차단).
+
+    게이트 없을 때 긴 비-slash 프롬프트면 1회 환기. slash·짧은 프롬프트·스로틀은 생략.
+    열린 게이트(created/approved)가 있으면 다른 레이어가 담당하므로 cue 안 뜸.
+    """
+    print("[25e] 새 요청 진입 → 계획 필요 여부 자가 판단 cue")
+    hook = HOOKS / "detect_task_boundary.py"
+    MSG = "진행하며 범위를 파악"
+
+    def submit(proj: Path, text: str):
+        return run_hook(hook, {"prompt": text}, proj)
+
+    p = make_project(base, "cue_fresh")
+    r = submit(p, "로그인 토큰 만료 처리를 추가하고 싶어 어떻게 하면 좋을까")
+    check("게이트 없음 + 긴 프롬프트 → cue 출력", r.returncode == 0 and MSG in r.stdout,
+          f"rc={r.returncode} out={r.stdout[-160:]!r}")
+
+    p2 = make_project(base, "cue_slash")
+    r = submit(p2, "/done")
+    check("slash 입력 → cue 없음", MSG not in r.stdout, f"out={r.stdout[-120:]!r}")
+
+    p3 = make_project(base, "cue_short")
+    r = submit(p3, "ㅇㅋ 고고")
+    check("짧은 프롬프트 → cue 없음", MSG not in r.stdout, f"out={r.stdout[-120:]!r}")
+
+    p4 = make_project(base, "cue_throttle")
+    r = submit(p4, "사용자 인증 미들웨어를 리팩터링하려고 하는데 단계가 어떻게 될까")
+    check("첫 cue 출력 + 스로틀 ts 기록",
+          MSG in r.stdout and bool(json.loads((p4 / ".claude" / "state" / "plan_gate.json").read_text()).get("last_semantic_cue_ts")),
+          f"out={r.stdout[-120:]!r}")
+    r2 = submit(p4, "그리고 비밀번호 재설정 플로우도 같이 보고 싶은데 어떻게 할까")
+    check("스로틀 내 재요청 → cue 없음", MSG not in r2.stdout, f"out={r2.stdout[-120:]!r}")
+
+    # 열린 created 게이트가 있으면 cue 안 뜸 (다른 레이어 담당)
+    p5 = make_project(base, "cue_active_gate")
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p5 / "a.py"), p5)
+    r = submit(p5, "이 기능에 예외 처리를 추가하고 싶은데 어디를 봐야 할까")
+    check("열린 게이트 있으면 cue 없음", MSG not in r.stdout, f"out={r.stdout[-120:]!r}")
+
+
 def t_approved_thrash(base: Path) -> None:
     """승인 후에도 같은 파일 반복(thrash) 차단 — scope-creep 볼륨 차단의 대체(D9).
 
@@ -1122,7 +1290,7 @@ def t_approved_thrash(base: Path) -> None:
     rcs = [run_hook(gate_hook, edit_payload("Edit", f), p).returncode for _ in range(5)]
     check("승인 후 1~4회 미차단", all(rc == 0 for rc in rcs[:4]), f"rcs={rcs}")
     check("승인 후 5회째 thrash 차단", rcs[4] == 2, f"rcs={rcs}")
-    run_hook(bash_hook, {"tool_name": "Bash", "tool_response": {"exit_code": 0}, "tool_input": {"command": "t"}}, p)
+    run_hook(bash_hook, {"tool_name": "Bash", "tool_response": {"exit_code": 0}, "tool_input": {"command": "pytest"}}, p)
     rc2 = run_hook(gate_hook, edit_payload("Edit", f), p).returncode
     check("green Bash 리셋 후 통과", rc2 == 0, f"rc={rc2}")
 
@@ -2078,6 +2246,10 @@ def main() -> int:
         t_plan_gate_no_git_optout(base)
         t_checkpoint_backend(base)
         t_green_bash_reset(base)
+        t_created_rollover(base)
+        t_large_edit_advisory(base)
+        t_verification_reset(base)
+        t_plan_worthiness_cue(base)
         t_approved_thrash(base)
         t_manifest_parse(base)
         t_transition_approve(base)

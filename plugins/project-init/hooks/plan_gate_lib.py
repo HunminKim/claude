@@ -31,6 +31,17 @@ from typing import Any
 TRIGGER_REPEAT_RATIO = 5   # 단일 파일 편집 횟수 임계값: 같은 코드 파일 5회 이상 반복 시 차단
 GC_MAX_AGE_DAYS = 30
 
+# 큰 미승인 변경 → /approve-plan 권장(비차단 advisory) 임계. 규모는 "계획 필요"의
+# 신뢰 프록시가 아니므로(3줄도 위험·300줄 리네임은 사소) 차단이 아닌 환기 1회만 한다.
+LARGE_OP_LINES = 50    # 단일 편집이 추가하는 코드 줄(공백·주석 제외) 이 값 이상이면 환기
+LARGE_FAN_FILES = 3    # 미승인 게이트에서 건드린 코드 파일 수가 이 값 이상이면 환기
+
+# 새 요청 진입 시 "계획 필요 여부 자가 판단" cue (열린 게이트 없을 때만, detect_task_boundary).
+# 매 프롬프트 도배 방지: 짧은 프롬프트·slash 는 제외하고, 스로틀로 빈도 제한한다.
+# 정책 본문은 workflow.md 가 상주로 보유 — 훅 cue 는 가벼운 재무장만 한다.
+MIN_PROMPT_CHARS = 25            # 이 길이 미만 프롬프트(연속·짧은 응답)는 cue 생략
+SEMANTIC_CUE_THROTTLE_MIN = 15   # 직전 cue 로부터 이 분(分) 이내면 재출력 생략
+
 # 자동으로 .plan-gateignore에 추가할 후보 패턴 (파일명 기준, fnmatch)
 _AUTO_IGNORE_CANDIDATES: list[tuple[str, str]] = [
     ("*.md", "문서"),
@@ -601,6 +612,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "do_not_touch": [],                    # 매니페스트 do-not-touch 패턴 (deny-first)
         "manifest_sha256": None,               # 매니페스트 블록 원문 sha256 (TOCTOU 고정)
         "verifier_status": None,
+        "large_advisory_seen": False,          # 큰 미승인 변경 환기 1회 dedup
     }
 
 
@@ -701,6 +713,82 @@ def _unique_code_files(gate: dict[str, Any]) -> int:
 
 def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
     return _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
+
+
+def converged_since_last_edit(gate: dict[str, Any]) -> bool:
+    """직전 편집 이후 green Bash(수렴 신호, D9)가 발생했는지.
+
+    created(미승인) 게이트의 자동 롤오버 판정용: 작은 미승인 편집은 approve·done
+    둘 다 불요이므로, 편집 뒤 통과한 Bash 가 작업을 사실상 마감했다고 보고
+    다음 편집 때 게이트를 조용히 닫는다(닫는 신호를 사람이 칠 필요 없음).
+    last_edit_ts 가 없으면(편집 0회) 롤오버 대상 아님 → False.
+    """
+    edited = gate.get("last_edit_ts")
+    converged = gate.get("last_successful_bash_ts")
+    if not edited or not converged:
+        return False
+    return converged > edited  # ISO 8601 문자열은 사전순=시간순
+
+
+# ── 검증 명령 판별 (green-bash 수렴 신호 필터) ───────────────────────────
+# 아무 exit-0 명령(ls·cat·git status)이 수렴으로 인정되면 thrash·롤오버 신호가
+# 의미를 잃는다. 테스트·빌드·린트·타입체크 등 "코드를 검증하는" 명령의 성공만
+# 수렴으로 본다. 단어형 러너는 \b 로, 서브커맨드 필요한 런처(go/cargo/npm…)는
+# 동사와 함께 매칭한다. 미인식 시 False(=리셋 안 함) — fail-closed 로 신호를 보수.
+_VERIFY_RE = re.compile(
+    r"\b(pytest|unittest|nosetests|tox|jest|vitest|mocha|playwright|cypress|"
+    r"rspec|phpunit|mypy|pyright|ruff|flake8|pylint|eslint|tslint|tsc|rubocop|"
+    r"ctest|gtest|bazel|make|gradle|gradlew|mvn|cmake)\b",
+    re.IGNORECASE,
+)
+_VERIFY_COMPOUND_RE = re.compile(
+    r"\b(go\s+(test|build|vet)|"
+    r"cargo\s+(test|build|check|clippy)|"
+    r"(npm|yarn|pnpm)\s+(run\s+)?(test|build|lint|typecheck|check)|"
+    r"dotnet\s+(test|build)|"
+    r"rake\s+(test|spec)|"
+    r"python3?\s+-m\s+(pytest|unittest|tox|mypy|ruff|pylint|flake8))",
+    re.IGNORECASE,
+)
+
+
+def is_verification_command(command: str) -> bool:
+    """Bash 명령이 테스트/빌드/린트 등 코드 '검증' 명령이면 True (수렴 신호 자격)."""
+    if not command:
+        return False
+    return bool(_VERIFY_RE.search(command) or _VERIFY_COMPOUND_RE.search(command))
+
+
+# ── 편집 규모 추정 (큰 미승인 변경 환기용) ───────────────────────────────
+_COMMENT_PREFIX_RE = re.compile(r"^\s*(#|//|/\*|\*|<!--|--|;)")
+
+
+def _code_lines(text: str) -> int:
+    """공백·단순 prefix 주석을 제외한 줄 수. 문자열 리터럴 안 주석은 보수적으로 코드로 셈."""
+    n = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if _COMMENT_PREFIX_RE.match(line):
+            continue
+        n += 1
+    return n
+
+
+def edit_added_code_lines(tool_name: str, tool_input: dict[str, Any], root: Path | None) -> int:
+    """이 편집이 추가하는 코드 줄 수 추정. doc 파일은 0. 미지원/누락 필드는 0(fail-open)."""
+    target = extract_target_file(tool_name, tool_input, project_root=root)
+    if target and is_doc_path(target):
+        return 0
+    if tool_name == "Edit":
+        return _code_lines(tool_input.get("new_string") or "")
+    if tool_name == "Write":
+        return _code_lines(tool_input.get("content") or "")
+    if tool_name == "MultiEdit":
+        return sum(_code_lines(e.get("new_string") or "") for e in tool_input.get("edits") or [])
+    if tool_name == "NotebookEdit":
+        return _code_lines(tool_input.get("new_source") or "")
+    return 0
 
 
 # ── doc 경로 판별 ───────────────────────────────────────────────────────
@@ -1217,6 +1305,30 @@ def format_soft_hint(gate: dict[str, Any]) -> str:
         f"현재까지 {gate['edit_count']}회 편집 / 코드 파일 {_unique_code_files(gate)}개{hot_info}.\n"
         f"큰 작업이라면 미리 tasks/todo.md 에 계획을 작성해두는 것이 좋습니다.\n"
         f"{DIVIDER}\n"
+    )
+
+
+def format_plan_worthiness_cue() -> str:
+    """새 작업 진입 시 '계획 필요 여부 자가 판단' 가벼운 재무장 (비차단 환기)."""
+    return (
+        "[plan-gate] 새 작업 — 진행하며 범위를 파악하고 스스로 판단하세요:\n"
+        "  다단계·위험·기존 동작 변경이면 tasks/todo.md + /approve-plan 후 구현,\n"
+        "  작고 가역적인 작업이면 그대로 진행(approve·done 불요). 과잉 계획 금지."
+    )
+
+
+def format_large_edit_advisory(added: int, fan: int) -> str:
+    """큰 미승인 변경 → /approve-plan 권장 (비차단 환기, 강제 아님)."""
+    reasons = []
+    if added >= LARGE_OP_LINES:
+        reasons.append(f"한 번에 코드 {added}줄 추가")
+    if fan >= LARGE_FAN_FILES:
+        reasons.append(f"코드 파일 {fan}개 변경")
+    return (
+        "[plan-gate] 📐 변경 규모가 큽니다 (" + ", ".join(reasons) + ").\n"
+        "  계획되지 않은 큰 변경이라면, 진행 전 tasks/todo.md 에 계획을 적고\n"
+        "  /approve-plan 으로 승인받는 것을 권장합니다.\n"
+        "  (강제 아님 — 작고 단순한 작업이거나 이미 의도한 변경이면 무시하세요.)"
     )
 
 

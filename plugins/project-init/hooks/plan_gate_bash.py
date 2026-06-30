@@ -91,8 +91,11 @@ def main() -> int:
     # ── layer-2 스코프 스윕 (R1) — exit code 무관 ──────────────────────────
     advisory = _sweep_advisory(root, gate, lib.scope_mode(root))
 
-    # ── green Bash = 수렴 신호 → 반복(thrash) 카운터 리셋 (exit 0 만) ──────
-    if exit_code == 0:
+    # ── green Bash = 수렴 신호 → 반복(thrash) 카운터 리셋 ──────────────────
+    # exit 0 이라도 "검증 명령"(테스트·빌드·린트)만 수렴으로 인정한다. ls·cat·git
+    # status 같은 읽기전용 성공이 카운터를 리셋하면 thrash·롤오버 신호가 무력화된다.
+    command = (data.get("tool_input") or {}).get("command", "")
+    if exit_code == 0 and lib.is_verification_command(command):
         had_counts = bool(gate.get("file_edit_counts"))
         gate["last_successful_bash_ts"] = lib.now_iso()
         gate["file_edit_counts"] = {}

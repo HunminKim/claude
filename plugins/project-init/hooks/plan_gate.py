@@ -118,6 +118,15 @@ def main() -> int:
     state = lib.load_state(root)
     gate = lib.current_gate(state)
 
+    # ── created 게이트 자동 롤오버 (green Bash 수렴 경계) ─────────────────
+    # 작은 미승인 편집은 approve·done 둘 다 불요. 직전 편집 이후 통과한 Bash 가
+    # 작업을 사실상 마감했다고 보고, 다음 편집 때 게이트를 조용히 닫고(체크포인트
+    # 정리) 새 게이트를 연다 — 사람이 /done 을 칠 필요가 없다(idle 경계 롤오버는
+    # detect_task_boundary 가 담당). approved/verified 는 명시 /done 대상이라 제외.
+    if gate and gate["state"] == "created" and lib.converged_since_last_edit(gate):
+        lib.do_gate_done(root, state, gate)
+        gate = None  # 아래 first-edit 블록이 새 게이트를 연다
+
     # ── 첫 Edit 직전 체크포인트 스냅샷 (D7) ──────────────────────────────
     if gate is None or gate["state"] in ("done", "rolled_back"):
         gate = lib.make_gate()
@@ -178,14 +187,9 @@ def main() -> int:
         except Exception:
             pass
 
-    # ── stale created gate 경고: 편집이 쌓인 채 방치된 gate ────────────────
-    # approved 이전 "created" 상태에서도 편집이 많이 쌓이면 /done 을 강하게 유도.
-    if gate and gate["state"] == "created" and gate.get("edit_count", 0) >= 3:
-        advisories.append(
-            f"[plan-gate] ⚠️  이전 작업 gate가 닫히지 않았습니다 (편집 {gate['edit_count']}회 누적).\n"
-            "  이전 작업이 끝났다면 지금 /done 을 입력하세요.\n"
-            "  /done 없이 계속하면 카운트가 누적되어 현재 작업이 차단됩니다."
-        )
+    # 미승인 created 게이트는 /done 을 강요하지 않는다 — 작은 편집은 approve·done
+    # 둘 다 불요. 닫기는 자동 롤오버(green Bash 수렴=위 블록 / idle=detect_task_boundary)가
+    # 담당하고, 수렴 없는 반복만 5회 트리거(아래)가 차단한다.
 
     # ── 세션 재진입 경고: 24시간 이상 된 approved gate 잔류 ──────────────
     if gate and gate["state"] == "approved":
@@ -255,6 +259,22 @@ def main() -> int:
             gate["unique_files"].append(target)
         counts = gate.setdefault("file_edit_counts", {})
         counts[target] = counts.get(target, 0) + 1
+
+    # ── 큰 미승인 변경 → /approve-plan 권장 (비차단 환기, 게이트당 1회) ────
+    # 규모는 "계획 필요"의 강제 기준이 못 되므로(과거 볼륨 차단 v1 오탐) 차단하지
+    # 않고 환기만 한다. created + 비자동승인에서, 단일 편집 코드량 또는 코드파일
+    # fan-out 이 임계 이상이면 1회 dedup 으로 advisory 누적.
+    if (
+        gate["state"] == "created"
+        and not gate.get("approved_auto")
+        and not gate.get("large_advisory_seen")
+    ):
+        added = lib.edit_added_code_lines(tool_name, tool_input, root)
+        fan = lib._unique_code_files(gate)
+        if added >= lib.LARGE_OP_LINES or fan >= lib.LARGE_FAN_FILES:
+            gate["large_advisory_seen"] = True
+            lib.log_audit(root, "large_edit_advisory", gate_id=gate["id"], added=added, files=fan)
+            advisories.append(lib.format_large_edit_advisory(added, fan))
 
     # ── soft hint (thrash 트리거 직전) ──────────────────────────────────
     # created/approved 모두 같은 파일 반복(thrash) 임박 시 부드러운 경고 (차단 X).
