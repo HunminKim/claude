@@ -29,19 +29,50 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
 DIVIDER = "━" * 55
 
 # 즉시 차단 — 복구 불가 수준의 파괴적 명령
+# (rm 의 루트/홈 재귀 삭제는 플래그 순서·형태가 다양해 정규식 대신 _rm_targets_root 로 판정)
 HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
-    # rm -rf / 또는 /* (루트 전체) — 플래그 순서·결합 무관, /* glob 포함
-    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
-    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
-    # rm -rf ~ (홈 전체) — 트레일링 슬래시 유무·플래그 순서 무관
-    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 디렉토리 전체 삭제)"),
-    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 디렉토리 전체 삭제)"),
-    (r"find\s+/\s+.*-delete\b", "find / -delete (루트 전체 탐색 삭제)"),
-    (r"find\s+/\s+.*-exec\s+rm\b", "find / -exec rm (루트 전체 삭제 실행)"),
+    # find / 또는 /* 루트 탐색 삭제 — `/` 뒤 공백 또는 `/*` glob 모두 커버(/home 등 하위는 제외)
+    (r"find\s+/\*?\s+.*-delete\b", "find / -delete (루트 전체 탐색 삭제)"),
+    (r"find\s+/\*?\s+.*-exec\s+rm\b", "find / -exec rm (루트 전체 삭제 실행)"),
     (r":\s*\(\s*\)\s*\{.*:\|:.*\}", "Fork bomb"),
     (r"dd\s+.*of=/dev/(sd|nvme|vd)[a-z]", "dd → 블록 디바이스 직접 덮어쓰기"),
     (r"mkfs\.", "파일시스템 포맷"),
 ]
+
+# rm 루트/홈 재귀 삭제 타겟 — /, //, /*, ~, ~/, $HOME, ${HOME} (하위 경로는 미매치)
+_RM_ROOT_TARGET_RE = re.compile(r"^(?:/+|/\*|~|~/|\$HOME|\$\{HOME\})/*\*?$")
+
+
+def _is_recursive_flag(tok: str) -> bool:
+    """rm 인자 토큰이 재귀 플래그면 True (--recursive, -R, -rf/-fr 등 결합 short)."""
+    if tok == "--recursive":
+        return True
+    if tok.startswith("--"):
+        return False  # --force 등 — 재귀만으로 위험 판정
+    return tok.startswith("-") and "r" in tok[1:].lower()
+
+
+def _rm_targets_root(command: str) -> bool:
+    """rm 이 루트(/)·홈(~/$HOME) 전체를 재귀 삭제하려 하면 True (플래그 순서·형태 무관).
+
+    세그먼트별로 rm(또는 sudo rm) 호출을 찾아, 재귀 플래그(-r/-R/-rf 결합·--recursive)와
+    루트/홈 타겟이 함께 있으면 차단한다. 정규식만으로는 `rm -rf //`·`rm --recursive
+    --force /`·`rm -rf $HOME` 같은 변형이 새어나가(플래그 배열·긴옵션·타겟 종류가 조합
+    폭발) 토큰 단위 판정이 더 견고하다. 하위 경로(`rm -rf build/`)는 타겟 정규식이 배제.
+    """
+    for seg in re.split(r"[;&|\n]+", command):
+        toks = seg.split()
+        if not toks:
+            continue
+        i = 1 if toks[0] == "sudo" and len(toks) > 1 else 0
+        if os.path.basename(toks[i]) != "rm":
+            continue
+        args = toks[i + 1:]
+        recursive = any(_is_recursive_flag(t) for t in args)
+        targets = [t for t in args if not t.startswith("-")]
+        if recursive and any(_RM_ROOT_TARGET_RE.match(t) for t in targets):
+            return True
+    return False
 
 # 경고 후 차단 — 핵심 운영 파일 직접 삭제
 PROTECTED_FILES = [
@@ -50,10 +81,12 @@ PROTECTED_FILES = [
     "Dockerfile", ".env", "Makefile",
     "requirements.txt", "pyproject.toml",
 ]
+# 끝에 `(?![\w.-])` — 파일명 경계. `\b` 는 "Makefile-backup"·"api.key.md" 처럼
+# 하이픈/점으로 이어지는 무관 파일에서 성립해 오탐을 냈다(rm my-Makefile-backup 차단).
 _PROTECTED_RE = re.compile(
     r"(?:^|&&|\|;|\s)rm\s+[^;|&\n]*"
     r"(?:docker-compose[\w.-]*\.ya?ml|Dockerfile[\w.-]*|\.env[\w.-]*"
-    r"|requirements\.txt|pyproject\.toml|Makefile)\b",
+    r"|requirements\.txt|pyproject\.toml|Makefile)(?![\w.-])",
     re.IGNORECASE,
 )
 
@@ -76,11 +109,13 @@ _SECRET_FILES = (
     r"|(?:service_account[\w.-]*\.json)"
     r"|(?:[\w.-]*\.(?:pem|key|p12|pfx|jks|keystore))"
 )
-_SECRET_FILE_PAT = rf"(?:{_SECRET_FILES})\b"
+# 끝에 `(?![\w.-])` — 파일명 경계(`\b` 대신). `\b` 는 "notes.env.md"·"api.key.md"
+# 처럼 비밀 토큰 뒤에 `.확장자` 가 더 붙는 무관 문서 파일에서도 성립해 오탐을 냈다.
+_SECRET_FILE_PAT = rf"(?:{_SECRET_FILES})(?![\w.-])"
 
-# 명령 경계: 줄 시작·연결자·공백뿐 아니라 따옴표·괄호 뒤도 포함한다.
-# `bash -c 'cat .env'` 처럼 인터프리터 인용 안에 든 명령을 놓치지 않기 위함.
-_BND = r"(?:^|&&|\|\||\||;|\s|['\"(])"
+# 명령 경계: 줄 시작·연결자·공백뿐 아니라 따옴표·괄호·백틱 뒤도 포함한다.
+# `bash -c 'cat .env'`·`` `cat .env` `` 처럼 인용/명령치환 안에 든 명령을 놓치지 않기 위함.
+_BND = r"(?:^|&&|\|\||\||;|\s|['\"(`])"
 
 # 1) 내용을 stdout 으로 흘리는 리더 명령 (대폭 확장)
 _READ_CMDS = (
@@ -100,15 +135,25 @@ _SECRET_SOURCE_RE = re.compile(
 )
 # 3) 입력 리다이렉트: `cmd < .env`, `$(< .env)`
 _SECRET_REDIR_RE = re.compile(rf"<\s*[^\s;|&<>]*{_SECRET_FILE_PAT}", re.IGNORECASE)
-# 4) 복사/이동/전송 시 비밀 파일이 첫 인자(소스)로 — exfil 경로
+# 4) 복사/이동/링크/전송 시 비밀 파일이 소스로 — exfil 경로.
+#    ln 포함: `ln -s .env leak` 후 leak 을 읽으면 secret_read_guard 도 우회된다.
 _SECRET_COPY_RE = re.compile(
-    rf"{_BND}(?:cp|mv|scp|rsync|install|dd\s+if=)\s*"
+    rf"{_BND}(?:cp|mv|ln|scp|rsync|install|dd\s+if=)\s*"
     rf"(?:-\S+\s+)*[^\s;|&]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
-# 5) 인터프리터 인라인 코드(-c/-e)가 비밀 파일을 언급 — open()/File.read 노출
+# 4b) 아카이브/업로드 도구 인자에 비밀 파일이 명시적으로 등장 — 한 명령 내 exfil.
+#     tar/zip 로 묶거나 curl -T/nc 로 내보내며 비밀 파일명을 직접 지목하는 경우.
+_SECRET_EXFIL_RE = re.compile(
+    rf"{_BND}(?:tar|zip|gzip|bzip2|xz|7z|curl|wget|nc|ncat|socat)\b"
+    rf"[^\n]*{_SECRET_FILE_PAT}",
+    re.IGNORECASE,
+)
+# 5) 인터프리터가 비밀 파일을 언급 — 인라인 코드(-c/-e)·stdin(`- `)·heredoc(<<) 모두.
+#    `python3 - <<EOF ... open('.env')` 처럼 -c 없이 stdin/heredoc 로 읽는 우회 포함.
 _INTERP_EVAL_RE = re.compile(
-    r"(?:python3?|node|deno|bun|ruby|perl|php)\b[^\n]*\s-(?:c|e)\b", re.IGNORECASE
+    r"(?:python3?|node|deno|bun|ruby|perl|php)\b[^\n]*(?:\s-(?:c|e)\b|\s-\s|\s-$|<<)",
+    re.IGNORECASE,
 )
 _SECRET_ANY_RE = re.compile(_SECRET_FILE_PAT, re.IGNORECASE)
 
@@ -123,6 +168,8 @@ def _reads_secret(command: str) -> bool:
         return True
     if _SECRET_COPY_RE.search(command):
         return True
+    if _SECRET_EXFIL_RE.search(command):
+        return True
     if _INTERP_EVAL_RE.search(command) and _SECRET_ANY_RE.search(command):
         return True
     return False
@@ -131,8 +178,10 @@ def _reads_secret(command: str) -> bool:
 
 INLINE_TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # 순서: 구체적 패턴 → 일반 패턴 (sk-ant- 가 sk- 보다 먼저)
-    (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "Anthropic API 키"),
-    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "OpenAI API 키"),
+    # 앞에 영숫자가 있으면 매치 금지 — "task-..."·"desk-..." 같은 평범한 토큰이
+    # 단어 내부 "sk-" 로 OpenAI 키 오인돼 실사용 명령(git checkout 등)이 차단되던 오탐 방지.
+    (re.compile(r"(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_\-]{20,}"), "Anthropic API 키"),
+    (re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9]{20,}"), "OpenAI API 키"),
     (re.compile(r"ghp_[A-Za-z0-9]{30,}"), "GitHub PAT"),
     (re.compile(r"ghs_[A-Za-z0-9]{30,}"), "GitHub Secret"),
     (re.compile(r"gho_[A-Za-z0-9]{30,}"), "GitHub OAuth 토큰"),
@@ -161,6 +210,8 @@ def _check(command: str) -> tuple[bool, str]:
     for pattern, reason in HARD_BLOCK_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
             return True, reason
+    if _rm_targets_root(command):
+        return True, "rm 루트/홈 전체 재귀 삭제 감지"
     if _deletes_project_root(command):
         return True, "작업 디렉토리(CLAUDE_PROJECT_DIR) 전체 삭제 감지"
     if _PROTECTED_RE.search(command):

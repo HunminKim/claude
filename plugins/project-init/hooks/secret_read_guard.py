@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import sys
@@ -43,13 +44,18 @@ SECRET_EXACT_NAMES: set[str] = {
     "id_ed25519",
     "id_ecdsa",
     "id_dsa",
+    # secrets.<민감확장자>만 비밀로 본다 (아래 접두사 "secrets." 는 secrets.md·
+    # secrets.txt 같은 문서까지 차단하는 오탐이라 정확 이름으로 대체).
+    "secrets.yaml",
+    "secrets.yml",
+    "secrets.json",
+    "secrets.toml",
 }
 
 # 파일명이 이 접두사로 시작하면 차단 (대소문자 무시)
 SECRET_PREFIX_PATTERNS: list[str] = [
     ".env.",          # .env.local, .env.production, ...
     "service_account",  # service_account.json, service_account_key.json
-    "secrets.",       # secrets.yaml, secrets.json, ...
 ]
 
 # 확장자 매치 (대소문자 무시)
@@ -94,7 +100,9 @@ def _is_allowed(name_lower: str) -> bool:
 
 def _is_secret_file(file_path: str) -> tuple[bool, str]:
     """(차단여부, 사유) 반환."""
-    name = PurePosixPath(file_path).name
+    # Windows 백슬래시 경로(C:\Users\x\.ssh\id_rsa)를 정규화 — PurePosixPath 는 `\` 를
+    # 구분자로 보지 않아 정규화 없이는 basename 추출·디렉토리 검사가 통째로 무력화된다.
+    name = PurePosixPath(file_path.replace("\\", "/")).name
     name_lower = name.lower()
 
     if _is_allowed(name_lower):
@@ -124,16 +132,31 @@ def _is_secret_file(file_path: str) -> tuple[bool, str]:
 
 def _hits_sensitive_dir(file_path: str) -> bool:
     """경로 컴포넌트에 민감 디렉토리(.ssh 등)가 있으면 True (디렉토리 탐색 우회 차단)."""
-    parts = [p.lower() for p in PurePosixPath(file_path).parts]
+    parts = [p.lower() for p in PurePosixPath(file_path.replace("\\", "/")).parts]
     return any(p in SENSITIVE_DIRS for p in parts)
 
 
+# 대표 비밀 파일명 — glob 이 이 중 하나라도 매칭하면 "비밀 겨냥"으로 본다.
+_REP_SECRETS: set[str] = (
+    {n.lower() for n in SECRET_EXACT_NAMES}
+    | {".env.local", "prod.env", "service_account.json"}
+    | {f"x{ext}" for ext in SECRET_EXTENSIONS}
+)
+
+
 def _glob_targets_secret(glob: str) -> bool:
-    """Grep glob 파라미터가 비밀 파일을 겨냥하면 True (.env*, *.pem, id_rsa* 등)."""
+    """Grep glob 파라미터가 비밀 파일을 겨냥하면 True (.env*, *.pem, id_* 등).
+
+    과거: `*`/`?` 를 지운 잔여 문자열만 비밀 판정 → `id_*`(→"id_")·`.en*`(→".en")
+    처럼 core 가 비밀 이름과 정확히 안 맞으면 통과(id_rsa·.env 노출)했다. 이제 대표
+    비밀 파일명을 glob 에 fnmatch 로 대조해, glob 이 실제로 비밀을 매칭하면 차단한다.
+    단 너무 넓은 글롭(`*` 등, 리터럴 core<3)은 특정 겨냥이 아니라고 보고 통과시킨다.
+    """
     core = glob.replace("*", "").replace("?", "")
-    if not core:
-        return False
-    if _is_secret_file(core)[0]:
+    if len(core) < 3:
+        return False  # `*`·`??` 등 광역 글롭은 비밀 특정 겨냥으로 보지 않음
+    g = glob.lower()
+    if any(fnmatch.fnmatch(rep, g) for rep in _REP_SECRETS):
         return True
     cl = core.lower()
     return cl.endswith(".env") or any(cl.endswith(ext) for ext in SECRET_EXTENSIONS)
