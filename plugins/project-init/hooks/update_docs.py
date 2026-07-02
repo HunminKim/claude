@@ -277,8 +277,11 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> int:
         content = claude_path.read_text(encoding="utf-8", errors="ignore")
         section_header = "## 알려진 버그 / 제약"
         # 이미 기재된 항목은 건너뛴다 — /retry 재검증 사이클마다 같은 제약이
-        # 무한 누적되는 것을 방지 (dedup 없던 회귀).
-        fresh = [c for c in critical_constraints if f"- {c}" not in content]
+        # 무한 누적되는 것을 방지 (dedup 없던 회귀). ⚠️ 라인 단위 정확 비교 —
+        # substring(`f"- {c}" in content`)은 새 제약이 기존 줄의 접두면 신규인데도
+        # "기존재"로 오판해 유실됐다(예: "캐시 무효화" ⊂ "- 캐시 무효화가 안 됨").
+        existing_lines = {ln.strip() for ln in content.splitlines()}
+        fresh = [c for c in critical_constraints if f"- {c}" not in existing_lines]
         if not fresh:
             _log("[update_docs] CLAUDE.md 제약 전부 기존재 — 건너뜀")
         else:

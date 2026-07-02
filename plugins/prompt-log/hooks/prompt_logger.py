@@ -55,8 +55,11 @@ def main() -> int:
 
     active = pl.pl_load_active(root)
     # 같은 세션의 active 인지 — 다른 세션(동시 세션) 것이면 흡수·통계 오염 방지.
-    # active 의 session_id 가 비어 있으면(구버전 레코드) 같은 세션으로 간주.
-    same_session = active is not None and active.get("session_id", "") in ("", session_id)
+    # active 의 session_id 가 비었거나(구버전 레코드) stdin session_id 가 비면(식별 불가)
+    # 같은 세션으로 간주 — session_finalize 의 폴백과 대칭.
+    same_session = active is not None and (
+        not session_id or active.get("session_id", "") in ("", session_id)
+    )
 
     # 토큰 입력은 직전 active record에만 추가하고 새 prompt 시작 X
     if token_value is not None and active is not None:

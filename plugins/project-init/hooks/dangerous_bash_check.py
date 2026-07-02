@@ -31,7 +31,8 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
 DIVIDER = "━" * 55
 
 # 즉시 차단 — 복구 불가 수준의 파괴적 명령
-# (rm 의 루트/홈 재귀 삭제는 플래그 순서·형태가 다양해 정규식 대신 _rm_targets_root 로 판정)
+# (rm 의 루트/홈 재귀 삭제는 플래그 순서·형태가 다양해 _rm_targets_root 토큰 판정 +
+#  아래 substring 백스톱 정규식 둘 다로 판정 — 접두 래퍼·쿼팅 우회를 이중 방어)
 HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
     # find / 또는 /* 루트 탐색 삭제 — `/` 뒤 공백 또는 `/*` glob 모두 커버(/home 등 하위는 제외)
     (r"find\s+/\*?\s+.*-delete\b", "find / -delete (루트 전체 탐색 삭제)"),
@@ -39,10 +40,45 @@ HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
     (r":\s*\(\s*\)\s*\{.*:\|:.*\}", "Fork bomb"),
     (r"dd\s+.*of=/dev/(sd|nvme|vd)[a-z]", "dd → 블록 디바이스 직접 덮어쓰기"),
     (r"mkfs\.", "파일시스템 포맷"),
+    # rm -rf / ~ substring 백스톱 — 토큰 판정이 못 잡는 쿼팅(`sh -c 'rm -rf /'`)·
+    # 이상 접두를 넓게 커버. 플래그 결합·순서 무관, `/` 뒤 공백/glob/끝만 루트로 인정.
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 전체 삭제)"),
 ]
 
 # rm 루트/홈 재귀 삭제 타겟 — /, //, /*, ~, ~/, $HOME, ${HOME} (하위 경로는 미매치)
 _RM_ROOT_TARGET_RE = re.compile(r"^(?:/+|/\*|~|~/|\$HOME|\$\{HOME\})/*\*?$")
+
+# rm 앞에 흔히 붙는 명령 래퍼 — 이들을 건너뛰고 실제 rm 토큰을 찾는다.
+# (sudo -E rm·env rm·time rm·\rm 우회 방지 — 래퍼 미스킵이 F1 회귀의 원인)
+_CMD_WRAPPERS = {
+    "sudo", "doas", "env", "time", "nice", "ionice", "command",
+    "exec", "builtin", "stdbuf", "nohup", "setsid",
+}
+
+
+def _find_rm_index(toks: list[str]) -> int:
+    """세그먼트 토큰 목록에서 실제 rm 실행 토큰의 인덱스. 없으면 -1.
+
+    첫 토큰이 rm(또는 `\\rm`)이면 그 자리. 래퍼(sudo/env/time/...)면 그 옵션·옵션값을
+    건너뛰며 rm 을 찾는다. 첫 토큰이 래퍼도 rm 도 아니면 이 세그먼트는 rm 명령이 아니다.
+    """
+    if not toks:
+        return -1
+    first = os.path.basename(toks[0].lstrip("\\"))
+    if first == "rm":
+        return 0
+    if first not in _CMD_WRAPPERS:
+        return -1
+    for i in range(1, len(toks)):
+        if os.path.basename(toks[i].lstrip("\\")) == "rm":
+            return i
+        if toks[i].startswith("-"):
+            continue  # 래퍼 옵션 (예: sudo -E, nice -n)
+        # 비옵션 토큰(옵션값·VAR=x 등)은 건너뛰고 계속 rm 을 찾는다
+    return -1
 
 
 def _is_recursive_flag(tok: str) -> bool:
@@ -57,19 +93,17 @@ def _is_recursive_flag(tok: str) -> bool:
 def _rm_targets_root(command: str) -> bool:
     """rm 이 루트(/)·홈(~/$HOME) 전체를 재귀 삭제하려 하면 True (플래그 순서·형태 무관).
 
-    세그먼트별로 rm(또는 sudo rm) 호출을 찾아, 재귀 플래그(-r/-R/-rf 결합·--recursive)와
-    루트/홈 타겟이 함께 있으면 차단한다. 정규식만으로는 `rm -rf //`·`rm --recursive
-    --force /`·`rm -rf $HOME` 같은 변형이 새어나가(플래그 배열·긴옵션·타겟 종류가 조합
-    폭발) 토큰 단위 판정이 더 견고하다. 하위 경로(`rm -rf build/`)는 타겟 정규식이 배제.
+    세그먼트별로 rm 호출(접두 래퍼 스킵 포함)을 찾아, 재귀 플래그(-r/-R/-rf 결합·
+    --recursive)와 루트/홈 타겟이 함께 있으면 차단한다. 긴옵션(`--recursive --force /`)·
+    `//`·`$HOME` 등 substring 정규식이 못 잡는 변형을 커버한다(정규식은 백스톱으로 병행).
+    하위 경로(`rm -rf build/`)는 타겟 정규식이 배제.
     """
     for seg in re.split(r"[;&|\n]+", command):
         toks = seg.split()
-        if not toks:
+        idx = _find_rm_index(toks)
+        if idx < 0:
             continue
-        i = 1 if toks[0] == "sudo" and len(toks) > 1 else 0
-        if os.path.basename(toks[i]) != "rm":
-            continue
-        args = toks[i + 1:]
+        args = toks[idx + 1:]
         recursive = any(_is_recursive_flag(t) for t in args)
         targets = [t for t in args if not t.startswith("-")]
         if recursive and any(_RM_ROOT_TARGET_RE.match(t) for t in targets):
@@ -144,10 +178,22 @@ _SECRET_COPY_RE = re.compile(
     rf"(?:-\S+\s+)*[^\s;|&]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
-# 4b) 아카이브/업로드 도구 인자에 비밀 파일이 명시적으로 등장 — 한 명령 내 exfil.
-#     tar/zip 로 묶거나 curl -T/nc 로 내보내며 비밀 파일명을 직접 지목하는 경우.
+# 4b) 아카이브/전송 도구 인자에 비밀 파일이 명시적으로 등장 — 한 명령 내 exfil.
+#     tar/zip 로 묶거나 nc 로 내보내며 비밀 파일명을 직접 지목하는 경우.
+#     ⚠️ curl/wget 은 여기서 제외 — URL 경로의 `foo.pem`(다운로드 목적지)까지 삼켜
+#     `curl https://x/pubkey.pem` 같은 정상 다운로드를 오탐했다(F3). 아래 업로드 문맥
+#     정규식으로만 잡는다.
 _SECRET_EXFIL_RE = re.compile(
-    rf"{_BND}(?:tar|zip|gzip|bzip2|xz|7z|curl|wget|nc|ncat|socat)\b"
+    rf"{_BND}(?:tar|zip|gzip|bzip2|xz|7z|nc|ncat|socat)\b"
+    rf"[^\n]*{_SECRET_FILE_PAT}",
+    re.IGNORECASE,
+)
+# 4c) curl/wget 은 업로드 문맥(-T/--upload-file/-d/--data*/-F/--form)에서 비밀 파일이
+#     등장할 때만 exfil 로 본다. 일반 다운로드(URL 경로의 확장자)는 소스가 아니라
+#     목적지라 제외한다.
+_SECRET_UPLOAD_RE = re.compile(
+    rf"(?:curl|wget)\b[^\n]*"
+    rf"(?:-T|--upload-file|-d|--data(?:-binary|-raw|-urlencode)?|-F|--form)\s+"
     rf"[^\n]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
@@ -171,6 +217,8 @@ def _reads_secret(command: str) -> bool:
     if _SECRET_COPY_RE.search(command):
         return True
     if _SECRET_EXFIL_RE.search(command):
+        return True
+    if _SECRET_UPLOAD_RE.search(command):
         return True
     if _INTERP_EVAL_RE.search(command) and _SECRET_ANY_RE.search(command):
         return True

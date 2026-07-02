@@ -137,11 +137,24 @@ def _hits_sensitive_dir(file_path: str) -> bool:
 
 
 # 대표 비밀 파일명 — glob 이 이 중 하나라도 매칭하면 "비밀 겨냥"으로 본다.
-_REP_SECRETS: set[str] = (
-    {n.lower() for n in SECRET_EXACT_NAMES}
-    | {".env.local", "prod.env", "service_account.json"}
-    | {f"x{ext}" for ext in SECRET_EXTENSIONS}
-)
+# ⚠️ 확장자·시그니처 **자체가 비밀 신호**인 것만 담는다. credentials.json·token.json·
+# secrets.<yaml/json/toml>·service_account.json 처럼 범용 확장자(json/yaml/toml)를 가진
+# 비밀명은 제외 — 포함하면 `*.json`·`*.yaml` 같은 일상 glob 이 이들에 fnmatch 되어
+# 전부 차단되는 오탐이 난다(F2). 이 파일들의 정확 경로 접근은 _is_secret_file 이 커버하고,
+# `*.json` 광역 glob 은 "특정 비밀 겨냥"이 아니므로 통과가 옳다.
+_REP_SECRETS: set[str] = {
+    ".env",
+    ".netrc",
+    ".pgpass",
+    ".npmrc",
+    ".pypirc",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+    ".env.local",
+    "prod.env",
+} | {f"x{ext}" for ext in SECRET_EXTENSIONS}
 
 
 def _glob_targets_secret(glob: str) -> bool:
@@ -149,8 +162,9 @@ def _glob_targets_secret(glob: str) -> bool:
 
     과거: `*`/`?` 를 지운 잔여 문자열만 비밀 판정 → `id_*`(→"id_")·`.en*`(→".en")
     처럼 core 가 비밀 이름과 정확히 안 맞으면 통과(id_rsa·.env 노출)했다. 이제 대표
-    비밀 파일명을 glob 에 fnmatch 로 대조해, glob 이 실제로 비밀을 매칭하면 차단한다.
-    단 너무 넓은 글롭(`*` 등, 리터럴 core<3)은 특정 겨냥이 아니라고 보고 통과시킨다.
+    비밀 파일명(_REP_SECRETS — 비밀 전용 확장자·시그니처만)을 glob 에 fnmatch 로 대조해,
+    glob 이 실제로 비밀을 매칭하면 차단한다. 단 너무 넓은 글롭(`*` 등, 리터럴 core<3)이나
+    범용 확장자 glob(`*.json` 등)은 특정 겨냥이 아니라고 보고 통과시킨다.
     """
     core = glob.replace("*", "").replace("?", "")
     if len(core) < 3:
