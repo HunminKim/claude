@@ -40,7 +40,8 @@ def main() -> int:
         return 0
 
     tool_name = data.get("tool_name", "")
-    if tool_name not in ("Edit", "Write", "MultiEdit"):
+    # NotebookEdit 포함 — hooks.json matcher 와 일치 (plan_gate 의 notebook 처리와 대칭)
+    if tool_name not in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         return 0
 
     root = lib.find_project_root()

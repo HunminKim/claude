@@ -40,7 +40,10 @@ MEDIUM = [
     r"빠뜨렸",
     r"안\s*날라",
     r"다시\s*해",
-    r"(?m)^no\b",
+    # "no" 단독/쉼표 연결만 교정으로 본다 — 맨 `^no\b` 는 "No worries…" 같은
+    # 평범한 영어 문두에 오탐 (교정 아님)
+    r"(?m)^no[.,!]?\s*$",
+    r"(?m)^no,\s",
     r"\bthat'?s\s+wrong\b",
     r"\bdon'?t\s+do\s+that\b",
 ]

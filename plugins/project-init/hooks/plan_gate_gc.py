@@ -45,7 +45,8 @@ def gc_state(state: dict, cutoff: datetime) -> int:
         if gid == current_id:
             keep[gid] = g
             continue
-        if g["state"] not in ("done", "rolled_back"):
+        # 손상된 gate 레코드(state 키 없음 등)는 보존 — GC 가 KeyError 로 죽지 않게
+        if not isinstance(g, dict) or g.get("state") not in ("done", "rolled_back"):
             keep[gid] = g
             continue
         # 닫힌 시각 기준 만료 — 오래 살다 최근에 닫힌 gate 가 조기 GC 되지 않게

@@ -89,7 +89,9 @@ preprocessing:
 1. **프리셋 지정됨** → `.claude/monitor_presets.yaml`에서 해당 프리셋 로드
 2. **프리셋 없음** → 자동 감지 시도:
    - `ps aux`로 실행 중인 python/bash 프로세스 확인
-   - 최근 수정된 `.log` 파일 확인 (`find . -name "*.log" -newer /tmp -maxdepth 3`)
+   - 최근 수정된 `.log` 파일 확인 (`find . -maxdepth 3 -name "*.log" -mmin -60`)
+     (`-maxdepth` 는 다른 조건보다 앞에 — 뒤에 두면 find 가 경고. `-newer /tmp` 는
+      /tmp 디렉토리 mtime 이라는 무의미한 기준이라 최근 60분 수정으로 대체)
    - 감지 결과를 사용자에게 제안:
      ```
      다음 지표를 감지했습니다:

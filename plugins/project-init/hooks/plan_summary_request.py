@@ -36,11 +36,19 @@ def main() -> int:
         return 0
 
     file_path = data.get("tool_input", {}).get("file_path", "")
-    if not file_path.endswith("tasks/todo.md"):
+    if not file_path:
         return 0
 
     root = lib.find_project_root()
     if root is None or not lib.is_plan_gate_enabled(root):
+        return 0
+
+    # 루트 기준 정확 경로 비교 — endswith("tasks/todo.md") 는 "subtasks/todo.md"
+    # 나 다른 프로젝트의 tasks/todo.md 에도 매치되는 오탐이 있었다.
+    try:
+        if Path(file_path).resolve() != (root / "tasks" / "todo.md").resolve():
+            return 0
+    except OSError:
         return 0
 
     todo = Path(file_path)

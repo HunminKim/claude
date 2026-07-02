@@ -85,13 +85,18 @@ def _project_root() -> Path:
     return Path(env) if env else Path.cwd()
 
 
-def _warn_once(root: Path, msg: str) -> None:
+def _warn_once(root: Path, session_id: str, msg: str) -> None:
+    """세션당 1회 안내 — 플래그에 session_id 를 기록해 세션이 바뀌면 재안내.
+
+    (과거: 존재 여부만 검사해 첫 안내 후 모든 미래 세션에서 영구 침묵 —
+     docstring "세션당 한 번" 과 불일치)
+    """
     flag = root / WARN_FLAG
-    if flag.exists():
-        return
     try:
+        if flag.exists() and flag.read_text(encoding="utf-8", errors="ignore").strip() == session_id:
+            return
         flag.parent.mkdir(parents=True, exist_ok=True)
-        flag.write_text("1\n", encoding="utf-8")
+        flag.write_text(session_id + "\n", encoding="utf-8")
     except Exception:
         pass
     sys.stderr.write(msg + "\n")
@@ -155,6 +160,7 @@ def main() -> int:
     if shutil.which("ruff") is None:
         _warn_once(
             _project_root(),
+            event.get("session_id") or "unknown",
             "[ruff_check] ruff 미설치 — Python 품질 훅이 비활성화됩니다.\n"
             "             설치: pip install ruff (또는 pipx install ruff)\n"
             "             이 안내는 세션당 한 번만 표시됩니다.",

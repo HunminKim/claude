@@ -139,12 +139,17 @@ type: `feat` `fix` `refactor` `docs` `chore`
 (번프가 없는 일반 커밋은 태그를 달지 않는다. git 태그는 `plugin.json` 버전과 1:1로 유지한다.)
 
 ```bash
-git tag -a vX.Y.Z -m "한 줄 요약"
+git tag -a vX.Y.Z -m "한 줄 요약"          # project-init (주 플러그인 — 무접두 v* 대역 소유)
+git tag -a prompt-log-vX.Y.Z -m "한 줄 요약"  # 그 외 플러그인은 <plugin>-v* 접두
 git push origin main --tags
 ```
 
 - `git push origin main` 만 하면 태그가 올라가지 않는다 → 반드시 `--tags` 포함
 - 태그 버전은 변경된 플러그인의 `plugin.json` 버전과 일치시킨다
+- **태그 네임스페이스**: 무접두 `v*` 대역은 project-init 이 소유한다(v1.x 는 이미
+  project-init 구버전 시리즈가 선점). harness-check·prompt-log 는
+  `harness-check-vX.Y.Z`·`prompt-log-vX.Y.Z` 접두 태그를 쓴다 — 단일 `v*` 대역을
+  세 플러그인이 공유하면 버전이 충돌해 1:1 규칙이 구조적으로 깨진다
 - Annotated 태그(`-a`)를 사용한다 (태거·날짜·메시지 보존)
 scope: `plan-gate`, `prompt-log`, `project-init` 등. 루트 영향 시 생략 가능.
 

@@ -2002,7 +2002,15 @@ def t_hook_future_imports() -> None:
     future import 가 PEP563 으로 어노테이션을 문자열화해야 3.7~3.9 에서 안전하다.
     """
     print("[14] 훅 future-import 일관성 (3.8 호환)")
-    hook_dirs = [HOOKS, REPO / "plugins" / "prompt-log" / "hooks", TEMPLATES / ".claude" / "hooks"]
+    # [17]/[37] 과 동일 커버리지 — 루트 .claude/hooks 와 templates/scripts 누락으로
+    # validate_arch.py 의 모듈 레벨 제네릭(3.8 즉사)을 못 잡던 사각 해소
+    hook_dirs = [
+        HOOKS,
+        REPO / "plugins" / "prompt-log" / "hooks",
+        REPO / ".claude" / "hooks",
+        TEMPLATES / ".claude" / "hooks",
+        TEMPLATES / "scripts",
+    ]
     offenders = []
     for d in hook_dirs:
         for f in sorted(d.glob("*.py")):
@@ -2710,6 +2718,10 @@ def main() -> int:
         t_prompt_log_session_guard(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
+        # base 를 쓰는 테스트는 반드시 with 블록 안에서 — 블록 밖에서 호출하면
+        # 삭제된 임시 경로를 재생성해 실행마다 /tmp/harness_smoke_* 가 누수된다
+        t_stdio_utf8_guard(base)
+        t_file_io_encoding_guard(base)
     t_scaffold_consistency()
     t_command_files()
     t_command_fallback()
@@ -2717,8 +2729,6 @@ def main() -> int:
     t_llm_agent_template()
     t_platform_compat()
     t_hook_future_imports()
-    t_stdio_utf8_guard(base)
-    t_file_io_encoding_guard(base)
     t_version_sync()
     print(f"\n결과: {PASS} 통과, {FAIL} 실패, {SKIP} 스킵")
     return 1 if FAIL else 0
