@@ -114,6 +114,49 @@ def _emit_verified_advisory(root: Path) -> None:
         sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
 
 
+def _dispatch_token(cli: Path, prompt: str, root: Path) -> bool:
+    """평문 프롬프트에서 plan-gate 토큰을 찾아 CLI 를 실행한다. 실행했으면 True.
+
+    ⚠️ 정확일치 가드: subplan 만 인자(<패턴>)를 받는다. 전이 토큰(approve/done/
+    rollback/retry/replan/skip/skip-verify)·status·scope-* 는 인자를 받지 않으므로
+    **프롬프트 전체가 토큰 하나와 정확히 일치할 때만** 발화시킨다.
+      과거: parts[0] 만 보고 발화 → "rollback the api change please" 같은 평문의
+      첫 단어가 토큰과 겹치면 무단 롤백(working tree 복원=데이터 손실)·무단 done/approve
+      가 오발했다. 슬래시 커맨드가 1차 경로이고 평문은 편의 fallback 이므로, 여기서
+      정확일치를 요구해도 정상 사용(/rollback, "rollback")은 그대로 동작한다.
+
+    정규화 SSOT(lib.strip_command_prefix): 슬래시·플러그인 네임스페이스("/project-init:done")
+    prefix 를 모두 흡수한다 (260618 F-005).
+    """
+    parts = prompt.split()
+    if not parts:
+        return False
+    token = lib.strip_command_prefix(parts[0])
+    extra_args = parts[1:]
+
+    if token == "subplan":
+        # 인자를 받는 명령 토큰 — 첫 단어 매칭 + 나머지는 인자로 전달
+        action = _resolve_command_token(token)
+        if action is not None:
+            _run_cli(cli, [action, *extra_args], root)
+            return True
+        return False
+
+    if extra_args:
+        return False  # 인자 없는 토큰은 프롬프트가 토큰 하나뿐일 때만
+
+    # 전이 토큰 — /done, done, /project-init:done 모두 동작
+    if token in _ACTION_TOKENS:
+        _run_cli(cli, [_ACTION_TOKENS[token]], root)
+        return True
+    # 명령 토큰(status/scope-*) — 슬래시 bash-block 미실행 런타임 fallback (F-010)
+    action = _resolve_command_token(token)
+    if action is not None:
+        _run_cli(cli, [action], root)
+        return True
+    return False
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
@@ -128,26 +171,11 @@ def main() -> int:
 
     cli = Path(__file__).parent / "plan_gate_cli.py"
 
-    # 토큰 + 인자 분리 (subplan <패턴> 지원). 첫 단어만 정규화한다.
-    # 정규화 SSOT(lib.strip_command_prefix): 슬래시·플러그인 네임스페이스 모두 흡수.
-    # 인라인 lstrip("/") 만으로는 "/project-init:done" 네임스페이스 prefix 를 못 벗겨
-    # 전이가 silent 실패하던 drift 를 제거한다 (260618 F-005).
-    parts = prompt.split()
-    token = lib.strip_command_prefix(parts[0]) if parts else ""
-    extra_args = parts[1:]
-
-    # 1) 전이 토큰(인자 없음) — /done, done, /project-init:done 모두 동작
-    if token in _ACTION_TOKENS:
-        _run_cli(cli, [_ACTION_TOKENS[token]], root)
+    # 1) 토큰 fallback 디스패치 (실행했으면 True)
+    if _dispatch_token(cli, prompt, root):
         return 0
 
-    # 2) 명령 토큰(scope/subplan/status) — 슬래시 bash-block 미실행 런타임 fallback (F-010)
-    action = _resolve_command_token(token)
-    if action is not None:
-        _run_cli(cli, [action, *extra_args], root)
-        return 0
-
-    # 3) verified ✅ 상태에서 평문 프롬프트 → 환기만 (자동 done 금지)
+    # 2) verified ✅ 상태에서 평문 프롬프트 → 환기만 (자동 done 금지)
     if prompt:
         _emit_verified_advisory(root)
     return 0

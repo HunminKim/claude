@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """SessionStart hook — .githooks 를 git hooksPath 로 (재)설정한다.
 
+출력 채널: 사용자전용 (exit 0 + stderr — 설정 알림은 Claude 행동과 무관.
+SessionStart 는 plain stdout 이 Claude context 에 주입되는 이벤트라 stdout 금지)
+
 원격(web) 세션은 매번 새 컨테이너로 clone 되어 core.hooksPath 설정이 사라진다.
 또한 .githooks/post-checkout 는 clone 시점에 hooksPath 가 아직 기본값이라
 실행되지 못한다(닭-달걀). 따라서 세션 시작마다 멱등하게 hooksPath 를 설정해
@@ -60,7 +63,8 @@ def main() -> None:
         if hook.is_file():
             hook.chmod(0o755)
 
-    print("[session-start] git 훅 활성화: core.hooksPath=.githooks")
+    # stderr — SessionStart 의 plain stdout 은 Claude context 에 주입돼 매 세션 노이즈가 된다
+    print("[session-start] git 훅 활성화: core.hooksPath=.githooks", file=sys.stderr)
 
 
 if __name__ == "__main__":

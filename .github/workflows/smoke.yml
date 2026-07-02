@@ -18,6 +18,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     defaults:
       run:
         # windows-latest 의 bash 는 Git Bash → 실제 훅 런타임과 동일.
@@ -29,3 +30,11 @@ jobs:
           python-version: "3.12"
       - name: smoke_test
         run: python tests/smoke_test.py
+      # CLAUDE.md "ruff 잔존 오류는 같은 PR 안에서 fix" 를 CI 로 강제 —
+      # ruff 미설치 로컬(PostToolUse 훅 graceful skip)에서 온 lint 회귀 차단.
+      # 템플릿(placeholder 코드)은 로컬 훅과 동일하게 대상 외.
+      - name: ruff
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          pip install ruff
+          ruff check . --exclude 'plugins/*/skills/*/assets/templates'

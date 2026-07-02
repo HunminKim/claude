@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "project-init",
-      "description": "v2.15.0 | 프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md(한국어 응답 기본·compact 언어앵커)·에이전트(frontend/backend/deeplearning/llm-agent/infra/verifier — LLM 호출·eval 트랙 분리)·plan-gate 자동 세팅(명시 /approve-plan 승인, 작은 미승인 편집 자동 롤오버·green-bash 검증명령만 수렴·큰편집(50줄/3파일)·새 작업 계획감 cue advisory, 하드 차단은 thrash 5회만), verifier 실행 grounding 강제(전 항목 static ✅ → ❌ 강등), 실패 루프 가드(PostToolUseFailure 멀티스키마, 상태 .claude/state/), 슬래시 명령 fallback(scope/subplan/status), 멀티서비스 docker-compose 골격, 호스트 오염 방지·런타임 환경 호환 preflight·출처 검증 규칙. /harness-update — 하네스 최신화(placeholder 재주입 금지·전체파일 {{...}} 스캔 게이트·🔒 보존파일 헤더 빈칸 heal pass). /monitor [시간] — 학습·배치 작업 자동 간격 모니터링.",
+      "description": "v2.16.0 | 프로젝트 초기화 및 하네스 관리 플러그인. /project-init — docs/ 구조·CLAUDE.md(한국어 응답 기본·compact 언어앵커)·에이전트(frontend/backend/deeplearning/llm-agent/infra/verifier — LLM 호출·eval 트랙 분리)·plan-gate 자동 세팅(명시 /approve-plan 승인, 평문 토큰 정확일치 오발 방지, advisory 무권한, 자가전이 ask 승격, 작은 미승인 편집 자동 롤오버·green-bash 검증명령만 수렴·큰편집(50줄/3파일) advisory, 하드 차단은 thrash 5회만), 위험명령·비밀읽기 가드(rm 접두래퍼·exfil·glob 우회 차단, 실사용 오탐 제거), verifier 실행 grounding 강제(전 항목 static ✅ → ❌ 강등), 실패 루프 가드(PostToolUseFailure 멀티스키마)·layer-2 스코프 스윕 실패이벤트 배선, 슬래시 명령 fallback(scope/subplan/status), 자동승인 신호 프로젝트 스코프+TTL, 멀티서비스 docker-compose 골격, 호스트 오염 방지·런타임 환경 호환 preflight. /harness-update — 하네스 최신화(placeholder 재주입 금지·중단 자가복구). /harness-uninstall — 문서 보존 하네스 제거. /monitor [시간] — 학습·배치 작업 자동 간격 모니터링.",
       "source": "./plugins/project-init",
       "category": "development"
     },
@@ -20,7 +20,7 @@
     },
     {
       "name": "prompt-log",
-      "description": "v1.1.5 | 사용자 prompt + 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적. /project-init 통합 동의, plugins/prompt-log/uninstall.sh 1줄 제거.",
+      "description": "v1.2.0 | 사용자 prompt 원문 전체(자동 마스킹 후) + 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적(멀티세션 격리·병렬 락·flush dead-letter). /project-init 통합 동의, /del_prompt_log 로 로그 이동·동의 재확인.",
       "source": "./plugins/prompt-log",
       "category": "development"
     }

@@ -68,10 +68,13 @@ PL_ACTIVE_FILE = "prompt-log-active.json"  # <project>/.claude/state/prompt-log-
 
 
 def pl_home() -> Path:
-    """글로벌 prompt-log 디렉토리. 없으면 만든다."""
-    home = Path(os.path.expanduser("~/.claude")) / PL_GLOBAL_DIRNAME
-    home.mkdir(parents=True, exist_ok=True)
-    return home
+    """글로벌 prompt-log 디렉토리 경로 (생성하지 않는다).
+
+    읽기 경로(동의 검사 등)에서 mkdir 부작용이 생기면 **미동의 프로젝트에서도**
+    매 프롬프트마다 ~/.claude/prompt-log/ 가 만들어진다 — default deny 취지 위반.
+    디렉토리 생성은 쓰기 지점(pl_save_allowed/pl_append_record)이 담당한다.
+    """
+    return Path(os.path.expanduser("~/.claude")) / PL_GLOBAL_DIRNAME
 
 
 def pl_log_path(ts: datetime | None = None) -> Path:
@@ -121,7 +124,11 @@ def pl_save_allowed(allowed: list[dict[str, Any]]) -> None:
     lock_file = p.parent / ".allowed.lock"
     with _pl_file_lock(lock_file):
         tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(allowed, ensure_ascii=False, indent=2), encoding="utf-8")
+        # 0600 — 프로젝트 절대경로 목록도 active/records 와 동일한 권한 정책
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        _pl_fchmod_600(fd)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(allowed, ensure_ascii=False, indent=2))
         tmp.replace(p)
 
 
@@ -245,19 +252,47 @@ def pl_load_active(project_root: Path) -> dict[str, Any] | None:
         return None
 
 
+def _pl_write_active(project_root: Path, active: dict[str, Any]) -> None:
+    """active 파일 무락 기록 (호출자가 락을 이미 잡은 상태에서 사용)."""
+    p = pl_active_state_path(project_root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    # 내용 기록 전에 0600 확보 — 기록 후 chmod 하면 그 사이
+    # prompt 본문이 group/other readable 로 노출되는 race 발생
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    _pl_fchmod_600(fd)  # tmp 잔존물이 0644 였던 경우 강제 교정 (POSIX)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(active, ensure_ascii=False, indent=2))
+    tmp.replace(p)
+
+
 def pl_save_active(project_root: Path, active: dict[str, Any]) -> None:
     p = pl_active_state_path(project_root)
     p.parent.mkdir(parents=True, exist_ok=True)
     lock_file = p.parent / ".active.lock"
     with _pl_file_lock(lock_file):
-        tmp = p.with_suffix(".tmp")
-        # 내용 기록 전에 0600 확보 — 기록 후 chmod 하면 그 사이
-        # prompt 본문이 group/other readable 로 노출되는 race 발생
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        _pl_fchmod_600(fd)  # tmp 잔존물이 0644 였던 경우 강제 교정 (POSIX)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(json.dumps(active, ensure_ascii=False, indent=2))
-        tmp.replace(p)
+        _pl_write_active(project_root, active)
+
+
+def pl_update_active(project_root: Path, mutate) -> bool:
+    """active 를 load→변형→save 까지 **단일 락**으로 갱신. 갱신했으면 True.
+
+    쓰기 구간만 락으로 감싸면 병렬 툴콜 훅 2개가 같은 스냅샷을 읽고 서로의
+    증가분을 덮어써 카운트가 유실된다(RMW race). 락을 read 이전으로 넓힌다.
+    active 없으면 no-op(False). mutate 는 dict 를 제자리 변형하는 callable.
+    """
+    p = pl_active_state_path(project_root)
+    if not p.exists():
+        return False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = p.parent / ".active.lock"
+    with _pl_file_lock(lock_file):
+        active = pl_load_active(project_root)
+        if active is None:
+            return False
+        mutate(active)
+        _pl_write_active(project_root, active)
+    return True
 
 
 def pl_clear_active(project_root: Path) -> None:
@@ -400,7 +435,10 @@ def pl_read_plan_gate_meta(project_root: Path) -> dict[str, Any] | None:
 
 def pl_append_record(record: dict[str, Any]) -> None:
     """월별 jsonl에 1줄 append. flock으로 동시 쓰기 방지, 0600 권한 보장."""
-    p = pl_log_path()
+    _pl_append_line(pl_log_path(), record)
+
+
+def _pl_append_line(p: Path, record: dict[str, Any]) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False) + "\n"
     lock_file = p.parent / ".records.lock"
@@ -410,6 +448,24 @@ def pl_append_record(record: dict[str, Any]) -> None:
         _pl_fchmod_600(fd)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(line)
+
+
+def pl_flush_record(record: dict[str, Any]) -> str | None:
+    """레코드를 월별 jsonl 에 flush. 실패 시 dead-letter 로 2차 시도.
+
+    반환: 성공 None / 실패 시 경고 메시지(호출자가 stderr 로 출력).
+    과거: flush 실패 후에도 active 를 무조건 삭제해 레코드가 영구 유실됐다 —
+    본 파일이 안 되면 failed-flush.jsonl 에라도 남겨 재시도 여지를 보존한다.
+    """
+    try:
+        pl_append_record(record)
+        return None
+    except Exception as e:
+        try:
+            _pl_append_line(pl_home() / "failed-flush.jsonl", record)
+            return f"[prompt-log] flush 실패({e}) — failed-flush.jsonl 에 보존"
+        except Exception as e2:
+            return f"[prompt-log] flush 실패({e}) + dead-letter 도 실패({e2}) — 레코드 유실"
 
 
 # ── [prompt-log] tool counting helpers ──────────────────────────────────

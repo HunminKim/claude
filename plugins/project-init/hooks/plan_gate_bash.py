@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""PostToolUse hook (Bash) — layer-2 스코프 스윕 + green-Bash thrash 리셋.
+"""PostToolUse + PostToolUseFailure hook (Bash) — layer-2 스코프 스윕 + green-Bash thrash 리셋.
 
 역할 1 (layer-2 스코프 강제, R1): Bash 가 스코프 밖 파일을 만들거나 수정했는지
 git status 로 훑어, enforce 면 체크포인트 상태로 롤백하고 shadow 면 기록만 한다.
 touched 매니페스트가 아닌 실제 working tree 변경을 보므로 `echo > 스코프밖파일`
-같은 Edit 우회까지 잡는다(rev.3 R1). exit code 무관(실패한 Bash 도 파일을 남길 수 있다).
+같은 Edit 우회까지 잡는다(rev.3 R1). 성공/실패 무관(실패한 Bash 도 파일을 남길 수 있다)
+— 공식 스펙상 PostToolUse 는 성공 시에만 발화하므로 PostToolUseFailure 에도 배선한다
+(hooks.json 양쪽 등록). 실패 이벤트에서는 스윕만 하고 green-reset 은 하지 않는다.
 
 역할 2 (green-bash 수렴 신호, D9): Bash 성공(exit 0)이면 현재 게이트의 파일별
 반복 편집 카운터(file_edit_counts)를 리셋해, 수렴 중인 정상 반복은 thrash 트리거에
@@ -86,16 +88,19 @@ def main() -> int:
     if ctx is None:
         return 0
     root, state, gate = ctx
+    # 실패 이벤트(PostToolUseFailure)는 절대 수렴 신호가 아니다 — tool_response 에
+    # exit_code 가 없더라도 이벤트명으로 fail-closed 판정한다(기본값 0 오인 방지).
+    failed_event = data.get("hook_event_name") == "PostToolUseFailure"
     exit_code = (data.get("tool_response") or {}).get("exit_code", 0)
 
-    # ── layer-2 스코프 스윕 (R1) — exit code 무관 ──────────────────────────
+    # ── layer-2 스코프 스윕 (R1) — 성공/실패 무관 ──────────────────────────
     advisory = _sweep_advisory(root, gate, lib.scope_mode(root))
 
     # ── green Bash = 수렴 신호 → 반복(thrash) 카운터 리셋 ──────────────────
     # exit 0 이라도 "검증 명령"(테스트·빌드·린트)만 수렴으로 인정한다. ls·cat·git
     # status 같은 읽기전용 성공이 카운터를 리셋하면 thrash·롤오버 신호가 무력화된다.
     command = (data.get("tool_input") or {}).get("command", "")
-    if exit_code == 0 and lib.is_verification_command(command):
+    if not failed_event and exit_code == 0 and lib.is_verification_command(command):
         had_counts = bool(gate.get("file_edit_counts"))
         gate["last_successful_bash_ts"] = lib.now_iso()
         gate["file_edit_counts"] = {}

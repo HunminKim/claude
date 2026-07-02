@@ -44,34 +44,33 @@ def main() -> int:
     if root is None or not pl.pl_is_consented(root):
         return 0
 
-    active = pl.pl_load_active(root)
-    if active is None:
-        return 0  # prompt 없이 도구만 호출되는 경우 (이론상 드뭄)
-
     bucket = pl.pl_tool_bucket(tool_name)
-    tools = active.setdefault(
-        "tools",
-        {
-            "edit": 0,
-            "write": 0,
-            "multi_edit": 0,
-            "bash": 0,
-            "task": 0,
-            "agent": 0,
-            "other": 0,
-            "total": 0,
-        },
-    )
-    tools[bucket] = tools.get(bucket, 0) + 1
-    tools["total"] = tools.get("total", 0) + 1
-
     target = pl.pl_extract_target_file(tool_name, tool_input)
-    if target:
-        unique = active.setdefault("files", {}).setdefault("unique", [])
-        if target not in unique:
-            unique.append(target)
 
-    pl.pl_save_active(root, active)
+    def _bump(active):  # 락 안에서 실행 — 병렬 툴콜 RMW race 방지
+        tools = active.setdefault(
+            "tools",
+            {
+                "edit": 0,
+                "write": 0,
+                "multi_edit": 0,
+                "bash": 0,
+                "task": 0,
+                "agent": 0,
+                "other": 0,
+                "total": 0,
+            },
+        )
+        tools[bucket] = tools.get(bucket, 0) + 1
+        tools["total"] = tools.get("total", 0) + 1
+        if target:
+            unique = active.setdefault("files", {}).setdefault("unique", [])
+            if target not in unique:
+                unique.append(target)
+
+    # load→변형→save 를 pl_update_active 가 단일 락으로 수행.
+    # (과거: 쓰기 구간만 락 → 병렬 훅 2개가 같은 스냅샷을 읽고 카운트 유실)
+    pl.pl_update_active(root, _bump)  # active 없으면 no-op (prompt 없는 도구 호출)
     return 0
 
 

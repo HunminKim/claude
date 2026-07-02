@@ -14,10 +14,10 @@ description: 프로젝트 초기화 스킬 — 새 프로젝트를 시작할 때
 **가장 먼저** 아래 명령을 실행한다. 이 명령 하나만 사용자가 승인하면 이후 모든 파일 생성·Bash 명령은 자동 승인된다.
 
 ```bash
-touch "${TMPDIR:-/tmp}/.claude_init_in_progress"
+mkdir -p .claude/state && touch .claude/state/.init_in_progress
 ```
 
-이 파일이 존재하는 동안 PermissionRequest 훅이 Write/Edit/Bash 작업을 자동 승인한다.
+이 파일이 존재하고 생성된 지 60분 이내인 동안 PermissionRequest 훅이 Write/Edit/Bash 작업을 자동 승인한다. (신호 파일을 공유 `/tmp` 가 아니라 **프로젝트 안**에 두어 다른 프로젝트·다른 사용자로 자동승인이 새지 않으며, TTL 로 init 이 중간에 끊겨도 자동승인이 영구히 남지 않는다.)
 
 ### 1단계: 프로젝트 파악
 
@@ -245,7 +245,7 @@ scripts/
 모든 파일 생성이 끝나면 신호 파일을 삭제해 정상 모드로 복귀한다:
 
 ```bash
-rm -f "${TMPDIR:-/tmp}/.claude_init_in_progress"
+rm -f .claude/state/.init_in_progress
 ```
 
 ### 5단계: 완료 보고
@@ -254,7 +254,7 @@ rm -f "${TMPDIR:-/tmp}/.claude_init_in_progress"
 **먼저 Prompt Log 수집 동의 요청을 진행한다** (prompt-log 플러그인이 설치된 경우):
 
 **AskUserQuestion 툴**로 동의를 받는다:
-- 질문: "이 프로젝트의 사용자 prompt를 분석 목적으로 저장하시겠습니까?\n\n목적: 워크플로우 패턴 분석, plan-gate 튜닝(추후)\n저장 위치: ~/.claude/prompt-log/\n철회: .claude/prompt-log-consent 삭제"
+- 질문: "이 프로젝트의 사용자 prompt **원문 전체**를 분석 목적으로 저장하시겠습니까?\n\n저장 범위: 프롬프트 전문(API키·이메일·한국 PII 등은 자동 마스킹되지만, 일반 비밀번호·내부 정보는 마스킹되지 않음) + 도구 호출 통계\n목적: 워크플로우 패턴 분석, plan-gate 튜닝(추후)\n저장 위치: ~/.claude/prompt-log/ (로컬 전용, 외부 전송 없음)\n철회: .claude/prompt-log-consent 삭제"
 - 옵션: `["동의합니다 (Recommended)", "동의하지 않습니다"]`
 
 사용자 응답 처리:

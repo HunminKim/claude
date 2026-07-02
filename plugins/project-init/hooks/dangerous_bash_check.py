@@ -8,9 +8,11 @@
   4. 비밀 파일 내용 출력 명령 감지 (cat/head/tail .env 등)
   5. 인라인 토큰/시크릿 감지 (ghp_, sk-ant-, AKIA 등)
   6. 위험 감지 시 exit 2 (차단 + 사유 출력)
-  7. 안전한 명령은 exit 0 (통과)
+  7. plan-gate 전이 CLI 호출(approve/done 등) 감지 시 permissionDecision=ask 로 승격
+     (차단 아님 — 사용자 전용 결정을 Claude 가 Bash 로 우회 실행하는 것을 확인창으로 가드)
+  8. 안전한 명령은 exit 0 (통과)
 
-출력 채널: 차단
+출력 채널: 차단 (위험 명령) / 권한 승격 (plan-gate 전이 — exit 0 + permissionDecision=ask JSON)
 """
 from __future__ import annotations
 
@@ -29,19 +31,87 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
 DIVIDER = "━" * 55
 
 # 즉시 차단 — 복구 불가 수준의 파괴적 명령
+# (rm 의 루트/홈 재귀 삭제는 플래그 순서·형태가 다양해 _rm_targets_root 토큰 판정 +
+#  아래 substring 백스톱 정규식 둘 다로 판정 — 접두 래퍼·쿼팅 우회를 이중 방어)
 HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
-    # rm -rf / 또는 /* (루트 전체) — 플래그 순서·결합 무관, /* glob 포함
-    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
-    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
-    # rm -rf ~ (홈 전체) — 트레일링 슬래시 유무·플래그 순서 무관
-    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 디렉토리 전체 삭제)"),
-    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 디렉토리 전체 삭제)"),
-    (r"find\s+/\s+.*-delete\b", "find / -delete (루트 전체 탐색 삭제)"),
-    (r"find\s+/\s+.*-exec\s+rm\b", "find / -exec rm (루트 전체 삭제 실행)"),
+    # find / 또는 /* 루트 탐색 삭제 — `/` 뒤 공백 또는 `/*` glob 모두 커버(/home 등 하위는 제외)
+    (r"find\s+/\*?\s+.*-delete\b", "find / -delete (루트 전체 탐색 삭제)"),
+    (r"find\s+/\*?\s+.*-exec\s+rm\b", "find / -exec rm (루트 전체 삭제 실행)"),
     (r":\s*\(\s*\)\s*\{.*:\|:.*\}", "Fork bomb"),
     (r"dd\s+.*of=/dev/(sd|nvme|vd)[a-z]", "dd → 블록 디바이스 직접 덮어쓰기"),
     (r"mkfs\.", "파일시스템 포맷"),
+    # rm -rf / ~ substring 백스톱 — 토큰 판정이 못 잡는 쿼팅(`sh -c 'rm -rf /'`)·
+    # 이상 접두를 넓게 커버. 플래그 결합·순서 무관, `/` 뒤 공백/glob/끝/닫는따옴표만
+    # 루트로 인정(닫는따옴표: `sh -c "rm -rf /"` 처럼 중첩 인용 안의 삭제까지 커버).
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\*|\s|$|['\"`])", "rm -rf / (루트 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\*|\s|$|['\"`])", "rm -rf / (루트 전체 삭제)"),
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+~(?:/|\*|\s|$|['\"`])", "rm -rf ~ (홈 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+~(?:/|\*|\s|$|['\"`])", "rm -rf ~ (홈 전체 삭제)"),
 ]
+
+# rm 루트/홈 재귀 삭제 타겟 — /, //, /*, ~, ~/, $HOME, ${HOME} (하위 경로는 미매치)
+_RM_ROOT_TARGET_RE = re.compile(r"^(?:/+|/\*|~|~/|\$HOME|\$\{HOME\})/*\*?$")
+
+# rm 앞에 흔히 붙는 명령 래퍼 — 이들을 건너뛰고 실제 rm 토큰을 찾는다.
+# (sudo -E rm·env rm·time rm·\rm 우회 방지 — 래퍼 미스킵이 F1 회귀의 원인)
+_CMD_WRAPPERS = {
+    "sudo", "doas", "env", "time", "nice", "ionice", "command",
+    "exec", "builtin", "stdbuf", "nohup", "setsid",
+}
+
+
+def _find_rm_index(toks: list[str]) -> int:
+    """세그먼트 토큰 목록에서 실제 rm 실행 토큰의 인덱스. 없으면 -1.
+
+    첫 토큰이 rm(또는 `\\rm`)이면 그 자리. 래퍼(sudo/env/time/...)면 그 옵션·옵션값을
+    건너뛰며 rm 을 찾는다. 첫 토큰이 래퍼도 rm 도 아니면 이 세그먼트는 rm 명령이 아니다.
+    """
+    if not toks:
+        return -1
+    first = os.path.basename(toks[0].lstrip("\\"))
+    if first == "rm":
+        return 0
+    if first not in _CMD_WRAPPERS:
+        return -1
+    for i in range(1, len(toks)):
+        if os.path.basename(toks[i].lstrip("\\")) == "rm":
+            return i
+        if toks[i].startswith("-"):
+            continue  # 래퍼 옵션 (예: sudo -E, nice -n)
+        # 비옵션 토큰(옵션값·VAR=x 등)은 건너뛰고 계속 rm 을 찾는다
+    return -1
+
+
+def _is_recursive_flag(tok: str) -> bool:
+    """rm 인자 토큰이 재귀 플래그면 True (--recursive, -R, -rf/-fr 등 결합 short)."""
+    if tok == "--recursive":
+        return True
+    if tok.startswith("--"):
+        return False  # --force 등 — 재귀만으로 위험 판정
+    return tok.startswith("-") and "r" in tok[1:].lower()
+
+
+def _rm_targets_root(command: str) -> bool:
+    """rm 이 루트(/)·홈(~/$HOME) 전체를 재귀 삭제하려 하면 True (플래그 순서·형태 무관).
+
+    세그먼트별로 rm 호출(접두 래퍼 스킵 포함)을 찾아, 재귀 플래그(-r/-R/-rf 결합·
+    --recursive)와 루트/홈 타겟이 함께 있으면 차단한다. 긴옵션(`--recursive --force /`)·
+    `//`·`$HOME` 등 substring 정규식이 못 잡는 변형을 커버한다(정규식은 백스톱으로 병행).
+    하위 경로(`rm -rf build/`)는 타겟 정규식이 배제.
+    """
+    for seg in re.split(r"[;&|\n]+", command):
+        toks = seg.split()
+        idx = _find_rm_index(toks)
+        if idx < 0:
+            continue
+        # 인자 토큰의 감싼 따옴표 제거 — `rm -rf "/"`·`rm -rf "$HOME"` 처럼
+        # 셸이 실행 시 벗겨내는 인용 타겟을 정규식이 놓치던 우회를 봉합.
+        args = [t.strip("'\"") for t in toks[idx + 1:]]
+        recursive = any(_is_recursive_flag(t) for t in args)
+        targets = [t for t in args if not t.startswith("-")]
+        if recursive and any(_RM_ROOT_TARGET_RE.match(t) for t in targets):
+            return True
+    return False
 
 # 경고 후 차단 — 핵심 운영 파일 직접 삭제
 PROTECTED_FILES = [
@@ -50,10 +120,12 @@ PROTECTED_FILES = [
     "Dockerfile", ".env", "Makefile",
     "requirements.txt", "pyproject.toml",
 ]
+# 끝에 `(?![\w.-])` — 파일명 경계. `\b` 는 "Makefile-backup"·"api.key.md" 처럼
+# 하이픈/점으로 이어지는 무관 파일에서 성립해 오탐을 냈다(rm my-Makefile-backup 차단).
 _PROTECTED_RE = re.compile(
     r"(?:^|&&|\|;|\s)rm\s+[^;|&\n]*"
     r"(?:docker-compose[\w.-]*\.ya?ml|Dockerfile[\w.-]*|\.env[\w.-]*"
-    r"|requirements\.txt|pyproject\.toml|Makefile)\b",
+    r"|requirements\.txt|pyproject\.toml|Makefile)(?![\w.-])",
     re.IGNORECASE,
 )
 
@@ -76,11 +148,13 @@ _SECRET_FILES = (
     r"|(?:service_account[\w.-]*\.json)"
     r"|(?:[\w.-]*\.(?:pem|key|p12|pfx|jks|keystore))"
 )
-_SECRET_FILE_PAT = rf"(?:{_SECRET_FILES})\b"
+# 끝에 `(?![\w.-])` — 파일명 경계(`\b` 대신). `\b` 는 "notes.env.md"·"api.key.md"
+# 처럼 비밀 토큰 뒤에 `.확장자` 가 더 붙는 무관 문서 파일에서도 성립해 오탐을 냈다.
+_SECRET_FILE_PAT = rf"(?:{_SECRET_FILES})(?![\w.-])"
 
-# 명령 경계: 줄 시작·연결자·공백뿐 아니라 따옴표·괄호 뒤도 포함한다.
-# `bash -c 'cat .env'` 처럼 인터프리터 인용 안에 든 명령을 놓치지 않기 위함.
-_BND = r"(?:^|&&|\|\||\||;|\s|['\"(])"
+# 명령 경계: 줄 시작·연결자·공백뿐 아니라 따옴표·괄호·백틱 뒤도 포함한다.
+# `bash -c 'cat .env'`·`` `cat .env` `` 처럼 인용/명령치환 안에 든 명령을 놓치지 않기 위함.
+_BND = r"(?:^|&&|\|\||\||;|\s|['\"(`])"
 
 # 1) 내용을 stdout 으로 흘리는 리더 명령 (대폭 확장)
 _READ_CMDS = (
@@ -100,15 +174,40 @@ _SECRET_SOURCE_RE = re.compile(
 )
 # 3) 입력 리다이렉트: `cmd < .env`, `$(< .env)`
 _SECRET_REDIR_RE = re.compile(rf"<\s*[^\s;|&<>]*{_SECRET_FILE_PAT}", re.IGNORECASE)
-# 4) 복사/이동/전송 시 비밀 파일이 첫 인자(소스)로 — exfil 경로
+# 4) 복사/이동/링크/전송 시 비밀 파일이 소스로 — exfil 경로.
+#    ln 포함: `ln -s .env leak` 후 leak 을 읽으면 secret_read_guard 도 우회된다.
 _SECRET_COPY_RE = re.compile(
-    rf"{_BND}(?:cp|mv|scp|rsync|install|dd\s+if=)\s*"
+    rf"{_BND}(?:cp|mv|ln|scp|rsync|install|dd\s+if=)\s*"
     rf"(?:-\S+\s+)*[^\s;|&]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
-# 5) 인터프리터 인라인 코드(-c/-e)가 비밀 파일을 언급 — open()/File.read 노출
+# 4b) 아카이브/전송 도구 인자에 비밀 파일이 명시적으로 등장 — 한 명령 내 exfil.
+#     tar/zip 로 묶거나 nc 로 내보내며 비밀 파일명을 직접 지목하는 경우.
+#     ⚠️ curl/wget 은 여기서 제외 — URL 경로의 `foo.pem`(다운로드 목적지)까지 삼켜
+#     `curl https://x/pubkey.pem` 같은 정상 다운로드를 오탐했다(F3). 아래 업로드 문맥
+#     정규식으로만 잡는다.
+_SECRET_EXFIL_RE = re.compile(
+    rf"{_BND}(?:tar|zip|gzip|bzip2|xz|7z|nc|ncat|socat)\b"
+    rf"[^\n]*{_SECRET_FILE_PAT}",
+    re.IGNORECASE,
+)
+# 4c) curl/wget 은 비밀 파일이 실제 업로드 대상(=소스)일 때만 exfil 로 본다.
+#     - `-T/--upload-file <secret>` : 파일이 플래그 바로 뒤 인자.
+#     - `@<secret>` : -d/--data*/-F/--form 이 파일을 읽는 curl 문법(`@` 접두).
+#     플래그 뒤 아무 데나(예: URL 경로 `.../server.pem`)의 확장자는 목적지라 삼키지
+#     않는다 — `curl -d @payload https://x/certs/server.pem` 같은 정상 POST 오탐 방지.
+_SECRET_UPLOAD_RE = re.compile(
+    rf"(?:curl|wget)\b[^\n]*(?:"
+    rf"(?:-T|--upload-file)\s+['\"]?{_SECRET_FILE_PAT}"
+    rf"|@['\"]?{_SECRET_FILE_PAT}"
+    rf")",
+    re.IGNORECASE,
+)
+# 5) 인터프리터가 비밀 파일을 언급 — 인라인 코드(-c/-e)·stdin(`- `)·heredoc(<<) 모두.
+#    `python3 - <<EOF ... open('.env')` 처럼 -c 없이 stdin/heredoc 로 읽는 우회 포함.
 _INTERP_EVAL_RE = re.compile(
-    r"(?:python3?|node|deno|bun|ruby|perl|php)\b[^\n]*\s-(?:c|e)\b", re.IGNORECASE
+    r"(?:python3?|node|deno|bun|ruby|perl|php)\b[^\n]*(?:\s-(?:c|e)\b|\s-\s|\s-$|<<)",
+    re.IGNORECASE,
 )
 _SECRET_ANY_RE = re.compile(_SECRET_FILE_PAT, re.IGNORECASE)
 
@@ -123,6 +222,10 @@ def _reads_secret(command: str) -> bool:
         return True
     if _SECRET_COPY_RE.search(command):
         return True
+    if _SECRET_EXFIL_RE.search(command):
+        return True
+    if _SECRET_UPLOAD_RE.search(command):
+        return True
     if _INTERP_EVAL_RE.search(command) and _SECRET_ANY_RE.search(command):
         return True
     return False
@@ -131,8 +234,10 @@ def _reads_secret(command: str) -> bool:
 
 INLINE_TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # 순서: 구체적 패턴 → 일반 패턴 (sk-ant- 가 sk- 보다 먼저)
-    (re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"), "Anthropic API 키"),
-    (re.compile(r"sk-[A-Za-z0-9]{20,}"), "OpenAI API 키"),
+    # 앞에 영숫자가 있으면 매치 금지 — "task-..."·"desk-..." 같은 평범한 토큰이
+    # 단어 내부 "sk-" 로 OpenAI 키 오인돼 실사용 명령(git checkout 등)이 차단되던 오탐 방지.
+    (re.compile(r"(?<![A-Za-z0-9])sk-ant-[A-Za-z0-9_\-]{20,}"), "Anthropic API 키"),
+    (re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9]{20,}"), "OpenAI API 키"),
     (re.compile(r"ghp_[A-Za-z0-9]{30,}"), "GitHub PAT"),
     (re.compile(r"ghs_[A-Za-z0-9]{30,}"), "GitHub Secret"),
     (re.compile(r"gho_[A-Za-z0-9]{30,}"), "GitHub OAuth 토큰"),
@@ -141,6 +246,42 @@ INLINE_TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"xox[baprs]-[A-Za-z0-9\-]+"), "Slack 토큰"),
     (re.compile(r"https?://[^\s:]+:[^\s@]+@"), "URL 내장 인증정보"),
 ]
+
+
+# ── Layer: plan-gate 자가 전이 승격 (차단 아님 — 사용자 확인 ask) ─────────
+# 게이트 전이(approve/done/…)는 사용자 전용 통제 지점인데, Claude 가 Bash 로
+# plan_gate_cli.py 를 직접 호출하면 슬래시 커맨드의 disable-model-invocation 을
+# 우회해 자가승인·자가마감이 가능하다. 차단(exit 2)하지 않는 이유: /approve-plan
+# 슬래시 커맨드 자체가 같은 명령을 실행하므로, 정당한 사용자 경로까지 죽이지 않고
+# 권한창(ask)으로 올려 사용자가 한 번 확인하게 한다. status/subplan(의도적 Claude
+# 호출 가능)·scope-shadow/enforce 는 승격 대상이 아니다.
+_GATE_TRANSITION_RE = re.compile(
+    r"plan_gate_cli\.py['\"]?\s+"
+    r"(approve|done|skip|skip-verify|retry|replan|rollback|off|scope-off)(?!\S)"
+)
+
+
+def _gate_self_transition(command: str) -> str | None:
+    """명령이 plan-gate 전이 CLI 호출이면 액션명 반환, 아니면 None."""
+    m = _GATE_TRANSITION_RE.search(command)
+    return m.group(1) if m else None
+
+
+def _emit_ask(action: str) -> None:
+    """PreToolUse permissionDecision=ask — 사용자 확인 후에만 실행되게 승격."""
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": (
+                f"[plan-gate] '{action}' 는 게이트 상태를 바꾸는 사용자 전용 결정입니다. "
+                "Claude 의 자율 실행이면 거부하고 슬래시 커맨드(/approve-plan 등)로 "
+                "직접 입력하세요. 사용자가 요청한 실행이면 허용해도 됩니다."
+            ),
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.flush()
 
 
 def _deletes_project_root(command: str) -> bool:
@@ -161,6 +302,8 @@ def _check(command: str) -> tuple[bool, str]:
     for pattern, reason in HARD_BLOCK_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
             return True, reason
+    if _rm_targets_root(command):
+        return True, "rm 루트/홈 전체 재귀 삭제 감지"
     if _deletes_project_root(command):
         return True, "작업 디렉토리(CLAUDE_PROJECT_DIR) 전체 삭제 감지"
     if _PROTECTED_RE.search(command):
@@ -189,6 +332,9 @@ def main() -> int:
 
     blocked, reason = _check(command)
     if not blocked:
+        action = _gate_self_transition(command)
+        if action:
+            _emit_ask(action)  # 차단 아님 — 사용자 확인(ask)으로 승격
         return 0
 
     sys.stderr.write("\n".join([

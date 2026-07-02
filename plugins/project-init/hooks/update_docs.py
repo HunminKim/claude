@@ -81,16 +81,54 @@ def main() -> int:
         _log(f"[update_docs] 결과 파일 읽기 실패: {e}")
         return 0
 
-    docs_dir = result_path.parent
-    feature_name = result.get("feature_name", "알 수 없음")
-    timestamp = result.get("timestamp", "")
+    # 4. 문서/게이트 갱신 — 어떤 예외가 나도 결과 파일은 finally 로 삭제한다.
+    #    verifier 는 LLM 이라 스키마 이탈이 정상 시나리오다. 과거: 비정형 test_items
+    #    (dict 아닌 문자열)에 AttributeError → rc=1 + 임시파일 잔존 + 게이트 미갱신.
+    try:
+        return _process(result_path.parent, result)
+    except Exception as e:
+        _log(f"[update_docs] ⚠️ 결과 처리 실패(스키마 이탈?): {e} — 문서 자동화 건너뜀")
+        return 0
+    finally:
+        try:
+            result_path.unlink()
+            _log("[update_docs] .verifier_result.json 삭제 완료")
+        except OSError:
+            pass
+
+
+def _coerce_items(raw: Any) -> list[dict[str, Any]]:
+    """test_items 를 dict 리스트로 정규화 — 문자열 항목은 {'item': ...} 로 감싼다."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for t in raw:
+        if isinstance(t, dict):
+            out.append(t)
+        elif isinstance(t, str):
+            out.append({"item": t})
+    return out
+
+
+def _str_list(raw: Any) -> list[str]:
+    """리스트가 아니거나 비문자 항목이 섞여도 문자열 리스트로 정규화."""
+    if not isinstance(raw, list):
+        return [str(raw)] if raw else []
+    return [str(x) for x in raw]
+
+
+def _process(docs_dir: Path, result: dict[str, Any]) -> int:
+    """결과 dict 를 문서·게이트에 반영. 필드는 전부 방어적으로 정규화해서 쓴다."""
+    feature_name = str(result.get("feature_name") or "알 수 없음")
+    timestamp = str(result.get("timestamp") or "")
     verdict = result.get("verdict", "❓")
-    test_items = result.get("test_items", [])
-    issues = result.get("issues", [])
-    code_smells = result.get("code_smells", [])
-    critical_constraints = result.get("critical_constraints", [])
-    evidence = result.get("evidence", "")
-    impl = result.get("implementation", {})
+    test_items = _coerce_items(result.get("test_items"))
+    issues = _str_list(result.get("issues"))
+    code_smells = _str_list(result.get("code_smells"))
+    critical_constraints = _str_list(result.get("critical_constraints"))
+    evidence = str(result.get("evidence") or "")
+    _raw_impl = result.get("implementation")
+    impl = _raw_impl if isinstance(_raw_impl, dict) else {}
 
     # ── 실행 grounding 강제 (✅ 의 최소 조건 — verifier.md 규칙의 기계 강제) ──
     # verifier.md 는 "✅ 는 최소 1개 항목이 실제 실행으로 입증" 을 프로즈로만 요구했다.
@@ -102,7 +140,9 @@ def main() -> int:
     _EXEC_METHODS = {"mocked", "isolated_exec", "production_exec"}
     if verdict == "✅":
         grounded = any((t.get("method") or "").strip() in _EXEC_METHODS for t in test_items)
-        exempt = "실행 불가" in (evidence or "")
+        # verifier.md 가 명시한 면제 마커 전체("전 항목 실행 불가")를 요구한다 —
+        # "실행 불가" substring 만 보면 다른 맥락의 문장으로도 면제가 성립하는 구멍.
+        exempt = "전 항목 실행 불가" in (evidence or "")
         if not grounded and not exempt:
             verdict = "❌"
             issues = list(issues) + [
@@ -232,12 +272,20 @@ def main() -> int:
         _log(f"[update_docs] technical_doc.md 업데이트 완료: {feature_name}")
 
     # ── CLAUDE.md 알려진 버그/제약 업데이트 ──────────────────────────────
-    if critical_constraints:
-        claude_path = docs_dir.parent / "CLAUDE.md"
-        if claude_path.exists():
-            content = claude_path.read_text(encoding="utf-8", errors="ignore")
-            section_header = "## 알려진 버그 / 제약"
-            new_items = "\n".join(f"- {c}" for c in critical_constraints)
+    claude_path = docs_dir.parent / "CLAUDE.md"
+    if critical_constraints and claude_path.exists():
+        content = claude_path.read_text(encoding="utf-8", errors="ignore")
+        section_header = "## 알려진 버그 / 제약"
+        # 이미 기재된 항목은 건너뛴다 — /retry 재검증 사이클마다 같은 제약이
+        # 무한 누적되는 것을 방지 (dedup 없던 회귀). ⚠️ 라인 단위 정확 비교 —
+        # substring(`f"- {c}" in content`)은 새 제약이 기존 줄의 접두면 신규인데도
+        # "기존재"로 오판해 유실됐다(예: "캐시 무효화" ⊂ "- 캐시 무효화가 안 됨").
+        existing_lines = {ln.strip() for ln in content.splitlines()}
+        fresh = [c for c in critical_constraints if f"- {c}" not in existing_lines]
+        if not fresh:
+            _log("[update_docs] CLAUDE.md 제약 전부 기존재 — 건너뜀")
+        else:
+            new_items = "\n".join(f"- {c}" for c in fresh)
 
             if section_header in content:
                 # 섹션 끝(다음 ## 또는 파일 끝) 바로 앞에 삽입
@@ -261,7 +309,7 @@ def main() -> int:
                 content += f"\n\n{section_header}\n\n{new_items}\n"
                 claude_path.write_text(content, encoding="utf-8")
 
-            _log(f"[update_docs] CLAUDE.md 알려진 버그/제약 업데이트: {len(critical_constraints)}건")
+            _log(f"[update_docs] CLAUDE.md 알려진 버그/제약 업데이트: {len(fresh)}건")
 
     # ── plan-gate state 갱신 (D3) ─────────────────────────────────────────
     # verifier 결과를 plan-gate 상태에 반영. 자동 /done이나 /rollback은 하지 않고,
@@ -345,10 +393,7 @@ def main() -> int:
     except Exception as _e:  # plan-gate 통합 실패는 verifier 흐름을 깨뜨리지 않는다
         _log(f"[update_docs] plan-gate 통합 경고: {_e}")
 
-    # 4. 결과 파일 삭제 (verifier 전용 임시 파일)
-    result_path.unlink()
-    _log("[update_docs] .verifier_result.json 삭제 완료")
-    return 0
+    return 0  # 결과 파일 삭제는 main 의 finally 가 담당
 
 
 if __name__ == "__main__":
