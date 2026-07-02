@@ -2225,6 +2225,49 @@ def t_command_fallback() -> None:
           not ({"subplan", "status", "scope-enforce"} & set(pa._ACTION_TOKENS)))
 
 
+def t_token_exact_match_guard(base: Path) -> None:
+    """평문 프롬프트 첫 단어가 토큰과 겹쳐도 전이가 오발하면 안 된다.
+
+    회귀 방지: "rollback the api change please" 같은 문장의 첫 단어만 보고 CLI 를
+    실행하면 working tree 가 복원(데이터 손실)되던 버그. 인자 없는 토큰은 프롬프트
+    전체가 토큰 하나와 정확히 일치할 때만 발화해야 한다. subplan(인자 받음)은 예외.
+    """
+    print("[41] 평문 토큰 정확일치 가드 (오발 방지)")
+    approval = HOOKS / "plan_approval.py"
+
+    # ── 파괴적 문장은 무시돼야 한다 (rollback 오발 → 편집 소실 방지) ──
+    p = make_project(base, "tok_rollback_sentence")
+    f = p / "f.txt"
+    f.write_text("original\n")
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", f), p)  # 게이트 열기
+    f.write_text("original\nedited\n")  # 편집 발생
+    r = run_hook(approval, {"prompt": "rollback the api change please"}, p)
+    check(
+        "평문 'rollback ...' 문장 → 롤백 미발화(편집 보존)",
+        r.returncode == 0 and f.read_text() == "original\nedited\n"
+        and get_gate(p)["state"] == "created",
+        f"rc={r.returncode} file={f.read_text()!r} state={get_gate(p)['state']}",
+    )
+
+    # ── 정확한 토큰은 그대로 동작해야 한다 (기능 보존) ──
+    r = run_hook(approval, {"prompt": "rollback"}, p)
+    check(
+        "정확히 'rollback' → 롤백 발화(편집 전 상태 복원)",
+        f.read_text() == "original\n" and get_gate(p)["state"] == "rolled_back",
+        f"file={f.read_text()!r} state={get_gate(p)['state']}",
+    )
+
+    # ── done 문장도 오발 금지 (무단 게이트 마감 방지) ──
+    p2 = make_project(base, "tok_done_sentence")
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p2 / "a.py"), p2)
+    r = run_hook(approval, {"prompt": "done with the feature now, moving on"}, p2)
+    check(
+        "평문 'done ...' 문장 → done 미발화(게이트 유지)",
+        get_gate(p2)["state"] == "created",
+        f"state={get_gate(p2)['state']}",
+    )
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -2381,6 +2424,7 @@ def main() -> int:
         t_preapprove_snapshot(base)
         t_scope_hardening(base)
         t_scope_auto_revert(base)
+        t_token_exact_match_guard(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
     t_scaffold_consistency()
