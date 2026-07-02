@@ -63,14 +63,18 @@ def _emit_deny(reason: str) -> None:
 
 
 def _emit_advisories(items: list[str]) -> None:
-    """누적된 환기 메시지를 hookSpecificOutput.additionalContext JSON 한 번으로 출력."""
+    """누적된 환기 메시지를 hookSpecificOutput.additionalContext JSON 한 번으로 출력.
+
+    ⚠️ permissionDecision 은 싣지 않는다 — "allow" 를 함께 실으면 환기가 붙은
+    Edit/Write 가 사용자 권한 프롬프트를 우회해 자동 허용된다(환기는 정보 주입일 뿐
+    권한 판단이 아니다). additionalContext 는 단독 사용이 공식 스펙상 유효하다.
+    """
     if not items:
         return
     combined = "\n\n".join(items)
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
             "additionalContext": combined,
         }
     }

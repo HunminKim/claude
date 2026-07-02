@@ -14,7 +14,7 @@ matcher 의 letter-only 토큰은 tool_name 정확일치라 "Task" 단독이면 
    (verifier/Plan/Explore 등 유틸·미정의 에이전트는 통과)
 3. tool_input.prompt 에서 TASK / USER_DECISIONS / CONSTRAINTS / GATE 4블록 존재 확인
 4. 누락 시 stderr + exit 2 — Claude context 에 blocking error 주입, 보강 후 재호출 유도
-5. 통과 시 hookSpecificOutput JSON 출력 (permissionDecision=allow + additionalContext) + exit 0
+5. 통과 시 hookSpecificOutput JSON 출력 (additionalContext 단독 — 권한 판단 없음) + exit 0
    — 차단 없이 Plan 검증 환기 메시지를 Claude context 에 주입 (exit 0 + plain stderr 는
    사용자 터미널만 보이고 메인 context 에 안 들어가므로 무효)
 
@@ -73,10 +73,11 @@ def main() -> int:
         )
         return 2
 
+    # permissionDecision 은 싣지 않는다 — "allow" 를 실으면 이 환기가 붙은 Agent 호출이
+    # 사용자 권한 프롬프트를 우회한다(환기는 정보 주입일 뿐 권한 판단이 아니다).
     advisory = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
             "additionalContext": (
                 "[delegation-prompt-check] 도메인 위임 직전 — "
                 "Plan subagent 외부 검증 호출했는가? "

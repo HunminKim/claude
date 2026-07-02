@@ -8,9 +8,11 @@
   4. 비밀 파일 내용 출력 명령 감지 (cat/head/tail .env 등)
   5. 인라인 토큰/시크릿 감지 (ghp_, sk-ant-, AKIA 등)
   6. 위험 감지 시 exit 2 (차단 + 사유 출력)
-  7. 안전한 명령은 exit 0 (통과)
+  7. plan-gate 전이 CLI 호출(approve/done 등) 감지 시 permissionDecision=ask 로 승격
+     (차단 아님 — 사용자 전용 결정을 Claude 가 Bash 로 우회 실행하는 것을 확인창으로 가드)
+  8. 안전한 명령은 exit 0 (통과)
 
-출력 채널: 차단
+출력 채널: 차단 (위험 명령) / 권한 승격 (plan-gate 전이 — exit 0 + permissionDecision=ask JSON)
 """
 from __future__ import annotations
 
@@ -192,6 +194,42 @@ INLINE_TOKEN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+# ── Layer: plan-gate 자가 전이 승격 (차단 아님 — 사용자 확인 ask) ─────────
+# 게이트 전이(approve/done/…)는 사용자 전용 통제 지점인데, Claude 가 Bash 로
+# plan_gate_cli.py 를 직접 호출하면 슬래시 커맨드의 disable-model-invocation 을
+# 우회해 자가승인·자가마감이 가능하다. 차단(exit 2)하지 않는 이유: /approve-plan
+# 슬래시 커맨드 자체가 같은 명령을 실행하므로, 정당한 사용자 경로까지 죽이지 않고
+# 권한창(ask)으로 올려 사용자가 한 번 확인하게 한다. status/subplan(의도적 Claude
+# 호출 가능)·scope-shadow/enforce 는 승격 대상이 아니다.
+_GATE_TRANSITION_RE = re.compile(
+    r"plan_gate_cli\.py['\"]?\s+"
+    r"(approve|done|skip|skip-verify|retry|replan|rollback|off|scope-off)(?!\S)"
+)
+
+
+def _gate_self_transition(command: str) -> str | None:
+    """명령이 plan-gate 전이 CLI 호출이면 액션명 반환, 아니면 None."""
+    m = _GATE_TRANSITION_RE.search(command)
+    return m.group(1) if m else None
+
+
+def _emit_ask(action: str) -> None:
+    """PreToolUse permissionDecision=ask — 사용자 확인 후에만 실행되게 승격."""
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": (
+                f"[plan-gate] '{action}' 는 게이트 상태를 바꾸는 사용자 전용 결정입니다. "
+                "Claude 의 자율 실행이면 거부하고 슬래시 커맨드(/approve-plan 등)로 "
+                "직접 입력하세요. 사용자가 요청한 실행이면 허용해도 됩니다."
+            ),
+        }
+    }
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    sys.stdout.flush()
+
+
 def _deletes_project_root(command: str) -> bool:
     """rm -rf 가 작업 디렉토리 루트(CLAUDE_PROJECT_DIR) 전체를 지우면 True.
 
@@ -240,6 +278,9 @@ def main() -> int:
 
     blocked, reason = _check(command)
     if not blocked:
+        action = _gate_self_transition(command)
+        if action:
+            _emit_ask(action)  # 차단 아님 — 사용자 확인(ask)으로 승격
         return 0
 
     sys.stderr.write("\n".join([

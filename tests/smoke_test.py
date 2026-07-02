@@ -2346,6 +2346,116 @@ def t_init_permission_signal(base: Path) -> None:
     )
 
 
+def t_advisory_no_permission(base: Path) -> None:
+    """환기(advisory)가 권한 판단을 싣지 않는다 + 자가 전이는 ask 로 승격된다.
+
+    회귀 방지: (1) advisory 에 permissionDecision="allow" 가 실려 환기 붙은 편집이
+    권한 프롬프트를 우회하던 버그. (2) Claude 가 Bash 로 plan_gate_cli 전이를 직접
+    실행해 사용자 전용 게이트를 우회하던 경로 — 차단 아닌 ask(사용자 확인) 승격.
+    """
+    print("[44] advisory 무권한 + 자가 전이 ask 승격")
+
+    # ── plan_gate advisory: additionalContext 단독, permissionDecision 없음 ──
+    p = make_project(base, "adv_noperm")
+    (p / "tasks").mkdir()
+    (p / "tasks" / "todo.md").write_text("## 목표\n이유\n- [ ] a\n- [ ] b\n", encoding="utf-8")
+    r = run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "f.py"), p)
+    d = json.loads(r.stdout.strip())["hookSpecificOutput"]
+    check(
+        "plan_gate advisory = additionalContext 단독 (권한 우회 없음)",
+        "additionalContext" in d and "permissionDecision" not in d,
+        f"keys={sorted(d)}",
+    )
+
+    # ── dangerous_bash: 전이 CLI 호출 → ask / status·subplan → 무간섭 ──
+    hook = HOOKS / "dangerous_bash_check.py"
+
+    def decision(cmd: str) -> str | None:
+        r = run_hook(hook, {"tool_name": "Bash", "tool_input": {"command": cmd}}, p)
+        try:
+            return json.loads(r.stdout.strip())["hookSpecificOutput"]["permissionDecision"]
+        except Exception:
+            return None
+
+    for action in ["approve", "done", "skip-verify", "rollback", "off"]:
+        check(
+            f"plan_gate_cli {action} → ask 승격",
+            decision(f"python3 x/hooks/plan_gate_cli.py {action}") == "ask",
+        )
+    for action in ["status", "subplan src/**", "scope-shadow"]:
+        check(
+            f"plan_gate_cli {action} → 무간섭 (조회·의도적 Claude 경로)",
+            decision(f"python3 x/hooks/plan_gate_cli.py {action}") is None,
+        )
+
+
+def t_failed_bash_no_green_reset(base: Path) -> None:
+    """PostToolUseFailure 이벤트는 절대 green-reset 하지 않는다 (+배선 존재).
+
+    공식 스펙상 PostToolUse 는 성공 시에만 발화하므로 실패한 Bash 의 스코프밖
+    생성물을 잡으려면 PostToolUseFailure 에도 plan_gate_bash 가 배선돼야 하고,
+    그 경로에서 exit_code 부재(기본 0)로 thrash 카운터가 리셋되면 안 된다.
+    """
+    print("[45] 실패 Bash — 스윕 배선 + green-reset 미발화")
+
+    # 배선: hooks.json PostToolUseFailure 에 plan_gate_bash.py 존재
+    hooks_cfg = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
+    ptuf = json.dumps(hooks_cfg["hooks"].get("PostToolUseFailure", []))
+    check("hooks.json: PostToolUseFailure 에 plan_gate_bash 배선", "plan_gate_bash.py" in ptuf)
+
+    # 행위: 실패 이벤트 + 검증 명령 → 카운터 보존 / 성공 이벤트 → 리셋
+    p = make_project(base, "failbash")
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "a.py"), p)
+    set_gate(p, file_edit_counts={"a.py": 3})
+    run_hook(
+        HOOKS / "plan_gate_bash.py",
+        {"hook_event_name": "PostToolUseFailure", "tool_name": "Bash",
+         "tool_input": {"command": "pytest"}, "tool_response": {}},
+        p,
+    )
+    check("실패 이벤트: thrash 카운터 보존", get_gate(p)["file_edit_counts"].get("a.py") == 3)
+    run_hook(
+        HOOKS / "plan_gate_bash.py",
+        {"hook_event_name": "PostToolUse", "tool_name": "Bash",
+         "tool_input": {"command": "pytest"}, "tool_response": {"exit_code": 0}},
+        p,
+    )
+    check("성공 이벤트: green-reset 동작", get_gate(p)["file_edit_counts"] == {})
+
+
+def t_update_docs_malformed(base: Path) -> None:
+    """update_docs 가 verifier 의 비정형 JSON(스키마 이탈)에도 죽지 않는다.
+
+    verifier 는 LLM 이라 test_items 가 문자열 리스트로 오는 등 이탈이 정상
+    시나리오. 회귀 방지: AttributeError → rc=1 + 임시파일 잔존 + 게이트 미갱신.
+    """
+    print("[46] update_docs 비정형 입력 방어")
+    p = _approved_gate_project(base, "malformed_verifier")
+    docs = p / "docs"
+    docs.mkdir(exist_ok=True)
+    rj = docs / ".verifier_result.json"
+    rj.write_text(json.dumps({
+        "feature_name": "x", "verdict": "✅",
+        "test_items": ["ran pytest"],          # dict 아님 — 스키마 이탈
+        "issues": "one issue",                  # 리스트 아님
+        "implementation": "not-a-dict",         # dict 아님
+        "evidence": "ok",
+    }, ensure_ascii=False), encoding="utf-8")
+    r = run_hook(
+        HOOKS / "update_docs.py",
+        {"tool_name": "Write", "tool_input": {"file_path": str(rj)}},
+        p,
+    )
+    check(
+        "비정형 입력 → rc=0 + traceback 없음 + 임시파일 삭제",
+        r.returncode == 0 and "Traceback" not in r.stderr and not rj.exists(),
+        f"rc={r.returncode} exists={rj.exists()} err={r.stderr[:80]!r}",
+    )
+    # 실행 grounding 은 여전히 동작: 전 항목 비실행 → ❌ 강등돼 게이트에 반영
+    check("스키마 이탈에도 grounding 강등 반영", get_gate(p).get("verifier_status") == "❌",
+          f"vs={get_gate(p).get('verifier_status')}")
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -2504,6 +2614,9 @@ def main() -> int:
         t_scope_auto_revert(base)
         t_token_exact_match_guard(base)
         t_init_permission_signal(base)
+        t_advisory_no_permission(base)
+        t_failed_bash_no_green_reset(base)
+        t_update_docs_malformed(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
     t_scaffold_consistency()
