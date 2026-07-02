@@ -41,11 +41,12 @@ HARD_BLOCK_PATTERNS: list[tuple[str, str]] = [
     (r"dd\s+.*of=/dev/(sd|nvme|vd)[a-z]", "dd → 블록 디바이스 직접 덮어쓰기"),
     (r"mkfs\.", "파일시스템 포맷"),
     # rm -rf / ~ substring 백스톱 — 토큰 판정이 못 잡는 쿼팅(`sh -c 'rm -rf /'`)·
-    # 이상 접두를 넓게 커버. 플래그 결합·순서 무관, `/` 뒤 공백/glob/끝만 루트로 인정.
-    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
-    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\*|\s|$)", "rm -rf / (루트 전체 삭제)"),
-    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 전체 삭제)"),
-    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+~(?:/|\*|\s|$)", "rm -rf ~ (홈 전체 삭제)"),
+    # 이상 접두를 넓게 커버. 플래그 결합·순서 무관, `/` 뒤 공백/glob/끝/닫는따옴표만
+    # 루트로 인정(닫는따옴표: `sh -c "rm -rf /"` 처럼 중첩 인용 안의 삭제까지 커버).
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+/(?:\*|\s|$|['\"`])", "rm -rf / (루트 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+/(?:\*|\s|$|['\"`])", "rm -rf / (루트 전체 삭제)"),
+    (r"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+~(?:/|\*|\s|$|['\"`])", "rm -rf ~ (홈 전체 삭제)"),
+    (r"rm\s+-[a-z]*f[a-z]*r[a-z]*\s+~(?:/|\*|\s|$|['\"`])", "rm -rf ~ (홈 전체 삭제)"),
 ]
 
 # rm 루트/홈 재귀 삭제 타겟 — /, //, /*, ~, ~/, $HOME, ${HOME} (하위 경로는 미매치)
@@ -103,7 +104,9 @@ def _rm_targets_root(command: str) -> bool:
         idx = _find_rm_index(toks)
         if idx < 0:
             continue
-        args = toks[idx + 1:]
+        # 인자 토큰의 감싼 따옴표 제거 — `rm -rf "/"`·`rm -rf "$HOME"` 처럼
+        # 셸이 실행 시 벗겨내는 인용 타겟을 정규식이 놓치던 우회를 봉합.
+        args = [t.strip("'\"") for t in toks[idx + 1:]]
         recursive = any(_is_recursive_flag(t) for t in args)
         targets = [t for t in args if not t.startswith("-")]
         if recursive and any(_RM_ROOT_TARGET_RE.match(t) for t in targets):
@@ -188,13 +191,16 @@ _SECRET_EXFIL_RE = re.compile(
     rf"[^\n]*{_SECRET_FILE_PAT}",
     re.IGNORECASE,
 )
-# 4c) curl/wget 은 업로드 문맥(-T/--upload-file/-d/--data*/-F/--form)에서 비밀 파일이
-#     등장할 때만 exfil 로 본다. 일반 다운로드(URL 경로의 확장자)는 소스가 아니라
-#     목적지라 제외한다.
+# 4c) curl/wget 은 비밀 파일이 실제 업로드 대상(=소스)일 때만 exfil 로 본다.
+#     - `-T/--upload-file <secret>` : 파일이 플래그 바로 뒤 인자.
+#     - `@<secret>` : -d/--data*/-F/--form 이 파일을 읽는 curl 문법(`@` 접두).
+#     플래그 뒤 아무 데나(예: URL 경로 `.../server.pem`)의 확장자는 목적지라 삼키지
+#     않는다 — `curl -d @payload https://x/certs/server.pem` 같은 정상 POST 오탐 방지.
 _SECRET_UPLOAD_RE = re.compile(
-    rf"(?:curl|wget)\b[^\n]*"
-    rf"(?:-T|--upload-file|-d|--data(?:-binary|-raw|-urlencode)?|-F|--form)\s+"
-    rf"[^\n]*{_SECRET_FILE_PAT}",
+    rf"(?:curl|wget)\b[^\n]*(?:"
+    rf"(?:-T|--upload-file)\s+['\"]?{_SECRET_FILE_PAT}"
+    rf"|@['\"]?{_SECRET_FILE_PAT}"
+    rf")",
     re.IGNORECASE,
 )
 # 5) 인터프리터가 비밀 파일을 언급 — 인라인 코드(-c/-e)·stdin(`- `)·heredoc(<<) 모두.
