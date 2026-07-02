@@ -6,8 +6,10 @@ PyYAML 없으면 검증을 스킵하고 성공으로 종료한다.
 다언어 지원: banned 의존성을 언어별 import 문법(Python/JS·TS/Go/Rust)으로 검사한다.
 해당 언어 소스가 없으면 그 패턴은 자연히 매치되지 않는다.
 """
-import sys
+from __future__ import annotations  # 3.8 등 구버전에서 모듈 레벨 제네릭 주석 즉사 방지
+
 import subprocess
+import sys
 from pathlib import Path
 
 # Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
@@ -46,16 +48,28 @@ def load_constraints() -> dict:
         print(f"[validate_arch] constraints.yaml 파싱 오류: {e} — 검증 스킵")
         return {}
 
+# 벤더/생성물 디렉토리 제외 — .venv 안의 `import requests` 가 매치되어 본인 코드는
+# 깨끗한데 push 가 영구 차단되던 오탐 방지 (+대형 node_modules 스캔 성능).
+_EXCLUDE_DIRS = (
+    "scripts", ".git", ".venv", "venv", "env", "node_modules", "__pycache__",
+    "site-packages", "dist", "build", ".tox", ".mypy_cache", ".ruff_cache", "vendor",
+)
+
+
 def _imports_dependency(name: str) -> bool:
     """name 의존성이 어떤 언어 소스에든 import/use 되면 True (언어별 문법 검사)."""
+    exclude_args = []
+    for d in _EXCLUDE_DIRS:
+        exclude_args += [f"--exclude-dir={d}"]
     for includes, templates in LANG_RULES:
         include_args = []
         for inc in includes:
             include_args += ["--include", inc]
         for template in templates:
             pattern = template.format(name=name)
+            # -F: 패턴을 리터럴로 — 의존성명에 정규식 특수문자가 있어도 오동작 없음
             result = subprocess.run(
-                ["grep", "-r", *include_args, "--exclude-dir=scripts", pattern, str(PROJECT_ROOT)],
+                ["grep", "-rF", *include_args, *exclude_args, pattern, str(PROJECT_ROOT)],
                 capture_output=True, text=True
             )
             if result.returncode == 0 and result.stdout.strip():

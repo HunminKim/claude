@@ -64,7 +64,9 @@ from pathlib import Path
 root = Path(os.environ['PROJECT_ROOT'])
 try:
     import yaml
-    with open(root / 'docs' / 'constraints.yaml') as f:
+    # encoding 명시 — Windows(Git Bash+cp949 파이썬)에서 한국어 주석 포함 yaml 이
+    # UnicodeDecodeError 로 죽어 커스텀 temp_patterns 이 조용히 무시되던 사각 방지
+    with open(root / 'docs' / 'constraints.yaml', encoding='utf-8', errors='ignore') as f:
         data = yaml.safe_load(f) or {}
     p = data.get('temp_patterns', {})
     # debug_/_debug 는 기본 제외 — 정식 소스(*_debug.h 등)와 오탐. 잡으려면 constraints.yaml 에 opt-in.
@@ -95,10 +97,15 @@ PYEOF
     fi
 fi
 
-# CLAUDE.md 명령어 섹션에서 lint 명령을 모두 추출한다.
+# CLAUDE.md 의 ``` 코드펜스 안에서만 lint 명령을 추출한다.
 # - 단독 린터/타입체커: ruff, eslint, tsc 등
 # - npm/pnpm/yarn/bun 스크립트는 lint 만 매칭 (build/test 오실행 방지)
-LINT_CMDS=$(grep -E "^\s*((ruff|pylint|flake8|eslint|tsc|mypy|black|isort)\b|(npm|pnpm|yarn|bun)(\s+run)?\s+lint\b)" "$CLAUDE_MD" 2>/dev/null | sed 's/^[[:space:]]*//')
+# ⚠️ 전문 grep 금지: 산문("mypy strict 모드는 쓰지 않는다" 등)이 매치되면 그 줄이
+#    그대로 eval 실행된다 — 문서 문장이 셸 명령이 되는 injection 표면.
+#    컨벤션: 실행할 명령은 반드시 코드펜스(```) 안에 적는다.
+LINT_CMDS=$(awk '/^[[:space:]]*```/{fence=!fence; next} fence' "$CLAUDE_MD" 2>/dev/null \
+    | grep -E "^\s*((ruff|pylint|flake8|eslint|tsc|mypy|black|isort)\b|(npm|pnpm|yarn|bun)(\s+run)?\s+lint\b)" \
+    | sed 's/^[[:space:]]*//')
 
 if [ -z "$LINT_CMDS" ]; then
     echo "[pre-commit] 경고: CLAUDE.md에 등록된 lint 명령이 없어 lint 검증을 건너뜁니다." >&2
