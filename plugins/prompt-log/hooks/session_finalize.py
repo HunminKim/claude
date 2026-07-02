@@ -28,8 +28,10 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
 
 
 def main() -> int:
+    session_id = ""
     try:
-        json.load(sys.stdin)  # input은 사용 안 함
+        data = json.load(sys.stdin)
+        session_id = data.get("session_id") or ""
     except Exception:
         pass
 
@@ -41,13 +43,17 @@ def main() -> int:
     if active is None:
         return 0
 
+    # 다른 세션의 active 는 건드리지 않는다 — 같은 프로젝트의 동시 세션 A/B 에서
+    # A 의 종료가 B 의 진행 중 레코드를 flush·삭제해 이후 도구 카운트가 전부
+    # 드롭되던 오염 방지. active 의 session_id 가 비어 있으면(구버전) 같은 세션 간주.
+    if active.get("session_id", "") not in ("", session_id) and session_id:
+        return 0
+
     record = pl.pl_finalize_record(active, root, ended_by="session_end")
-    try:
-        pl.pl_append_record(record)
-    except Exception as e:
-        sys.stderr.write(f"[prompt-log] flush 실패: {e}\n")
-    finally:
-        pl.pl_clear_active(root)
+    warn = pl.pl_flush_record(record)  # 실패 시 dead-letter 보존
+    if warn:
+        sys.stderr.write(warn + "\n")
+    pl.pl_clear_active(root)
     return 0
 
 

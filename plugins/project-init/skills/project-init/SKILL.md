@@ -254,7 +254,7 @@ rm -f .claude/state/.init_in_progress
 **먼저 Prompt Log 수집 동의 요청을 진행한다** (prompt-log 플러그인이 설치된 경우):
 
 **AskUserQuestion 툴**로 동의를 받는다:
-- 질문: "이 프로젝트의 사용자 prompt를 분석 목적으로 저장하시겠습니까?\n\n목적: 워크플로우 패턴 분석, plan-gate 튜닝(추후)\n저장 위치: ~/.claude/prompt-log/\n철회: .claude/prompt-log-consent 삭제"
+- 질문: "이 프로젝트의 사용자 prompt **원문 전체**를 분석 목적으로 저장하시겠습니까?\n\n저장 범위: 프롬프트 전문(API키·이메일·한국 PII 등은 자동 마스킹되지만, 일반 비밀번호·내부 정보는 마스킹되지 않음) + 도구 호출 통계\n목적: 워크플로우 패턴 분석, plan-gate 튜닝(추후)\n저장 위치: ~/.claude/prompt-log/ (로컬 전용, 외부 전송 없음)\n철회: .claude/prompt-log-consent 삭제"
 - 옵션: `["동의합니다 (Recommended)", "동의하지 않습니다"]`
 
 사용자 응답 처리:

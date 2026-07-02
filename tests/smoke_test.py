@@ -2487,6 +2487,64 @@ def t_harness_update_heal(base: Path) -> None:
     check("마커 없으면 무개입", r2.stdout == "" and (p2 / ".claude" / "plan_gate_enabled").exists())
 
 
+def t_prompt_log_session_guard(base: Path) -> None:
+    """prompt-log 멀티세션 가드 + RMW 락 + 미동의 mkdir 부작용 없음.
+
+    회귀 방지: (1) 타 세션의 SessionEnd 가 진행 중 active 를 flush·삭제하던 오염,
+    (2) 병렬 툴콜 훅의 read-modify-write 로 카운트 유실, (3) 미동의 프로젝트에서도
+    동의 검사만으로 ~/.claude/prompt-log/ 가 생성되던 default-deny 위반.
+    """
+    print("[48] prompt-log 세션 가드 + RMW 락")
+    pl_hooks = REPO / "plugins" / "prompt-log" / "hooks"
+    fake_home = base / "pl_home"
+    proj = make_project(base, "pl_guard")
+
+    def run_pl(script: str, payload: dict) -> subprocess.CompletedProcess[str]:
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(proj), "HOME": str(fake_home),
+               "USERPROFILE": str(fake_home)}
+        return subprocess.run(
+            [sys.executable, str(pl_hooks / script)], input=json.dumps(payload),
+            capture_output=True, text=True, cwd=str(proj), env=env,
+        )
+
+    # (3) 미동의: 훅 실행해도 글로벌 디렉토리 미생성
+    run_pl("prompt_logger.py", {"prompt": "hello", "session_id": "s1"})
+    check("미동의 프로젝트 → ~/.claude/prompt-log 미생성",
+          not (fake_home / ".claude" / "prompt-log").exists())
+
+    # 동의 부여 (marker + whitelist)
+    r = subprocess.run(
+        [sys.executable, "-c",
+         f"import sys; sys.path.insert(0, r'{pl_hooks}');"
+         "import prompt_log_lib as pl; from pathlib import Path;"
+         f"pl.pl_grant_consent(Path(r'{proj}'))"],
+        capture_output=True, text=True, env={**GIT_ENV, "HOME": str(fake_home),
+                                             "USERPROFILE": str(fake_home)},
+    )
+    check("동의 부여 성공", r.returncode == 0, r.stderr[:80])
+
+    active = proj / ".claude" / "state" / "prompt-log-active.json"
+    run_pl("prompt_logger.py", {"prompt": "first prompt", "session_id": "s1"})
+    check("동의 후 active 생성 (session_id 기록)",
+          active.exists() and json.loads(active.read_text())["session_id"] == "s1")
+
+    # (1) 타 세션 SessionEnd → active 보존 / 같은 세션 → finalize
+    run_pl("session_finalize.py", {"session_id": "s2"})
+    check("타 세션 SessionEnd → active 보존", active.exists())
+    run_pl("session_finalize.py", {"session_id": "s1"})
+    check("같은 세션 SessionEnd → flush + 삭제",
+          not active.exists()
+          and len(list((fake_home / ".claude" / "prompt-log").glob("prompts-*.jsonl"))) == 1)
+
+    # (2) 카운터 정확성 (pl_update_active 단일 락 RMW)
+    run_pl("prompt_logger.py", {"prompt": "count test", "session_id": "s1"})
+    for _ in range(4):
+        run_pl("tool_counter.py", {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+    tools = json.loads(active.read_text())["tools"]
+    check("툴 카운트 정확 누적 (4회)", tools["bash"] == 4 and tools["total"] == 4,
+          f"tools={tools}")
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -2649,6 +2707,7 @@ def main() -> int:
         t_failed_bash_no_green_reset(base)
         t_update_docs_malformed(base)
         t_harness_update_heal(base)
+        t_prompt_log_session_guard(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
     t_scaffold_consistency()

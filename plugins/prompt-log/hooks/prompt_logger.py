@@ -54,22 +54,27 @@ def main() -> int:
     token_value = pl.pl_normalize_token(sanitized)
 
     active = pl.pl_load_active(root)
+    # 같은 세션의 active 인지 — 다른 세션(동시 세션) 것이면 흡수·통계 오염 방지.
+    # active 의 session_id 가 비어 있으면(구버전 레코드) 같은 세션으로 간주.
+    same_session = active is not None and active.get("session_id", "") in ("", session_id)
 
     # 토큰 입력은 직전 active record에만 추가하고 새 prompt 시작 X
     if token_value is not None and active is not None:
-        tokens = active.setdefault("user_tokens_during", [])
-        tokens.append({"token": token_value, "ts": pl.pl_now_iso()})
-        pl.pl_save_active(root, active)
-        return 0
+        if same_session:
+            def _add_token(a):  # 락 안에서 재적용 (RMW race 방지)
+                a.setdefault("user_tokens_during", []).append(
+                    {"token": token_value, "ts": pl.pl_now_iso()}
+                )
+            pl.pl_update_active(root, _add_token)
+        return 0  # 다른 세션의 active 면 오염 방지를 위해 조용히 무시
 
-    # 기존 active가 있으면 finalize 후 flush
+    # 기존 active가 있으면 finalize 후 flush — 다른 세션 것이면 경계를 표시해 flush
     if active is not None:
-        ended_by = "next_prompt"
+        ended_by = "next_prompt" if same_session else "superseded_by_other_session"
         record = pl.pl_finalize_record(active, root, ended_by)
-        try:
-            pl.pl_append_record(record)
-        except Exception as e:
-            sys.stderr.write(f"[prompt-log] flush 실패: {e}\n")
+        warn = pl.pl_flush_record(record)  # 실패 시 dead-letter 보존
+        if warn:
+            sys.stderr.write(warn + "\n")
         pl.pl_clear_active(root)
 
     # 새 active 시작 (토큰 여부는 pl_make_active_record 가 pl_normalize_token 으로 판정)
