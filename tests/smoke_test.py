@@ -27,6 +27,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Windows cp949 등 비UTF-8 로캘에서 (1) ✔/✘ 결과 기호 출력, (2) UTF-8 을 뱉는 자식 훅의
@@ -2268,6 +2269,56 @@ def t_token_exact_match_guard(base: Path) -> None:
     )
 
 
+def t_init_permission_signal(base: Path) -> None:
+    """project_init_permission 자동승인 신호가 프로젝트 스코프 + TTL 로 제한된다.
+
+    회귀 방지: 신호를 공유 /tmp 고정경로에 두어 (1) 다른 프로세스가 켤 수 있고
+    (2) 다른 프로젝트로 새고 (3) init 크래시 시 영구 자동승인되던 위험. 이제
+    신호는 <프로젝트>/.claude/state/.init_in_progress 이고 mtime TTL 로 만료된다.
+    """
+    print("[43] init 자동승인 신호 스코프+TTL")
+    hook = HOOKS / "project_init_permission.py"
+    payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+
+    def approved(r: subprocess.CompletedProcess[str]) -> bool:
+        try:
+            d = json.loads(r.stdout.strip())
+        except Exception:
+            return False
+        return d.get("hookSpecificOutput", {}).get("decision", {}).get("behavior") == "allow"
+
+    # 1) 신호 없음 → 승인 안 함
+    p = make_project(base, "perm_none")
+    check("신호 파일 없으면 자동승인 안 함", not approved(run_hook(hook, payload, p)))
+
+    # 2) fresh 신호 → 승인
+    p = make_project(base, "perm_fresh")
+    sig = p / ".claude" / "state" / ".init_in_progress"
+    sig.parent.mkdir(parents=True, exist_ok=True)
+    sig.touch()
+    check("fresh 신호 → 자동승인", approved(run_hook(hook, payload, p)))
+
+    # 3) stale 신호(TTL 초과) → 승인 안 함 + self-heal 삭제
+    old = time.time() - 2 * 60 * 60
+    os.utime(sig, (old, old))
+    r = run_hook(hook, payload, p)
+    check(
+        "stale 신호 → 자동승인 안 함 + self-heal 삭제",
+        not approved(r) and not sig.exists(),
+        f"approved={approved(r)} exists={sig.exists()}",
+    )
+
+    # 4) 비승인 대상 도구는 신호가 fresh 여도 승인 안 함
+    p = make_project(base, "perm_tool")
+    s2 = p / ".claude" / "state" / ".init_in_progress"
+    s2.parent.mkdir(parents=True, exist_ok=True)
+    s2.touch()
+    check(
+        "목록 밖 도구(WebFetch)는 자동승인 대상 아님",
+        not approved(run_hook(hook, {"tool_name": "WebFetch", "tool_input": {}}, p)),
+    )
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -2425,6 +2476,7 @@ def main() -> int:
         t_scope_hardening(base)
         t_scope_auto_revert(base)
         t_token_exact_match_guard(base)
+        t_init_permission_signal(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
     t_scaffold_consistency()
