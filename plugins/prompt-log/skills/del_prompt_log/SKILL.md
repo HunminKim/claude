@@ -42,7 +42,8 @@ disable-model-invocation: true
 ### 3단계: 이동 실행
 
 1. 프로젝트 루트에 `prompt_log/` 디렉토리 생성
-2. 1단계 파일들을 `prompt_log/` 로 **이동**(`mv` — 복사 후 삭제와 동일 효과)
+2. 1단계에서 파악한 **수집 데이터 파일들**(1·2항 — whitelist 는 제외)을 `prompt_log/` 로
+   **이동**(`mv` — 복사 후 삭제와 동일 효과)
 3. **`.gitignore` 에 `prompt_log/` 가 없으면 append** — 프롬프트 원문이 담긴
    데이터가 실수로 커밋·푸시되는 것을 차단 (이동 직후, 질문 전에 먼저 처리)
 
@@ -62,8 +63,9 @@ disable-model-invocation: true
 - **동의 유지**: 아무것도 바꾸지 않는다 (marker·whitelist 그대로 → 다음 프롬프트부터 새로 수집)
 - **이 프로젝트만 철회**: `<project>/.claude/prompt-log-consent` 삭제 +
   `projects-allowed.json` 에서 이 프로젝트 항목 제거
-- **모든 프로젝트 철회**: whitelist 의 **각 프로젝트**에서 `prompt-log-consent`·
-  `prompt-log-active.json` 삭제 후, `projects-allowed.json` 자체 삭제
+- **모든 프로젝트 철회**: whitelist 의 **각 프로젝트**에서
+  `<프로젝트>/.claude/prompt-log-consent`·`<프로젝트>/.claude/state/prompt-log-active.json`
+  삭제 후, `projects-allowed.json` 자체 삭제
   (다른 프로젝트의 active 파일은 옮기지 않고 삭제 — 원하면 해당 프로젝트에서
   /del_prompt_log 를 먼저 실행하라고 안내)
 
