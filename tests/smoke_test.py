@@ -2456,6 +2456,37 @@ def t_update_docs_malformed(base: Path) -> None:
           f"vs={get_gate(p).get('verifier_status')}")
 
 
+def t_harness_update_heal(base: Path) -> None:
+    """중단된 /harness-update 가 끈 plan-gate 를 SessionStart 가 자동 복구한다.
+
+    회귀 방지: 업데이트가 세션 중단으로 6단계(재활성화)에 못 가면 plan-gate 가
+    조용히 영구 비활성으로 남던 갭 — 마커 존재 시 다음 세션에서 자가복구.
+    """
+    print("[47] harness-update 중단 자가복구")
+    hook = HOOKS / "plan_gate_session_start.py"
+
+    p = make_project(base, "healgate")
+    enabled = p / ".claude" / "plan_gate_enabled"
+    marker = p / ".claude" / "state" / ".harness_update_in_progress"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    # harness-update 1단계 상태 재현: 마커 생성 + enabled 삭제 → 세션 끊김
+    marker.touch()
+    enabled.unlink()
+
+    r = run_hook(hook, {}, p)
+    healed = enabled.exists() and not marker.exists()
+    check(
+        "마커 감지 → enabled 복구 + 마커 삭제 + 환기",
+        healed and "자동으로 다시 켰습니다" in r.stdout,
+        f"enabled={enabled.exists()} marker={marker.exists()} out={r.stdout[:60]!r}",
+    )
+
+    # 평상시(마커 없음·게이트 없음)엔 무출력·무부작용
+    p2 = make_project(base, "healgate_noop")
+    r2 = run_hook(hook, {}, p2)
+    check("마커 없으면 무개입", r2.stdout == "" and (p2 / ".claude" / "plan_gate_enabled").exists())
+
+
 def t_version_sync() -> None:
     print("[9] 버전 동기화")
     mp = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
@@ -2617,6 +2648,7 @@ def main() -> int:
         t_advisory_no_permission(base)
         t_failed_bash_no_green_reset(base)
         t_update_docs_malformed(base)
+        t_harness_update_heal(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
     t_scaffold_consistency()

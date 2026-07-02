@@ -30,6 +30,43 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 
 
+HARNESS_UPDATE_MARKER = ".claude/state/.harness_update_in_progress"
+
+
+def _emit_context(text: str) -> None:
+    """SessionStart additionalContext JSON 출력 (환기 채널)."""
+    result = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": text,
+        }
+    }
+    sys.stdout.write(json.dumps(result, ensure_ascii=False))
+
+
+def _heal_interrupted_update(root) -> str | None:
+    """중단된 /harness-update 가 끈 plan-gate 를 자동 복구한다. 복구 시 환기 메시지 반환.
+
+    harness-update 는 대량 파일 갱신 동안 plan-gate 를 끄고(마커 생성 + enabled 삭제)
+    완료 시 복원한다. 세션이 중간에 끊기면 복원 단계에 도달하지 못해 plan-gate 가
+    조용히 영구 비활성으로 남는다 — 새 세션 진입 = 그 업데이트는 죽었다는 뜻이므로
+    여기서 enabled 를 되살리고 마커를 지운다 (Claude 성실함 의존 제거).
+    """
+    marker = root / HARNESS_UPDATE_MARKER
+    if not marker.exists():
+        return None
+    try:
+        marker.unlink()
+        lib.enable_plan_gate(root)
+    except OSError:
+        return None
+    return (
+        "[plan-gate] ♻️  이전 세션의 /harness-update 가 완료되지 못한 채 끊겨 "
+        "plan-gate 가 꺼진 상태였습니다 — 자동으로 다시 켰습니다.\n"
+        "  하네스 업데이트가 미완일 수 있으니 필요하면 /harness-update 를 재실행하세요."
+    )
+
+
 def main() -> int:
     try:
         json.load(sys.stdin)
@@ -37,38 +74,56 @@ def main() -> int:
         return 0
 
     root = lib.find_project_root()
-    if root is None or not lib.is_plan_gate_enabled(root):
+    if root is None:
+        return 0
+
+    # 중단된 harness-update 자가복구 — enabled 가 꺼진 상태를 고치는 단계라
+    # is_plan_gate_enabled 체크보다 반드시 앞서야 한다.
+    heal_msg = _heal_interrupted_update(root)
+
+    if not lib.is_plan_gate_enabled(root):
         return 0
 
     state = lib.load_state(root)
     gate = lib.current_gate(state)
 
-    if gate is None:
+    # 보고할 게이트가 없어도 자가복구가 있었으면 그 사실은 환기한다
+    if gate is None or gate["state"] not in ("created", "approved", "verified"):
+        if heal_msg:
+            _emit_context(heal_msg)
         return 0
+    body = _gate_report(gate)
+    if heal_msg:
+        body = heal_msg + "\n" + body
+    _emit_context(body)
+    return 0
 
+
+def _elapsed_human(gate: dict) -> str:
+    """마지막 활동으로부터 경과 시간을 사람이 읽는 형태로."""
+    ts_str = gate.get("last_edit_ts") or gate.get("approved_at") or gate.get("created_at")
+    if not ts_str:
+        return "-"
+    try:
+        ts = datetime.fromisoformat(ts_str)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        elapsed = datetime.now(timezone.utc) - ts
+        h = int(elapsed.total_seconds() // 3600)
+        m = int((elapsed.total_seconds() % 3600) // 60)
+        return f"{h}시간 {m}분 전"
+    except Exception:
+        return "-"
+
+
+def _gate_report(gate: dict) -> str:
+    """세션 재개 시 주입할 게이트 현황 리포트 본문."""
     g_state = gate["state"]
-    if g_state not in ("created", "approved", "verified"):
-        return 0
-
     max_repeat = lib._max_code_repeat(gate)
     auto_label = "자동" if gate.get("approved_auto") else "명시"
     approved_at = gate.get("approved_at") or "-"
     ckpt = (gate.get("checkpoint_commit") or "")[:12] or ("cp" if gate.get("cp_snapshot") else "(없음)")
-
-    # 경과 시간 계산
-    ts_str = gate.get("last_edit_ts") or gate.get("approved_at") or gate.get("created_at")
-    elapsed_str = "-"
-    if ts_str:
-        try:
-            ts = datetime.fromisoformat(ts_str)
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            elapsed = datetime.now(timezone.utc) - ts
-            h = int(elapsed.total_seconds() // 3600)
-            m = int((elapsed.total_seconds() % 3600) // 60)
-            elapsed_str = f"{h}시간 {m}분 전"
-        except Exception:
-            pass
+    elapsed_str = _elapsed_human(gate)
 
     lines = [
         "",
@@ -110,15 +165,7 @@ def main() -> int:
         ]
 
     lines += ["─" * 60, ""]
-
-    result = {
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": "\n".join(lines),
-        }
-    }
-    sys.stdout.write(json.dumps(result, ensure_ascii=False))
-    return 0
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
