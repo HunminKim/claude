@@ -9,7 +9,8 @@
 #   4. 외부 통합 흔적 grep 안내 (자동 제거는 안전을 위해 안 함)
 #   5. 플러그인 자체 제거 안내 (claude plugins uninstall prompt-log)
 #
-# 대화형(목록 확인 후 삭제)으로 하려면 /prompt-log-uninstall 스킬을 사용.
+# 대화형으로 하려면 /del_prompt_log 스킬 사용 — 로그를 ./prompt_log/ 로 옮기고(원본 삭제)
+#   동의 유지/철회를 재확인한다. 이 스크립트는 이동 없이 전부 삭제하는 일괄 정리용.
 #
 # 모든 prompt-log 추가 코드는 헤더에 `# [prompt-log]` 또는 마크업 마커
 # `>>> [prompt-log] integration begin` ~ `<<< [prompt-log] integration end`

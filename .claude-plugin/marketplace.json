@@ -20,7 +20,7 @@
     },
     {
       "name": "prompt-log",
-      "description": "v1.1.5 | 사용자 prompt 원문 전체(자동 마스킹 후) + 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적. /project-init 통합 동의, /prompt-log-uninstall 로 데이터 일괄 삭제.",
+      "description": "v1.1.5 | 사용자 prompt 원문 전체(자동 마스킹 후) + 도구 호출 통계를 동의한 프로젝트에서만 jsonl로 누적. /project-init 통합 동의, /del_prompt_log 로 로그 이동·동의 재확인.",
       "source": "./plugins/prompt-log",
       "category": "development"
     }
