@@ -8,11 +8,14 @@
   4. 비밀 파일 내용 출력 명령 감지 (cat/head/tail .env 등)
   5. 인라인 토큰/시크릿 감지 (ghp_, sk-ant-, AKIA 등)
   6. 위험 감지 시 exit 2 (차단 + 사유 출력)
-  7. plan-gate 전이 CLI 호출(approve/done 등) 감지 시 permissionDecision=ask 로 승격
+  7. 워크스페이스(CLAUDE_PROJECT_DIR) 밖 파괴적 명령(rm/mv/shred/find -delete/
+     `>` truncate 가 상위·형제 디렉토리 타겟) 감지 시 permissionDecision=ask 로 승격
+     (변수·명령치환 타겟은 해석 불가 → fail-closed 로 ask)
+  8. plan-gate 전이 CLI 호출(approve/done 등) 감지 시 permissionDecision=ask 로 승격
      (차단 아님 — 사용자 전용 결정을 Claude 가 Bash 로 우회 실행하는 것을 확인창으로 가드)
-  8. 안전한 명령은 exit 0 (통과)
+  9. 안전한 명령은 exit 0 (통과)
 
-출력 채널: 차단 (위험 명령) / 권한 승격 (plan-gate 전이 — exit 0 + permissionDecision=ask JSON)
+출력 채널: 차단 (위험 명령) / 권한 승격 (워크스페이스 밖 파괴 명령·plan-gate 전이 — exit 0 + permissionDecision=ask JSON)
 """
 from __future__ import annotations
 
@@ -60,26 +63,34 @@ _CMD_WRAPPERS = {
 }
 
 
-def _find_rm_index(toks: list[str]) -> int:
-    """세그먼트 토큰 목록에서 실제 rm 실행 토큰의 인덱스. 없으면 -1.
+def _find_cmd_index(toks: list[str], names: frozenset[str]) -> int:
+    """세그먼트 토큰 목록에서 names 에 속한 실행 토큰의 인덱스. 없으면 -1.
 
-    첫 토큰이 rm(또는 `\\rm`)이면 그 자리. 래퍼(sudo/env/time/...)면 그 옵션·옵션값을
-    건너뛰며 rm 을 찾는다. 첫 토큰이 래퍼도 rm 도 아니면 이 세그먼트는 rm 명령이 아니다.
+    첫 토큰이 대상 명령(또는 `\\rm` 식 백슬래시 접두)이면 그 자리. 래퍼(sudo/env/time/...)면
+    그 옵션·옵션값을 건너뛰며 대상 명령을 찾는다. 첫 토큰이 래퍼도 대상도 아니면 미해당.
     """
     if not toks:
         return -1
     first = os.path.basename(toks[0].lstrip("\\"))
-    if first == "rm":
+    if first in names:
         return 0
     if first not in _CMD_WRAPPERS:
         return -1
     for i in range(1, len(toks)):
-        if os.path.basename(toks[i].lstrip("\\")) == "rm":
+        if os.path.basename(toks[i].lstrip("\\")) in names:
             return i
         if toks[i].startswith("-"):
             continue  # 래퍼 옵션 (예: sudo -E, nice -n)
-        # 비옵션 토큰(옵션값·VAR=x 등)은 건너뛰고 계속 rm 을 찾는다
+        # 비옵션 토큰(옵션값·VAR=x 등)은 건너뛰고 계속 대상 명령을 찾는다
     return -1
+
+
+_RM_ONLY = frozenset({"rm"})
+
+
+def _find_rm_index(toks: list[str]) -> int:
+    """세그먼트 토큰 목록에서 실제 rm 실행 토큰의 인덱스. 없으면 -1."""
+    return _find_cmd_index(toks, _RM_ONLY)
 
 
 def _is_recursive_flag(tok: str) -> bool:
@@ -267,17 +278,33 @@ def _gate_self_transition(command: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _emit_ask(action: str) -> None:
+def _escalate_if_needed(command: str, data: dict) -> None:
+    """비차단 승격 판정 — 워크스페이스 밖 파괴 명령·plan-gate 전이면 ask 를 출력."""
+    cwd = (data.get("cwd") or "").strip() or os.getcwd()
+    outside = _destructive_outside_workspace(command, cwd)
+    if outside:
+        _emit_ask(
+            f"[workspace-guard] {outside}입니다. 워크스페이스 밖 파괴적 작업은 "
+            "사용자 확인이 필요합니다 — 사용자가 명시적으로 요청한 작업이면 허용하고, "
+            "Claude 의 자율 판단이면 거부 후 워크스페이스 안에서 대안을 찾으세요."
+        )
+        return
+    action = _gate_self_transition(command)
+    if action:
+        _emit_ask(
+            f"[plan-gate] '{action}' 는 게이트 상태를 바꾸는 사용자 전용 결정입니다. "
+            "Claude 의 자율 실행이면 거부하고 슬래시 커맨드(/approve-plan 등)로 "
+            "직접 입력하세요. 사용자가 요청한 실행이면 허용해도 됩니다."
+        )
+
+
+def _emit_ask(reason: str) -> None:
     """PreToolUse permissionDecision=ask — 사용자 확인 후에만 실행되게 승격."""
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
-            "permissionDecisionReason": (
-                f"[plan-gate] '{action}' 는 게이트 상태를 바꾸는 사용자 전용 결정입니다. "
-                "Claude 의 자율 실행이면 거부하고 슬래시 커맨드(/approve-plan 등)로 "
-                "직접 입력하세요. 사용자가 요청한 실행이면 허용해도 됩니다."
-            ),
+            "permissionDecisionReason": reason,
         }
     }
     sys.stdout.write(json.dumps(payload, ensure_ascii=False))
@@ -295,6 +322,122 @@ def _deletes_project_root(command: str) -> bool:
         return False
     pat = rf"rm\s+-[a-z]*r[a-z]*f[a-z]*\s+{re.escape(root)}(?:/+)?(?:\s|$)"
     return bool(re.search(pat, command))
+
+
+# ── Layer: 워크스페이스 밖 파괴적 명령 → 사용자 확인(ask) 승격 ──────────
+#
+# 루트/홈 하드블록(위)이 못 덮는 중간 지대: 상위·형제 디렉토리를 향한 파괴적
+# 파일 명령 (`rm -rf ../x`, 절대경로 형제, `> ../config` truncate 등).
+# 차단(exit 2)이 아니라 ask 인 이유: 사용자가 정당하게 요청한 워크스페이스 밖
+# 정리까지 죽이지 않고, 확인창 한 번으로 통제권을 사용자에게 넘긴다
+# (plan-gate 전이 승격과 동일 채널). 정적 분석 한계(변수·명령치환 타겟)는
+# fail-closed — 해석 불가면 ask.
+
+_FS_DESTRUCTIVE = frozenset({"rm", "shred", "unlink", "rmdir", "mv"})
+_WS_GUARD_CMDS = _FS_DESTRUCTIVE | {"find"}
+# find 의 파괴적 표현식 — -delete, -exec/-execdir rm|shred
+_FIND_DESTRUCTIVE_RE = re.compile(r"-delete\b|-exec(?:dir)?\s+(?:\S*/)?(?:rm|shred)\b")
+# `find … | xargs rm` — find 세그먼트 자체엔 파괴 표현식이 없지만 경로가 삭제 대상
+_XARGS_RM_RE = re.compile(r"\bxargs\b[^\n;&|]*\b(?:rm|shred)\b")
+# stdout `>` truncate 리다이렉트 — `>>`(append)·`>&`(fd 복제)·`>(`(process subst) 제외
+_TRUNC_REDIR_RE = re.compile(r"(?<!>)>(?![>&(])\s*([^\s;|&<>()]+)")
+_GLOB_CHAR_RE = re.compile(r"[*?\[]")
+_UNRESOLVED_RE = re.compile(r"[$`]")
+# 시스템 임시 트리는 워크스페이스 밖이어도 통과 (스크래치 용도) — 단, 워크스페이스
+# 자체가 그 트리 안이면 같은 트리의 형제를 지울 수 있으므로 해당 트리는 예외 비활성.
+_TMP_PREFIXES = tuple(os.path.realpath(d) for d in ("/tmp", "/var/tmp", "/dev/shm"))
+# 리다이렉트 무해 타겟 — realpath 전에 문자열로 판정 (/dev/stdout 은 realpath 가
+# 훅 프로세스의 실제 fd 대상으로 풀려 오판하므로 lexical 비교가 맞다)
+_DEV_SINKS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+
+
+def _quoted_subcommands(command: str) -> list[str]:
+    """따옴표 안 문자열 목록 — `sh -c 'rm -rf ../x'` 같은 중첩 명령을 세그먼트로 추가."""
+    return [a or b for a, b in re.findall(r"'([^']+)'|\"([^\"]+)\"", command)]
+
+
+def _path_escapes(target: str, cwd: str, root: str) -> str:
+    """타겟 경로 판정: 'outside' | 'inside' | 'unresolved'.
+
+    root·cwd 는 realpath 된 절대경로 전제. 변수는 훅 프로세스 환경으로 확장을
+    시도하고, 남는 `$`/백틱(미정의 변수·명령치환)은 해석 불가로 본다.
+    glob 타겟은 첫 glob 문자 앞까지의 리터럴 접두로 판정한다 (`../*` → `../`).
+    """
+    t = target.strip("'\"")
+    if not t or t == "-":
+        return "inside"
+    t = os.path.expanduser(os.path.expandvars(t))
+    if _UNRESOLVED_RE.search(t):
+        return "unresolved"
+    if t in _DEV_SINKS:
+        return "inside"
+    m = _GLOB_CHAR_RE.search(t)
+    if m:
+        t = t[:m.start()] or "."
+    resolved = os.path.realpath(os.path.join(cwd, t))
+    if resolved == root or resolved.startswith(root + os.sep):
+        return "inside"
+    for pref in _TMP_PREFIXES:
+        under_pref = resolved.startswith(pref + os.sep)
+        root_in_pref = root == pref or root.startswith(pref + os.sep)
+        if under_pref and not root_in_pref:
+            return "inside"
+    return "outside"
+
+
+def _segment_targets(toks: list[str], idx: int, name: str, seg: str, xargs_rm: bool) -> list[str]:
+    """세그먼트에서 판정 대상 경로 토큰 추출. 파괴적 문맥이 아니면 빈 목록."""
+    if name == "find":
+        # find 는 파괴 표현식(-delete/-exec rm)이 있거나 xargs rm 으로 이어질 때만 판정
+        if not (_FIND_DESTRUCTIVE_RE.search(seg) or xargs_rm):
+            return []
+        paths = []
+        for t in toks[idx + 1:]:
+            if t.strip("'\"").startswith("-") or t in ("(", "!"):
+                break  # 표현식 시작 — 이후는 경로가 아니다
+            paths.append(t)
+        return paths or ["."]  # 경로 생략 시 find 는 cwd 를 탐색
+    paths = []
+    for t in toks[idx + 1:]:
+        if t == "--":
+            continue
+        if t.startswith("--target-directory="):
+            paths.append(t.split("=", 1)[1])  # mv/cp 계열 목적지 플래그
+        elif not t.strip("'\"").startswith("-"):
+            paths.append(t)
+    return paths
+
+
+def _destructive_outside_workspace(command: str, cwd: str) -> str | None:
+    """워크스페이스 밖을 향한 파괴적 명령이면 사유 문자열, 아니면 None."""
+    root = os.environ.get("CLAUDE_PROJECT_DIR", "").rstrip("/")
+    if not root:
+        return None
+    root = os.path.realpath(root)
+    cwd = os.path.realpath(cwd or ".")
+    xargs_rm = bool(_XARGS_RM_RE.search(command))
+    segments = re.split(r"[;&|\n]+", command) + _quoted_subcommands(command)
+    for seg in segments:
+        toks = seg.split()
+        idx = _find_cmd_index(toks, _WS_GUARD_CMDS)
+        if idx < 0:
+            continue
+        name = os.path.basename(toks[idx].lstrip("\\"))
+        for t in _segment_targets(toks, idx, name, seg, xargs_rm):
+            verdict = _path_escapes(t, cwd, root)
+            if verdict == "outside":
+                return f"{name} 타겟 {t!r} 이(가) 워크스페이스 밖 경로"
+            if verdict == "unresolved":
+                return f"{name} 타겟 {t!r} 해석 불가 (변수/명령치환)"
+    # `>` truncate 리다이렉트 — 워크스페이스 밖 파일을 0바이트로 덮는 사고 방지
+    for m in _TRUNC_REDIR_RE.finditer(command):
+        target = m.group(1)  # fd 숫자(`2>`)는 `>` 앞이라 그룹에 안 들어온다
+        verdict = _path_escapes(target, cwd, root)
+        if verdict == "outside":
+            return f"리다이렉트(>) 타겟 {target!r} 이(가) 워크스페이스 밖 경로"
+        if verdict == "unresolved":
+            return f"리다이렉트(>) 타겟 {target!r} 해석 불가 (변수/명령치환)"
+    return None
 
 
 def _check(command: str) -> tuple[bool, str]:
@@ -332,9 +475,7 @@ def main() -> int:
 
     blocked, reason = _check(command)
     if not blocked:
-        action = _gate_self_transition(command)
-        if action:
-            _emit_ask(action)  # 차단 아님 — 사용자 확인(ask)으로 승격
+        _escalate_if_needed(command, data)
         return 0
 
     sys.stderr.write("\n".join([

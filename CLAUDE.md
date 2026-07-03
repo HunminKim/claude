@@ -47,6 +47,7 @@ install.sh                   마켓플레이스 + 플러그인 일괄 설치
 |------|------|
 | **차단/강제** (편집 거부·위반 차단) | `exit 2` + stderr → Claude blocking error |
 | **비차단 환기** (advisory·정보 주입) | `exit 0` + stdout `hookSpecificOutput.additionalContext` JSON |
+| **권한 승격** (사용자 확인창 ask / 자동 승인 allow) | `exit 0` + stdout `hookSpecificOutput.permissionDecision` JSON |
 | **사용자 터미널 전용** (Claude 영향 없음) | `exit 0` + stderr |
 
 - **금지**: `exit 0 + plain stderr/stdout` 로 Claude 환기 메시지 출력 금지 — context 진입 안 됨. 반드시 `additionalContext` JSON 으로 감싼다.

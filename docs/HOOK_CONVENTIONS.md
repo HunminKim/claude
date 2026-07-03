@@ -68,6 +68,11 @@ matcher 의 letter-only 토큰은 tool_name **정확일치** — 죽은 토큰(M
     턴이 연장된다 — 자리 비운 사용자에게 토큰·시간 낭비 + 의도치 않은 행동. 따라서 **Stop 훅은
     반드시 `stop_hook_active == true` 면 아무 JSON 없이 `exit 0` 으로 억제**하고, 조건 충족 시에만
     주입한다. (참조 구현: 활성 훅 `plan_gate_stop_alert`, 그리고 템플릿 측 `skills/.../templates/.claude/hooks/cleanup_suggest.py` — 후자는 활성 hooks 디렉토리엔 없으니 grep 시 주의.)
+- **권한 승격 (ask/allow)** (실행 자체를 사용자 확인창에 맡기거나 자동 승인): `exit 0 + stdout` 으로 `hookSpecificOutput.permissionDecision` JSON 출력
+  - `ask` = 차단과 환기의 중간 — 정당한 사용자 경로까지 죽이지 않으면서 Claude 자율 실행엔 확인을 요구한다.
+    예: `dangerous_bash_check` 의 plan-gate 자가전이 승격·workspace-guard(워크스페이스 밖 파괴 명령)
+  - `allow` = PermissionRequest 이벤트에서 자동 승인. 예: `project_init_permission` (초기화 중 파일 생성, 프로젝트 스코프 신호 + TTL 로 남용 방지)
+  - PreToolUse 에서 `ask` 는 반드시 exit 0 과 함께 — exit 2 를 섞으면 차단이 우선돼 확인창이 뜨지 않는다.
 - **사용자 터미널 전용** (Claude 행동 영향 없음, 사용자 정보 알림): `exit 0 + stderr`
   - 사용자 터미널에만 보임 — Claude 는 못 봄
   - 예: `plan_gate_gc` (SessionEnd 시점 정보 — Claude 주입 불가 이벤트)

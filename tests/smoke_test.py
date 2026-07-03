@@ -14,6 +14,7 @@
   4. plan_approval: /skip-verify 토큰 → gate done + ⏭️ 기록
   5. update_docs: stdout 은 advisory JSON 단독 (평문 오염 시 환기 무효)
   6. dangerous_bash: .env 차단 / .env.example 허용 / rm -rf 차단
+  6b. workspace-guard: 워크스페이스 밖 파괴적 명령(절대/상대/변수 경로) → ask 승격
   7. 채널 JSON 형태: stop_alert·session_start 가 hookSpecificOutput 래퍼 출력
   8. 스캐폴드 정합: 템플릿 settings.json 훅 ↔ SKILL.md ↔ 실물 3중 일치
   9. 버전 동기화: marketplace.json description ↔ 각 plugin.json
@@ -479,6 +480,131 @@ def t_dangerous_bash(base: Path) -> None:
     # 작업 디렉토리 루트 전체 삭제 — 특정 경로(/workspace) 하드코딩 대신 CLAUDE_PROJECT_DIR 동적 비교
     r = run_hook(hook, {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {p}"}}, p)
     check("CLAUDE_PROJECT_DIR 전체 삭제 → 차단", r.returncode == 2, f"rc={r.returncode}")
+
+
+def _wsg_runner(hook: Path, p: Path, fakehome: Path, outside: Path):
+    """workspace-guard 테스트용 러너 — (rc, permissionDecision) 반환 클로저 생성.
+
+    cwd 는 실사용과 동일하게 stdin payload 의 `cwd` 필드로 전달한다.
+    project="" 는 CLAUDE_PROJECT_DIR 미설정(fail-open 경로) 시뮬레이션.
+    """
+    def run(cmd: str, cwd: Path | None = None, project: str | None = None):
+        env = {
+            **GIT_ENV,
+            "HOME": str(fakehome),
+            "INSIDE_DIR": str(p / "sub"),
+            "OUTSIDE_DIR": str(outside),
+        }
+        env.pop("CLAUDE_PROJECT_DIR", None)
+        if project is None:
+            project = str(p)
+        if project:
+            env["CLAUDE_PROJECT_DIR"] = project
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": cmd},
+            "cwd": str(cwd or p),
+        }
+        r = subprocess.run(
+            [sys.executable, str(hook)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, cwd=str(p), env=env,
+        )
+        try:
+            decision = json.loads(r.stdout.strip())["hookSpecificOutput"]["permissionDecision"]
+        except Exception:
+            decision = None
+        return r.returncode, decision
+
+    return run
+
+
+# 워크스페이스 밖(ask 기대) — 절대/상대/변수/glob/인용/래퍼/리다이렉트 전 형태
+_WSG_ASK_CASES = [
+    "rm -rf ../sibling",                    # 상대 상위
+    "rm -rf ..",                            # 상위 디렉토리 자체
+    "rm ../file.txt",                       # 플래그 없는 rm 도 파괴적
+    "rm -r ~/stuff",                        # 홈 하위 (워크스페이스 밖 — rf 결합은 하드블록이 선점)
+    "rm -rf $UNDEFINED_WSG_VAR/x",          # 미해석 변수 → fail-closed
+    'rm -rf "$OUTSIDE_DIR"',                # 해석되는 변수 → 밖
+    "rm -rf $INSIDE_DIR/../../evil",        # 변수 해석 후 .. 탈출
+    "rm -rf ../*",                          # 상위 glob
+    "rm -rf '../quoted'",                   # 따옴표 타겟
+    "sudo rm -rf ../x",                     # 래퍼 경유
+    "sh -c 'rm -rf ../x'",                  # 인용 중첩 명령
+    "rm -rf $(pwd)/../x",                   # 명령치환 → 해석 불가
+    "mv important.txt ../",                 # mv 목적지 상위
+    "mv --target-directory=../dst f.txt",   # 긴옵션 목적지
+    "find .. -delete",                      # find 상위 삭제
+    "shred ../secret.bin",
+    "rmdir ../empty",
+    "find .. -name '*.pyc' | xargs rm",     # xargs 경유 삭제
+    "sed s/a/b/ x.py > ../config",          # truncate 리다이렉트 밖
+    "echo x > $UNDEF_WSG_REDIR/f",          # 리다이렉트 변수 → 해석 불가
+]
+
+# 워크스페이스 안·비파괴(무간섭 기대) — 오탐 방지
+_WSG_PASS_CASES = [
+    "rm -rf build/",
+    "rm -rf ./build",
+    "rm file.txt",
+    "rm -rf $INSIDE_DIR",                   # 변수 해석 → 내부
+    "rm -rf build/*",                       # 내부 glob
+    "mv a.txt b/",
+    "find . -name '*.pyc' -delete",
+    "find src tests -delete",
+    "ls ../",                               # 비파괴 상위 접근은 대상 아님
+    "cat ../README.md",
+    "echo hi > out.txt",                    # 내부 리다이렉트
+    "python3 app.py > /dev/null 2>&1",      # /dev sink + fd 복제
+    "echo x >> ../log.txt",                 # append 는 truncate 아님 (정책상 제외)
+    "grep '->' src/x.py",                   # `>` 오탐 방지
+]
+
+
+def t_workspace_parent_guard(base: Path) -> None:
+    """워크스페이스 밖 파괴적 명령 → ask 승격. 절대/상대/변수 경로 전 케이스."""
+    print("[46] workspace-guard — 워크스페이스 밖 파괴적 명령 ask 승격")
+    hook = HOOKS / "dangerous_bash_check.py"
+    p = make_project(base, "wsguard")
+    (p / "sub").mkdir()
+    outside = base / "wsguard_outside"
+    outside.mkdir()
+    fakehome = base / "wsguard_home"
+    fakehome.mkdir()
+    run = _wsg_runner(hook, p, fakehome, outside)
+
+    for cmd in _WSG_ASK_CASES:
+        rc, dec = run(cmd)
+        check(f"ask: {cmd}", rc == 0 and dec == "ask", f"rc={rc} dec={dec}")
+    for cmd in [f"rm -rf {outside}", f"rm -rf {outside}/nested/dir",
+                f"mv {outside}/f .", f"find {outside} -name '*.log' -delete"]:
+        rc, dec = run(cmd)
+        check(f"ask(절대경로): {cmd[:44]}", rc == 0 and dec == "ask", f"rc={rc} dec={dec}")
+    for cmd in _WSG_PASS_CASES:
+        rc, dec = run(cmd)
+        check(f"무간섭: {cmd}", rc == 0 and dec is None, f"rc={rc} dec={dec}")
+    for cmd in [f"rm -rf {p}/build", f"mv {p}/a {p}/b"]:
+        rc, dec = run(cmd)
+        check(f"무간섭(절대 내부): {cmd[:44]}", rc == 0 and dec is None, f"rc={rc} dec={dec}")
+
+    # cwd 가 하위 디렉토리일 때 — `..` 는 cwd 기준으로 리졸브
+    rc, dec = run("rm -rf ../../evil", cwd=p / "sub")
+    check("ask: 하위 cwd 에서 ../../ 탈출", rc == 0 and dec == "ask", f"rc={rc} dec={dec}")
+    rc, dec = run("rm -rf ../build", cwd=p / "sub")
+    check("무간섭: 하위 cwd 의 ../ 가 루트 내부", rc == 0 and dec is None, f"rc={rc} dec={dec}")
+
+    # 시스템 임시 트리 예외 — 워크스페이스가 그 트리 밖일 때만 활성
+    var_tmp = os.path.realpath("/var/tmp")
+    if not os.path.realpath(str(p)).startswith(var_tmp + os.sep):
+        rc, dec = run("rm -rf /var/tmp/wsg_cache/x")
+        check("무간섭: 시스템 임시 트리(/var/tmp) 하위", rc == 0 and dec is None,
+              f"rc={rc} dec={dec}")
+
+    # CLAUDE_PROJECT_DIR 미설정 → 판정 불가 fail-open (기존 _deletes_project_root 와 동일 정책)
+    rc, dec = run("rm -rf ../x", project="")
+    check("무간섭: CLAUDE_PROJECT_DIR 미설정 (fail-open)", rc == 0 and dec is None,
+          f"rc={rc} dec={dec}")
 
 
 def t_secret_read_guard() -> None:
@@ -2733,6 +2859,7 @@ def main() -> int:
         t_verifier_grounding_enforce(base)
         t_verdict_transitions(base)
         t_dangerous_bash(base)
+        t_workspace_parent_guard(base)
         t_secret_read_guard()
         t_channel_shapes(base)
         t_secret_commit_guard(base)
