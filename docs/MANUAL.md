@@ -2,7 +2,7 @@
 
 > 이 문서는 저장소의 **세 플러그인(project-init / harness-check / prompt-log)** 과
 > 핵심 기능인 **plan-gate** 의 동작·명령·상태 흐름을 코드 기준으로 정리한 사용 설명서다.
-> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.16.2**, harness-check **v1.0.2**, prompt-log **v1.2.0**)
+> (작성 시점 버전: marketplace `hunminkim`, project-init **v2.17.0**, harness-check **v1.0.2**, prompt-log **v1.2.0**)
 >
 > ⚠️ 이 문서는 *마켓플레이스를 쓰는 사용자*용 매뉴얼이다. 저장소 자체를 개발할 때의 규칙은 루트 `CLAUDE.md` 를 본다.
 >
@@ -58,7 +58,7 @@
 
 | 플러그인 | 버전 | 한 줄 요약 |
 |---------|------|----------|
-| **project-init** | v2.16.2 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 18개 훅 + 18개 명령 + 5개 스킬 |
+| **project-init** | v2.17.0 | 본체. 프로젝트 스캐폴딩 + plan-gate + verifier + 18개 훅 + 18개 명령 + 5개 스킬 |
 | **harness-check** | v1.0.2 | 진단. 독립 서브에이전트가 하네스 건강 상태를 점검·리포트 |
 | **prompt-log** | v1.2.0 | 옵트인 프롬프트 통계 수집 (기본 비활성 = default deny) |
 
