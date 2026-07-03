@@ -347,7 +347,7 @@ project-init 의 18개 훅이 이벤트별로 묶여 있다(`detect_failure_loop
 
 | 이벤트 | 매처 | 훅 | 역할 | 채널 |
 |--------|------|----|------|------|
-| **PreToolUse** | Bash | `dangerous_bash_check` | `rm -rf /`·비밀파일·인라인 토큰 등 차단 | 차단 |
+| **PreToolUse** | Bash | `dangerous_bash_check` | `rm -rf /`·비밀파일·인라인 토큰 등 차단 + 워크스페이스 밖 파괴 명령 ask 승격 | 차단/ask |
 | | Read\|Grep | `secret_read_guard` | `.env`·`*.pem`·`.ssh` 읽기 차단 (`.example` 허용) | 차단 |
 | | Edit\|Write\|…Edit | `plan_gate` | Layer-1 스코프, thrash 가드, 첫편집 스냅샷 | 차단/환기 |
 | | Agent\|Task | `delegation_prompt_check` | 도메인 에이전트 4블록 프롬프트 강제 | 차단/환기 |
