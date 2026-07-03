@@ -32,6 +32,12 @@ tasks/todo.md 작성
 ```
 
 ## @verifier 검증 후
+
+> **먼저 live 게이트 상태를 확인한다** (`plan_gate_cli.py status` 또는 `.claude/state/plan_gate.json` 의 `current_gate_id`).
+> 재개 배너의 상태는 스냅샷(stale)일 수 있으니 안내 직전 재조회한다.
+> - `state == created` **또는** `current_gate_id == null` → **`/done` 안내 금지.** 미승인 소편집은 다음 편집 시 자동 롤오버로 닫히므로 별도 조치 불필요(명시 `/done` 도 "무조건 마감"으로 동작하나 필수 아님).
+> - `state == approved / verified` → 아래 표대로 처리.
+
 ```
 verifier ✅  →  /done          (체크포인트 정리 + gate 완료)
 verifier ❌  →  /retry         (같은 체크포인트에서 재구현)
