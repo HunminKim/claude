@@ -417,6 +417,8 @@ verifier 는 단순히 ✅/❌ 만 내지 않는다. 검증이 끝나면 `docs/.
 | 필드 | 의미 |
 |------|------|
 | `verdict` | 최종 판정 `✅`/`❌` |
+| `task_type` | 작업 유형 — `bugfix`/`feature`/`refactor`/`docs`/`config`/`infra`/`security`/`llm-prompt`. verifier 가 diff·요구사항으로 판별하며, 유형별 **검증 프로파일**(예: bugfix=재현→소멸, refactor=행위 불변, security=부정 테스트)이 verifier 스펙에 표로 고정돼 있다 |
+| `failure_category` | `❌` 일 때 필수 — `implementation_defect`(구현 결함) / `test_gap`(테스트 부족) / `verification_limit`(검증 자산 한계) / `environment_constraint`(환경 제약). 훅이 이 분류로 후속 안내를 가른다(구현 결함→`/retry` 권장, 환경 제약→"구현 문제 아닐 수 있음"+`/skip` 권장) |
 | `test_items[]` | 검증 항목별 `{item, result, note, method}`. `method` = `static`(코드만 읽음) / `mocked` / `isolated_exec` / `production_exec` — **"어떻게" 검증했는지를 명시** |
 | `evidence` | 실행 명령·출력 등 판정 근거 (사본) |
 | `issues` | 발견된 문제 목록 |
@@ -424,7 +426,7 @@ verifier 는 단순히 ✅/❌ 만 내지 않는다. 검증이 끝나면 `docs/.
 | `code_smells` | 동작엔 무관한 설계 냄새 (판정 영향 없음) |
 | `critical_constraints` | 다음 세션에 영향 줄 제약 → `CLAUDE.md` 자동 반영 |
 
-> **✅ 의 최소 조건 — 실행 grounding (v2.6.0 기계 강제)**: `✅` 는 `test_items` 중 **최소 1개가 실제 실행**(`mocked`/`isolated_exec`/`production_exec`)으로 입증돼야 한다. 전 항목이 `static`(코드만 읽음)인데 `✅` 면, `update_docs` 훅이 이를 **자동으로 `❌` 로 강등**하고 사유를 advisory 로 남긴다 — "읽기만 하고 통과시키기"를 막는다. 실행이 정말 불가능한 경우에만 예외이며, 이때는 `evidence` 에 `전 항목 실행 불가 — 사유` 를 명시해야 ✅ 가 유지된다.
+> **✅ 의 최소 조건 — 실행 grounding (v2.6.0 기계 강제)**: `✅` 는 `test_items` 중 **최소 1개가 실제 실행**(`mocked`/`isolated_exec`/`production_exec`)으로 입증돼야 한다. 전 항목이 `static`(코드만 읽음)인데 `✅` 면, `update_docs` 훅이 이를 **자동으로 `❌` 로 강등**하고 사유를 advisory 로 남긴다 — "읽기만 하고 통과시키기"를 막는다. 예외 2종: ① 실행이 정말 불가능한 경우 — `evidence` 에 `전 항목 실행 불가 — 사유` 명시. ② **docs/config 프로파일** — `task_type` 이 `docs`/`config` 이고 **훅의 diff 교차 검증**(git status 기준, 변경이 전부 문서/설정 파일이며 행동 지시 문서(`.claude/**`·`CLAUDE.md`·`.githooks/**`)가 아닐 때)을 통과하면 전-static ✅ 를 인정한다. 자가선언만으로는 인정되지 않는다 — 코드 변경이 섞이면 강등이 그대로 적용된다(과잉검증 완화 + 위장 차단).
 
 ---
 
@@ -547,10 +549,26 @@ API 키(sk-ant-, ghp_, AKIA), JWT, URL 자격증명, 이메일, 한국 주민번
 
 ## 11. 문제 해결 (FAQ)
 
+### 차단·환기 코드 일람
+
+모든 차단/위반 메시지 헤더에는 `[코드]` 가 붙는다 — 어느 가드가 왜 막았는지 코드 하나로 판별한다 (감사 로그 action 과 1:1):
+
+| 코드 | 원인 | audit action | 다음 액션 |
+|------|------|--------------|-----------|
+| `PG-TRIGGER` | 복잡도 임계 도달 — 계획 승인 필요 | `trigger` | todo.md 작성 → `/approve-plan` |
+| `PG-D1` | verifier ❌ 미해결 편집 잠금 | (판정은 update_docs) | `/retry`·`/skip`·`/done`·`/rollback` |
+| `PG-THRASH` | 같은 파일 반복 편집(수렴 안 됨) | `thrash_approved` | 접근 재검토 / `/replan` |
+| `PG-SCOPE-L1` | layer-1 스코프 밖 편집 거부(enforce) | `scope_deny_enforced` | `/subplan` 또는 매니페스트 수정 |
+| `PG-DNT` | do-not-touch 위반 거부 (subplan 으로도 못 품) | `scope_deny_enforced` | 매니페스트 재검토 |
+| `PG-SCOPE-SHADOW` | shadow 위반 감지(기록만) | `scope_deny_shadow`/`scope_violation_shadow` | 필요 시 scope 추가 |
+| `PG-SCOPE-L2` | layer-2 git-status 스윕 (Bash 부작용) | `scope_violation_enforced` | 스코프 확인 |
+| `FL-LOOP` | 연속 Bash 실패 — **failure-loop 가드 (plan-gate 아님)** | (별도 `failure_log.json`) | 멈추고 원인 분석 |
+
 **Q. 편집이 갑자기 차단됐다.**
-- 같은 파일 5회 반복(thrash) → 멈추고 접근 재검토. 테스트 통과(green Bash)하면 카운터 리셋.
-- enforce 모드 + 스코프 밖 → `/subplan` 으로 확장하거나 매니페스트 수정.
-- 연속 Bash 2회 실패 → 실패루프 가드. 원인부터 파악.
+- 메시지 헤더의 `[코드]` 로 원인을 판별한다 (위 표).
+- 같은 파일 5회 반복(`PG-THRASH`) → 멈추고 접근 재검토. 테스트 통과(green Bash)하면 카운터 리셋.
+- enforce 모드 + 스코프 밖(`PG-SCOPE-L1`/`PG-DNT`) → `/subplan` 으로 확장하거나 매니페스트 수정.
+- 연속 Bash 2회 실패(`FL-LOOP`) → 실패루프 가드(plan-gate 와 별개). 원인부터 파악.
 
 **Q. @verifier 호출하라는 환기가 계속 뜬다.**
 - 승인 후 코드 편집이 누적됐는데 검증 안 함. `@verifier` 호출하거나, 검증 불필요하면 `/skip-verify`(판정 전) / `/done`.

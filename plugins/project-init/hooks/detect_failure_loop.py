@@ -68,11 +68,13 @@ def format_soft_hint(entry: dict) -> str:
 
 
 def format_warning(entries: list) -> str:
+    # [FL-LOOP] 는 안정 진단 코드 — plan-gate(PG-*)와 별개 시스템임을 코드로 구분한다
+    # (코드 일람: docs/MANUAL.md §11 / plan-gate-help 스킬. 변경 시 smoke_test [41] 동기)
     divider = "━" * 57
     lines = [
         "",
         divider,
-        f"[FAILURE LOOP DETECTED] Bash 실패 {len(entries)}회 연속",
+        f"[FL-LOOP] Bash 실패 {len(entries)}회 연속 (failure-loop 가드 — plan-gate 아님)",
         divider,
         "",
         "최근 실패 패턴:",

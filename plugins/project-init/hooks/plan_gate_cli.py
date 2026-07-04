@@ -160,8 +160,10 @@ def _recover_verifier_from_file(root, gate, state) -> bool:
         return False
     if verdict not in ("✅", "❌"):
         return False
-    gate["state"] = "verified"
-    gate["verifier_status"] = verdict
+    try:
+        lib.enter_verified(gate, verdict)  # verified 진입 단일 출처 (직접 대입 금지)
+    except ValueError:
+        return False  # cmd_done 가드상 도달 불가 상태 — 복구 대신 미검증 경로로
     lib.save_state(root, state)
     _info(f"[plan-gate done] verifier_result.json에서 상태 복구: {verdict}")
     return True
@@ -334,15 +336,13 @@ def cmd_rollback(root, state) -> int:
         )
         return 1
 
-    gate["state"] = "rolled_back"
-    lib.clear_current_gate(state)
-    lib.save_state(root, state)
+    # rolled_back 마감 단일 출처 (상태·closed_at·enforce 청소 — 직접 대입 금지)
+    _reverted = lib.do_gate_rolled_back(root, state, gate)
     _info(
         "[plan-gate rollback] 체크포인트로 복원 완료 — 편집 전 상태로 되돌렸습니다.\n"
         f"  gate {gate['id']} → rolled_back."
     )
-    # rollback 은 do_gate_done 을 안 거치므로 여기서 직접 stale enforce 청소
-    _notify_scope_revert(lib.revert_scope_if_enforced(root))
+    _notify_scope_revert(_reverted)
     return 0
 
 
