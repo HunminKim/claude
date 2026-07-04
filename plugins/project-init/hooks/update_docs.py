@@ -11,9 +11,11 @@
 동작 단계:
 verifier가 `*.verifier_result.json`(파일명 suffix 매칭 — docs/ 위치 무관)을 생성하면:
 1. 실행 근거(evidence)가 없으면 verdict ✅→❌ 격하
+   (docs/config 프로파일은 diff 교차 검증 통과 시 전-static ✅ 인정 — 과잉검증 완화)
 2. checklist.md, completion_report.md, technical_doc.md 자동 갱신
 3. ❌ 이슈가 있으면 CLAUDE.md "알려진 버그 / 제약" 섹션에 반영
 4. plan-gate gate 상태 갱신 + 사용자 결정 유도 advisory(환기) 출력
+   (❌ 는 failure_category 별로 권장 액션이 갈린다 — 구현 결함 vs 환경 제약 구분)
 이 결과 파일은 verifier 외에 아무도 건드려서는 안 된다.
 """
 
@@ -22,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -117,6 +120,95 @@ def _str_list(raw: Any) -> list[str]:
     return [str(x) for x in raw]
 
 
+# ── 작업 유형별 검증 프로파일 / 실패 사유 분류 (verifier.md 스키마 확장) ──
+# docs/config 프로파일은 실행 grounding 을 완화(전-static ✅ 허용)하는 유일한
+# 유형이라, verifier 의 task_type 자가선언을 그대로 믿으면 코드 변경이 경량
+# 프로파일로 빠져나가는 구멍이 된다 — 아래 diff 교차 검증(기계 강제)이 막는다.
+_DOCS_PROFILE_TYPES = {"docs", "config"}
+_DOCS_OK_SUFFIXES = (".md", ".rst", ".txt", ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg")
+# 행동 지시 문서 — Claude·서브에이전트 동작을 바꾸므로 행위 검증 대상 (경량 프로파일 제외)
+_INSTRUCTION_COMPONENTS = {".claude", ".github", ".githooks"}
+
+# ❌ 실패 사유 분류 → 사용자 안내 분기. 구현 결함과 검증 한계/환경 제약이 같은
+# 4택으로 뭉개지던 문제를 해소한다 — verdict 소비자(D1 lock 등)는 이진 유지라 무영향.
+_FAILURE_CATEGORY_INFO = {
+    "implementation_defect": (
+        "구현 자체 결함",
+        "/retry 로 같은 체크포인트에서 수정 후 재검증 권장",
+    ),
+    "test_gap": (
+        "테스트 부재·부족 — 판정 근거 미확보",
+        "테스트 보강 후 @verifier 재검증 권장 (구현 결함으로 단정하지 말 것)",
+    ),
+    "verification_limit": (
+        "검증 정책·자산 한계 (예: eval 골든셋 부재)",
+        "구현 문제가 아닐 수 있음 — 검증 자산 보강 후 재검증 또는 /skip(보존 마감) 권장",
+    ),
+    "environment_constraint": (
+        "실행 환경 제약으로 검증 불가",
+        "구현 문제가 아닐 수 있음 — 환경 확보 후 재검증 또는 /skip(보존 마감) 권장",
+    ),
+}
+
+
+def _control_plane_rel(rel: str) -> bool:
+    """plan-gate 운영 파일 — 어떤 게이트에서든 변하는 파일이라 diff 판정에서 제외."""
+    return (
+        rel in ("tasks/todo.md", ".plan-gateignore")
+        or rel.endswith(".verifier_result.json")
+        or rel.startswith(".claude/state/")
+        or rel.startswith(".claude/plan_gate")
+    )
+
+
+def _diff_is_docs_only(docs_dir: Path) -> bool:
+    """working tree 변경이 문서/설정 파일로만 구성됐는지 기계 교차 검증 (fail-closed).
+
+    git status --porcelain 기준(untracked 신규 파일 포함 — diff HEAD 는 못 본다).
+    판단 불가(비-git·명령 실패·변경 없음)면 False, 행동 지시 문서(.claude/**,
+    CLAUDE.md, .githooks/**)나 비문서 확장자가 하나라도 섞이면 False.
+    """
+    try:
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(docs_dir), capture_output=True, text=True, timeout=10,
+        )
+        if top.returncode != 0 or not top.stdout.strip():
+            return False
+        root = top.stdout.strip()
+        # -uall: untracked 디렉토리를 "?? dir/" 로 축약하지 않고 파일 단위로 나열
+        # (축약되면 확장자 판정이 디렉토리명에 걸려 문서-only 를 오판한다)
+        st = subprocess.run(
+            ["git", "status", "--porcelain", "-uall"],
+            cwd=root, capture_output=True, text=True, timeout=10,
+        )
+        if st.returncode != 0:
+            return False
+    except Exception:
+        return False
+
+    rels: list[str] = []
+    for line in st.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        rel = line[3:].strip().strip('"')
+        if " -> " in rel:  # rename: 새 경로 기준으로 판정
+            rel = rel.split(" -> ")[-1].strip().strip('"')
+        rel = rel.replace("\\", "/").rstrip("/")
+        if rel and not _control_plane_rel(rel):
+            rels.append(rel)
+    if not rels:
+        return False  # 판정할 변경이 없음 — 근거 부재는 인정 아님 (fail-closed)
+
+    for rel in rels:
+        parts = rel.split("/")
+        if parts[-1] == "CLAUDE.md" or any(c in _INSTRUCTION_COMPONENTS for c in parts):
+            return False
+        if not rel.lower().endswith(_DOCS_OK_SUFFIXES):
+            return False
+    return True
+
+
 def _process(docs_dir: Path, result: dict[str, Any]) -> int:
     """결과 dict 를 문서·게이트에 반영. 필드는 전부 방어적으로 정규화해서 쓴다."""
     feature_name = str(result.get("feature_name") or "알 수 없음")
@@ -127,6 +219,8 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> int:
     code_smells = _str_list(result.get("code_smells"))
     critical_constraints = _str_list(result.get("critical_constraints"))
     evidence = str(result.get("evidence") or "")
+    task_type = str(result.get("task_type") or "").strip().lower()
+    failure_category = str(result.get("failure_category") or "").strip().lower()
     _raw_impl = result.get("implementation")
     impl = _raw_impl if isinstance(_raw_impl, dict) else {}
 
@@ -135,21 +229,35 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> int:
     # 강제가 없으면 전 항목 static(코드만 읽음)인데 ✅ 를 줘도 그대로 통과해 '읽고
     # 통과시키기'가 새어든다. 여기서 기계 강제: 실행 입증이 없고 면제 사유도 없으면
     # ✅ 를 신뢰 불가로 보고 ❌ 로 강등한다 — 이후 checklist/보고서/advisory 가 전부
-    # ❌ 단일 경로로 흐른다. 면제(전 항목 정적 확인만 가능)는 evidence 의 '실행 불가'
-    # 사유로만 인정한다(verifier.md 가 명시한 '전 항목 실행 불가 — 사유' 마커).
+    # ❌ 단일 경로로 흐른다. 면제 2종:
+    #   ① evidence 의 '전 항목 실행 불가' 마커 (verifier.md 명시, 전 유형 공통)
+    #   ② docs/config 프로파일 — 변경이 문서/설정뿐임을 diff 로 교차 검증했을 때만
+    #     (verifier 자가선언만으로는 인정 안 함 — 코드 변경의 경량 프로파일 위장 차단)
     _EXEC_METHODS = {"mocked", "isolated_exec", "production_exec"}
     if verdict == "✅":
         grounded = any((t.get("method") or "").strip() in _EXEC_METHODS for t in test_items)
         # verifier.md 가 명시한 면제 마커 전체("전 항목 실행 불가")를 요구한다 —
         # "실행 불가" substring 만 보면 다른 맥락의 문장으로도 면제가 성립하는 구멍.
         exempt = "전 항목 실행 불가" in (evidence or "")
-        if not grounded and not exempt:
+        docs_profile = False
+        if not grounded and not exempt and task_type in _DOCS_PROFILE_TYPES:
+            docs_profile = _diff_is_docs_only(docs_dir)
+            if docs_profile:
+                _log(f"[update_docs] {task_type} 프로파일 — diff 교차 검증 통과, 전-static ✅ 인정")
+        if not grounded and not exempt and not docs_profile:
+            _cross = (
+                f" (task_type={task_type} 선언됐으나 diff 교차 검증 실패 — 변경에 "
+                f"문서/설정 외 파일이 포함됐거나 판단 불가)"
+                if task_type in _DOCS_PROFILE_TYPES
+                else ""
+            )
             verdict = "❌"
+            failure_category = failure_category or "test_gap"  # 강등 = 검증 미수행
             issues = list(issues) + [
                 "실행 grounding 위반: 전 검증 항목이 static 이고 실행 입증도 면제 사유도 "
                 "없어 ✅ 를 신뢰할 수 없습니다 — ❌ 로 강등. 최소 1개 항목을 실제 실행"
                 "(mocked/isolated_exec/production_exec)으로 재검증하거나, 실행이 정말 "
-                "불가능하면 evidence 에 '전 항목 실행 불가 — 사유' 를 명시하세요."
+                "불가능하면 evidence 에 '전 항목 실행 불가 — 사유' 를 명시하세요." + _cross
             ]
 
     # ── checklist.md 업데이트 ──────────────────────────────────────────────
@@ -323,8 +431,7 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> int:
             _state = _pglib.load_state(_root)
             _gate = _pglib.current_gate(_state)
             if _gate and _gate["state"] in ("approved", "verified"):
-                _gate["state"] = "verified"
-                _gate["verifier_status"] = verdict
+                _pglib.enter_verified(_gate, verdict)  # verified 진입 단일 출처
                 _pglib.save_state(_root, _state)
                 _div = "━" * 60
                 if verdict == "✅":
@@ -365,6 +472,19 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> int:
                         if _has_ckpt
                         else "  /rollback  ⚠️  체크포인트 없음 — 사용 불가 (/skip 또는 /done 권장)\n"
                     )
+                    # 실패 사유 분류 — 구현 결함과 검증 한계/환경 제약의 안내를 가른다
+                    if failure_category in _FAILURE_CATEGORY_INFO:
+                        _cat_desc, _cat_hint = _FAILURE_CATEGORY_INFO[failure_category]
+                        _cat_block = (
+                            f"▌ 실패 분류 (verifier 보고)\n"
+                            f"  {failure_category}: {_cat_desc}\n"
+                            f"  권장: {_cat_hint}\n"
+                        )
+                    else:
+                        _cat_block = (
+                            "▌ 실패 분류 (verifier 보고)\n"
+                            "  (미분류 — verifier 가 failure_category 를 기입하지 않음)\n"
+                        )
                     _msg = (
                         f"\n{_div}\n"
                         f"❌ verifier 검증 실패 — 사용자 결정 대기\n"
@@ -377,6 +497,8 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> int:
                         f"▌ 발견된 문제\n"
                         f"{_issues_text}\n"
                         f"\n"
+                        f"{_cat_block}"
+                        f"\n"
                         f"▌ 사용자에게 다음 토큰 중 하나 입력 요청\n"
                         f"  /retry     같은 체크포인트에서 Claude 가 문제를 수정해 재시도\n"
                         f"  /skip      현재 상태 보존하며 gate 마감 (문제 인지 후 유지)\n"
@@ -385,6 +507,7 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> int:
                         f"\n"
                         f"▌ Claude 행동 지시\n"
                         f"  발견된 문제와 추정 원인을 한국어로 풀어 설명하고,\n"
+                        f"  실패 분류를 반영해(구현 결함이 아닐 수 있으면 그 사실을 명시)\n"
                         f"  네 가지 선택지의 의미를 사용자가 결정할 수 있게 안내한다.\n"
                         f"  추가 Edit 시도는 D1 lock 으로 차단되므로 사용자 결정 전까지 멈춘다.\n"
                         f"{_div}"

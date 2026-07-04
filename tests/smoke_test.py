@@ -371,6 +371,156 @@ def t_verdict_transitions(base: Path) -> None:
     )
 
 
+def t_gate_close_helpers(base: Path) -> None:
+    """전이 쓰기 경로 수렴 — enter_verified·do_gate_rolled_back 단일 출처 행위 검증.
+
+    verified/rolled_back 진입 직접 대입이 update_docs·CLI 복구·cmd_rollback 3곳에
+    흩어져 한쪽만 필드가 갈라지던 결합(C3) 해소분. 불법 상태의 verified 진입은
+    ValueError, rollback 마감은 closed_at 기록 + current_gate 해제까지 보장한다.
+    """
+    print("[5d] verified/rolled_back 진입 단일 출처 (enter_verified·do_gate_rolled_back)")
+    lib = _reload_lib()
+
+    g = _mkgate(lib, state="approved")
+    lib.enter_verified(g, "✅")
+    check("approved → enter_verified(✅)", g["state"] == "verified" and g["verifier_status"] == "✅")
+    lib.enter_verified(g, "❌")
+    check("verified 재판정 덮어쓰기 합법", g.get("verifier_status") == "❌")
+    try:
+        lib.enter_verified(_mkgate(lib, state="created"), "✅")
+        illegal_blocked = False
+    except ValueError:
+        illegal_blocked = True
+    check("created 에서 enter_verified → ValueError", illegal_blocked)
+
+    # E2E: /rollback 이 do_gate_rolled_back 경유 — closed_at 기록(GC 시각 기준) + current 해제
+    p = make_project(base, "rb_helper")
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "a.py"), p)
+    gid = get_gate(p)["id"]
+    r = _cli(p, "rollback")
+    sp = json.loads((p / ".claude" / "state" / "plan_gate.json").read_text())
+    gr = sp["gates"][gid]
+    check(
+        "/rollback → rolled_back + closed_at 기록 + current 해제",
+        r.returncode == 0 and gr["state"] == "rolled_back" and bool(gr.get("closed_at"))
+        and sp["current_gate_id"] is None,
+        f"rc={r.returncode} state={gr.get('state')} closed_at={gr.get('closed_at')!r}",
+    )
+
+
+def t_failure_category_advisory(base: Path) -> None:
+    """❌ advisory 실패 사유(failure_category) 분기 — 원인별 안내가 갈린다.
+
+    구현 결함과 검증 한계/환경 제약이 같은 4택으로 뭉개지던 문제 해소분.
+    verdict 소비자(D1 lock 등)는 이진 유지 — 분류는 안내 텍스트만 가른다.
+    """
+    print("[5e] verifier 실패 분류(failure_category) advisory 분기")
+    fail_items = [{"item": "동작", "result": "❌", "method": "isolated_exec"}]
+    base_r = {
+        "feature_name": "f", "timestamp": "t", "verdict": "❌",
+        "test_items": fail_items, "issues": ["원인"], "evidence": "fail",
+        "implementation": {"files": []},
+    }
+
+    p = _approved_gate_project(base, "failcat_env")
+    out = _emit_verifier_result(p, dict(base_r, failure_category="environment_constraint"))
+    check(
+        "environment_constraint → '구현 문제 아닐 수 있음' 안내",
+        "실패 분류" in out and "environment_constraint" in out and "구현 문제가 아닐 수 있음" in out,
+        f"out={out[:200]!r}",
+    )
+    check("게이트 verified+❌ 반영(이진 유지)", get_gate(p).get("verifier_status") == "❌")
+
+    p2 = _approved_gate_project(base, "failcat_impl")
+    out2 = _emit_verifier_result(p2, dict(base_r, failure_category="implementation_defect"))
+    check(
+        "implementation_defect → /retry 권장",
+        "implementation_defect" in out2 and "/retry 로 같은 체크포인트" in out2,
+        f"out={out2[:200]!r}",
+    )
+
+    p3 = _approved_gate_project(base, "failcat_none")
+    out3 = _emit_verifier_result(p3, dict(base_r))
+    check("미기입 → 미분류 표기", "미분류" in out3, f"out={out3[:200]!r}")
+
+
+def t_docs_profile_grounding(base: Path) -> None:
+    """docs/config 프로파일 조건부 grounding — diff 교차 검증 (자가선언 위장 차단).
+
+    문서만 바꾼 작업의 전-static ✅ 를 인정하되(과잉검증 완화), 코드 변경·행동 지시
+    문서·판정 근거 부재는 verifier 가 task_type=docs 를 선언해도 강등한다(기계 강제).
+    """
+    print("[5f] docs 프로파일 전-static ✅ + diff 교차 검증")
+    static_items = [{"item": "링크 무결성", "result": "✅", "method": "static"}]
+    base_r = {
+        "feature_name": "d", "timestamp": "t", "verdict": "✅", "task_type": "docs",
+        "test_items": static_items, "issues": [], "evidence": "정적 확인",
+        "implementation": {"files": []},
+    }
+
+    def commit_all(p: Path) -> None:
+        subprocess.run(["git", "-C", str(p), "add", "-A"], check=True, env=GIT_ENV, capture_output=True)
+        subprocess.run(["git", "-C", str(p), "commit", "-qm", "base"], check=True, env=GIT_ENV, capture_output=True)
+
+    # (1) 문서만 변경 → 전-static ✅ 인정
+    p = _approved_gate_project(base, "docsprof_ok")
+    commit_all(p)
+    (p / "README.md").write_text("# 문서 변경\n")
+    out = _emit_verifier_result(p, dict(base_r))
+    check(
+        "문서만 변경 + task_type=docs → ✅ 유지",
+        get_gate(p).get("verifier_status") == "✅" and "검증 통과" in out,
+        f"vs={get_gate(p).get('verifier_status')} out={out[:120]!r}",
+    )
+
+    # (2) 코드 파일이 섞이면 → ❌ 강등 (경량 프로파일 위장 차단)
+    p2 = _approved_gate_project(base, "docsprof_code")
+    commit_all(p2)
+    (p2 / "README.md").write_text("# 문서\n")
+    (p2 / "app.py").write_text("x = 1\n")
+    out2 = _emit_verifier_result(p2, dict(base_r))
+    check(
+        "코드 섞임 → ❌ 강등 + 교차 검증 실패 사유",
+        get_gate(p2).get("verifier_status") == "❌" and "교차 검증 실패" in out2,
+        f"vs={get_gate(p2).get('verifier_status')} out={out2[:200]!r}",
+    )
+
+    # (3) 행동 지시 문서(.claude/**) 변경 → 경량 인정 안 함 (행위 검증 대상)
+    p3 = _approved_gate_project(base, "docsprof_instr")
+    commit_all(p3)
+    (p3 / ".claude" / "agents" / "verifier.md").write_text("# 지시 변경")
+    out3 = _emit_verifier_result(p3, dict(base_r))
+    check("행동 지시 문서 변경 → ❌ 강등", get_gate(p3).get("verifier_status") == "❌",
+          f"out={out3[:160]!r}")
+
+    # (4) 판정할 변경이 없으면 → fail-closed 강등 (근거 부재는 인정 아님)
+    p4 = _approved_gate_project(base, "docsprof_empty")
+    commit_all(p4)
+    out4 = _emit_verifier_result(p4, dict(base_r))
+    check("변경 없음 → fail-closed ❌ 강등", get_gate(p4).get("verifier_status") == "❌",
+          f"out={out4[:160]!r}")
+
+
+def t_block_codes(base: Path) -> None:
+    """차단/환기 메시지의 안정 진단 코드 태깅 (PG-* / FL-LOOP).
+
+    코드 문자열은 사용자·기계 공용 계약 — 사용자가 '어느 가드가 왜 막았나'를 코드로
+    판별한다. MANUAL §11·plan-gate-help 표와 동기 유지(변경 시 함께 갱신).
+    """
+    print("[5g] 차단/환기 안정 코드 태깅")
+    lib = _reload_lib()
+    g = _mkgate(lib, state="created", edit_count=5, unique_files=["a.py"],
+                file_edit_counts={"a.py": 5})
+    check("[PG-TRIGGER] 트리거 차단", "[PG-TRIGGER]" in lib.format_trigger_message(g, False, ""))
+    check("[PG-D1] verifier ❌ 잠금", "[PG-D1]" in lib.format_d1_lock_message(g))
+    check("[PG-THRASH] 반복 편집", "[PG-THRASH]" in lib.format_thrash_message(g))
+    gs = _mkgate(lib, scope=["src/**"], do_not_touch=["secrets/**"])
+    check("[PG-SCOPE-L1] 스코프 밖 거부", "[PG-SCOPE-L1]" in lib.format_scope_deny("lib/x.py", gs))
+    check("[PG-DNT] do-not-touch 구분", "[PG-DNT]" in lib.format_scope_deny("secrets/k.pem", gs))
+    check("[PG-SCOPE-SHADOW] shadow 위반", "[PG-SCOPE-SHADOW]" in lib.format_scope_shadow("x.py", "Edit"))
+    check("[PG-SCOPE-L2] layer-2 스윕", "[PG-SCOPE-L2]" in lib.format_scope_sweep(["a"], [], "enforce", "enforce"))
+
+
 def t_rollback_preserves_user_files(base: Path) -> None:
     """rollback 안전성 — 사용자가 손수 만든 untracked 파일은 /rollback 으로 안 날린다.
 
@@ -2114,6 +2264,18 @@ def t_verifier_spec() -> None:
         "실행 grounding" in text and "전 항목이 `static` 인데 `✅` 는 금지" in text,
     )
     check("method enum 보유", "isolated_exec" in text and "production_exec" in text)
+    # 작업 유형별 검증 프로파일 — 유형 축 없이 단일 기준으로 전 작업을 판정하던
+    # 과소/과잉검증 문제의 해소분. 표가 사라지면 유형별 필수 검증이 다시 붕괴한다.
+    check(
+        "작업 유형별 검증 프로파일 표 (task_type 8종)",
+        "task_type" in text and "`bugfix`" in text and "`refactor`" in text
+        and "`security`" in text and "행위 불변" in text and "부정 테스트" in text,
+    )
+    check(
+        "실패 원인 분류(failure_category) 필수 규칙",
+        "failure_category" in text and "implementation_defect" in text
+        and "environment_constraint" in text,
+    )
     # @llm-agent 작업 품질 조항 — A2 재현으로 입증된 레버(배관 mocked 테스트만으로 ✅ 금지).
     # 이 문장이 사라지면 LLM 에이전트 산출물이 다시 mocked 배관 테스트로 완료 처리된다.
     check(
@@ -2359,8 +2521,8 @@ def t_failure_loop_guard(base: Path) -> None:
     )
     r = run_hook(hook, failure, p)
     check(
-        "실패2 연속 → exit2 차단 + 카운터 리셋",
-        r.returncode == 2 and "FAILURE LOOP DETECTED" in (r.stderr or "") and cf() == 0,
+        "실패2 연속 → exit2 차단([FL-LOOP] 코드) + 카운터 리셋",
+        r.returncode == 2 and "[FL-LOOP]" in (r.stderr or "") and cf() == 0,
         f"rc={r.returncode} cf={cf()} err={r.stderr[:80]!r}",
     )
     r = run_hook(hook, old_fail, p)
@@ -2858,6 +3020,10 @@ def main() -> int:
         t_update_docs(base)
         t_verifier_grounding_enforce(base)
         t_verdict_transitions(base)
+        t_gate_close_helpers(base)
+        t_failure_category_advisory(base)
+        t_docs_profile_grounding(base)
+        t_block_codes(base)
         t_dangerous_bash(base)
         t_workspace_parent_guard(base)
         t_secret_read_guard()

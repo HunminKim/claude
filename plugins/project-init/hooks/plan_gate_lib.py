@@ -478,6 +478,12 @@ def sweep_effective_mode(root: Path, gate: dict[str, Any], mode: str) -> str:
 
     스냅샷이 없으면 파일이 게이트 열림 시점에 존재했는지 판정할 수 없어 신규/기존
     구분도 복원도 불가능하다 — 무백업 삭제로 빠지는 fail-open 을 막고 감지만 한다.
+
+    ⚠️ 결합 주의: 이 강등은 체크포인트 기능이 스코프 강제 수위를 결정하는 지점이다 —
+    /plan-gate-no-git(체크포인트 opt-out)이나 스냅샷 실패가 enforce 를 조용히
+    무력화한다. 의도된 안전 결합(무백업 삭제 금지)이므로 절단하지 말 것. 강등 시
+    format_scope_sweep 이 사유를 반드시 환기한다(침묵 강등 금지). 행위 계약은
+    smoke_test [30] H-2 가 고정한다.
     """
     if mode == "enforce" and not gate.get("checkpoint_commit"):
         return "shadow"
@@ -699,6 +705,22 @@ def transition(gate: dict[str, Any], name: str) -> dict[str, Any]:
     return gate
 
 
+def enter_verified(gate: dict[str, Any], verdict: str) -> dict[str, Any]:
+    """verifier 판정 반영(→verified)의 단일 출처.
+
+    update_docs.py(정상 경로)와 plan_gate_cli 의 결과 파일 복구 경로가 공유한다 —
+    직접 대입이 여러 곳에 흩어지면 한쪽만 필드가 추가·리셋되는 회귀가 생긴다.
+    approved(첫 판정)·verified(재판정 덮어쓰기)에서만 합법. verdict 는 ✅/❌.
+    """
+    if gate.get("state") not in ("approved", "verified"):
+        raise ValueError(
+            f"illegal enter_verified from state={gate.get('state')!r} (legal: approved, verified)"
+        )
+    gate["state"] = "verified"
+    gate["verifier_status"] = verdict
+    return gate
+
+
 # ── 트리거 휴리스틱 (D5) ─────────────────────────────────────────────────
 def _max_code_repeat(gate: dict[str, Any]) -> int:
     """코드 파일 중 가장 많이 편집된 횟수. doc 파일은 제외."""
@@ -735,6 +757,13 @@ def converged_since_last_edit(gate: dict[str, Any]) -> bool:
 # 의미를 잃는다. 테스트·빌드·린트·타입체크 등 "코드를 검증하는" 명령의 성공만
 # 수렴으로 본다. 단어형 러너는 \b 로, 서브커맨드 필요한 런처(go/cargo/npm…)는
 # 동사와 함께 매칭한다. 미인식 시 False(=리셋 안 함) — fail-closed 로 신호를 보수.
+# ⚠️ 결합 주의: 이 정규식 하나가 3개 기능의 공유 입력이다 —
+#   ① thrash 카운터 리셋 (plan_gate_bash.py green-reset)
+#   ② soft hint 억제 (같은 리셋 경유)
+#   ③ created 게이트 자동 롤오버 = 체크포인트 삭제 시점
+#     (converged_since_last_edit → plan_gate.py 롤오버 → do_gate_done)
+# 러너를 추가·제거하면 "롤백 불가능해지는 순간"이 함께 바뀐다.
+# 행위 계약은 smoke_test [23](리셋)·[25b](롤오버)·[25d](비검증 명령 제외)가 고정한다.
 _VERIFY_RE = re.compile(
     r"\b(pytest|unittest|nosetests|tox|jest|vitest|mocha|playwright|cypress|"
     r"rspec|phpunit|mypy|pyright|ruff|flake8|pylint|eslint|tslint|tsc|rubocop|"
@@ -1118,13 +1147,31 @@ def scope_allows(
     return any(_path_match(rel, pat) for pat in allowed)
 
 
+# ── 차단/환기 안정 코드 ─────────────────────────────────────────────────
+# 사람·기계 공용 진단 키 — "어느 가드가 왜 막았나"를 코드 하나로 판별한다.
+# 사용자 메시지 헤더에 [코드] 로 태깅되고 audit action 과 1:1 매핑된다
+# (사용자에게 모든 차단이 'plan-gate 하나'로 보여 원인 파악이 어려운 문제 해소).
+# 코드 문자열은 안정 계약 — 변경 시 docs/MANUAL.md·plan-gate-help 스킬·smoke_test
+# [42] 를 함께 갱신한다. failure-loop 가드는 별도 시스템이라 FL- 접두를 쓴다
+# (detect_failure_loop.py 의 FL-LOOP — plan-gate 아님을 코드로 드러낸다).
+CODE_TRIGGER = "PG-TRIGGER"  # 복잡도 임계 → 계획 승인 필요 (audit: trigger)
+CODE_D1_LOCK = "PG-D1"  # verifier ❌ 미해결 편집 잠금 (audit: 없음 — 판정은 update_docs)
+CODE_THRASH = "PG-THRASH"  # 같은 파일 반복 편집 (audit: thrash_approved)
+CODE_SCOPE_L1 = "PG-SCOPE-L1"  # layer-1 스코프 밖 편집 거부 (audit: scope_deny_enforced)
+CODE_DNT = "PG-DNT"  # do-not-touch 위반 거부 (audit: scope_deny_enforced)
+CODE_SCOPE_SHADOW = "PG-SCOPE-SHADOW"  # shadow 위반 감지 (audit: scope_deny_shadow/scope_violation_shadow)
+CODE_SCOPE_L2 = "PG-SCOPE-L2"  # layer-2 git-status 스윕 (audit: scope_violation_enforced)
+
+
 def format_scope_deny(rel: str, gate: dict[str, Any]) -> str:
     """layer-1 스코프 밖 편집 거부 사유 (permissionDecisionReason, enforce)."""
     scope = ", ".join(gate.get("scope", [])) or "(없음)"
     dnt = gate.get("do_not_touch") or []
     dnt_line = f"\n  do-not-touch: {', '.join(dnt)}" if dnt else ""
+    # do-not-touch 위반은 스코프 이탈과 원인이 다르다(subplan 으로도 못 품) — 코드 구분
+    code = CODE_DNT if any(_path_match(rel, p) for p in dnt) else CODE_SCOPE_L1
     return (
-        f"[plan-gate] 🛑 스코프 밖 편집 거부: {rel}\n"
+        f"[plan-gate] 🛑 [{code}] 스코프 밖 편집 거부: {rel}\n"
         f"  이번 계획의 scope: {scope}{dnt_line}\n"
         f"  scope 안의 파일만 수정하거나, 계획 변경이 필요하면 /replan 으로 "
         f"tasks/todo.md 의 매니페스트를 갱신한 뒤 /approve-plan 하세요."
@@ -1134,7 +1181,7 @@ def format_scope_deny(rel: str, gate: dict[str, Any]) -> str:
 def format_scope_shadow(rel: str, layer: str) -> str:
     """shadow 모드 위반 환기 (차단·롤백 없음 — additionalContext 용)."""
     return (
-        f"[plan-gate] 👁  스코프 위반 감지(shadow, {layer}): {rel}\n"
+        f"[plan-gate] 👁  [{CODE_SCOPE_SHADOW}] 스코프 위반 감지(shadow, {layer}): {rel}\n"
         f"  enforce 모드였다면 거부/롤백됐을 변경입니다. 현재는 기록만 합니다 "
         f"(audit log)."
     )
@@ -1155,7 +1202,7 @@ def format_scope_sweep(
     스코프 밖 변경(기존 파일 수정/shadow). requested↔effective 가 다르면(스냅샷 없어
     enforce→shadow 강등) 그 사실을 명시한다.
     """
-    parts = [f"\n{DIVIDER}", "[plan-gate] 스코프 위반 감지 (layer-2 / git-status 스윕)"]
+    parts = [f"\n{DIVIDER}", f"[plan-gate] [{CODE_SCOPE_L2}] 스코프 위반 감지 (layer-2 / git-status 스윕)"]
     if removed:
         parts.append(f"↩️  스코프 밖 신규 변경 {len(removed)}건 롤백(삭제, enforce):")
         parts.append(_bullet(removed))
@@ -1342,7 +1389,7 @@ def format_trigger_message(
     parts = [
         "",
         DIVIDER,
-        "🛑 PLAN-GATE 차단됨 — 사용자 계획 승인 필요",
+        f"🛑 [{CODE_TRIGGER}] PLAN-GATE 차단됨 — 사용자 계획 승인 필요",
         DIVIDER,
         "",
         "▌ 왜 멈췄나",
@@ -1415,7 +1462,7 @@ def format_d1_lock_message(gate: dict[str, Any]) -> str:
     )
     return (
         f"\n{DIVIDER}\n"
-        f"🛑 PLAN-GATE LOCK — 이전 작업 결정 대기 중\n"
+        f"🛑 [{CODE_D1_LOCK}] PLAN-GATE LOCK — 이전 작업 결정 대기 중\n"
         f"{DIVIDER}\n"
         f"\n"
         f"▌ 상태\n"
@@ -1440,7 +1487,7 @@ def format_thrash_message(gate: dict[str, Any]) -> str:
     max_repeat = _max_code_repeat(gate)
     return (
         f"\n{DIVIDER}\n"
-        f"🛑 PLAN-GATE — 같은 파일 반복 편집(수렴 안 됨)\n"
+        f"🛑 [{CODE_THRASH}] PLAN-GATE — 같은 파일 반복 편집(수렴 안 됨)\n"
         f"{DIVIDER}\n"
         f"\n"
         f"▌ 무슨 일이?\n"
@@ -1485,6 +1532,21 @@ def do_gate_done(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> boo
     except Exception:
         pass
     return revert_scope_if_enforced(root)  # 게이트 닫힘 = 사이클 종료 → stale enforce 청소
+
+
+def do_gate_rolled_back(root: Path, state: dict[str, Any], gate: dict[str, Any]) -> bool:
+    """gate 를 rolled_back 으로 닫는 단일 출처 (do_gate_done 의 rollback 짝).
+
+    체크포인트 *복원*은 호출자(rollback_checkpoint)가 먼저 수행한다 — 여기서는
+    상태 마감·저장·stale enforce 청소만 담당한다. closed_at 기록으로 GC(30일
+    경과 종료 게이트 청소)가 rolled_back 도 정확한 시각 기준으로 정리한다.
+    반환: enforce→shadow 자동 복귀 여부 (do_gate_done 과 동일 — 호출자가 환기).
+    """
+    gate["state"] = "rolled_back"
+    gate["closed_at"] = now_iso()
+    clear_current_gate(state)
+    save_state(root, state)
+    return revert_scope_if_enforced(root)
 
 
 def last_archived_todo_sha(state: dict[str, Any]) -> str | None:
