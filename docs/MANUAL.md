@@ -314,7 +314,7 @@ secrets/**
 
 ### 4.8 반복편집 (thrash) 가드
 
-같은 코드 파일을 **5회**(`TRIGGER_REPEAT_RATIO=5`) 이상 반복 편집하면 차단된다 — "수렴 안 되는 헛돌이"를 멈추게 하는 장치.
+같은 코드 파일을 **5회**(`TRIGGER_REPEAT_RATIO=5`) 이상 반복 편집하면 차단된다 — "수렴 안 되는 헛돌이"를 멈추게 하는 장치. 차단 메시지에는 `[PG-THRASH]` 코드가 붙는다 ([§11 코드 일람](#차단환기-코드-일람)).
 
 - **green-bash 리셋**: 성공한 Bash(exit 0, 예: 테스트 통과) 직후 반복 카운터가 리셋된다. 정상적 반복(고치고-테스트-고치고)을 거짓 차단하지 않으려는 설계.
 - 실패한 Bash 는 카운터를 유지한다.
@@ -323,10 +323,10 @@ secrets/**
 
 ### 4.9 실패루프 가드
 
-연속 Bash 실패를 추적한다(`.claude/state/failure_log.json`).
+연속 Bash 실패를 추적한다(`.claude/state/failure_log.json`). **plan-gate 와 별개 시스템**(독립 훅·독립 상태 파일)이며, 차단 메시지에도 `[FL-LOOP]` 코드로 그 사실이 명시된다 — plan-gate 문제로 오인해 디버깅하지 않도록.
 
 - 1회 실패 → 부드러운 환기 (advisory)
-- **2회 연속 실패 → 차단**(exit 2) + 멈추고 재검토하라는 경고
+- **2회 연속 실패 → 차단**(exit 2, `[FL-LOOP]`) + 멈추고 재검토하라는 경고
 - 성공 / 30분 경과 / 작업 디렉토리 변경 시 리셋
 - `interrupt`(사용자 중단)는 실패로 치지 않는다
 
@@ -410,9 +410,23 @@ project-init 이 `.claude/agents/` 에 생성하는 6개 (verifier + 도메인 5
 
 공통 규칙: 시작 시 `git rev-parse HEAD` 로 baseline 기록 → 자기 변경을 "원래 있던 것"으로 오귀속하지 않음. verifier 만 opus(판단 품질), 구현 에이전트는 sonnet(처리량).
 
+### 작업 유형별 검증 프로파일 (과소/과잉검증 방지)
+
+verifier 는 검증 시작 시 **작업 유형(task_type)을 판별**하고 유형별 필수 검증을 적용한다 — 모든 작업을 단일 기준으로 판정하면 문서 변경은 과잉검증되고 보안 변경은 과소검증되기 때문이다. 프로파일 표(스펙 `verifier.md` §1-1이 SSOT):
+
+| task_type | 필수 검증 핵심 |
+|-----------|---------------|
+| `bugfix` | 수정 **전 재현 → 후 소멸** 확인 |
+| `feature` | 정상 + 경계값 + 에러 처리 (기본 3항목) |
+| `refactor` | **행위 불변** — 기존 테스트 green + 의도치 않은 동작 변경 부재 |
+| `docs` / `config` | 경량 — 참조 무결성·parse 검증. 행동 지시 문서(`agents/*.md`·`CLAUDE.md` 등)는 예외로 행위 검증 |
+| `infra` | dry-run 급 (`docker build`·`terraform plan` 등) |
+| `security` | 차단 경로 **부정 테스트** (통과 케이스만으로 ✅ 금지) |
+| `llm-prompt` | eval 필수 (배관 mocked 테스트만으로 ✅ 금지) |
+
 ### verifier 결과 스키마 (무엇을·어떻게 검증했나)
 
-verifier 는 단순히 ✅/❌ 만 내지 않는다. 검증이 끝나면 `docs/.verifier_result.json` 에 **무엇을 어떻게 검증했는지**를 구조화해 기록하고, `update_docs.py` 훅이 이를 읽어 문서·plan-gate 상태에 반영한 뒤 파일을 삭제한다. 핵심 필드:
+verifier 는 단순히 ✅/❌ 만 내지 않는다. 검증이 끝나면 `docs/.verifier_result.json` 에 **무엇을 어떻게 검증했는지**를 구조화해 기록하고, `update_docs.py` 훅이 이를 읽어 문서·plan-gate 상태에 반영한 뒤 파일을 삭제한다. ❌ 반영 시 advisory 는 `failure_category` 별로 권장 액션을 가른다. 핵심 필드:
 
 | 필드 | 의미 |
 |------|------|
