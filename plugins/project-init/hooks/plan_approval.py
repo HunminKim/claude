@@ -2,7 +2,7 @@
 """UserPromptSubmit hook — plan-gate 토큰 fallback 처리.
 
 출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON
-— verified ✅ 분기. CLI 위임 출력은 CLI 의 채널을 그대로 전달)
+— verified ✅ 분기 · CLI 실패(exit≠0) 안내 승격. CLI 성공 출력은 CLI 채널 그대로 전달)
 
 슬래시 커맨드(`/approve-plan` 등)는 commands/*.md 정의가 1차로 처리하지만,
 사용자가 슬래시 커맨드 형태가 아닌 평문 메시지로 토큰을 입력해도 동일하게
@@ -86,12 +86,28 @@ def _run_cli(cli: Path, cli_args: list[str], root: Path) -> None:
             cwd=str(root),
             env={**os.environ, "CLAUDE_PROJECT_DIR": str(root)},
         )
-        if r.stdout:
-            sys.stdout.write(r.stdout)
-        if r.stderr:
-            sys.stderr.write(r.stderr)
     except Exception as e:
         sys.stderr.write(f"[plan-gate approval] CLI 실행 실패: {e}\n")
+        return
+
+    # CLI 실패(exit != 0) 안내를 가시 채널(additionalContext)로 승격한다.
+    # UserPromptSubmit 의 plain stderr 는 모델·모바일 컨텍스트에 안 떠서(2026-07-08 리포트),
+    # approve rearm 1차 실패("todo 변경됨 → 한 번 더 approve") 안내가 묻히고
+    # "안내 없이 다시 치니 됨"으로 체감된다. JSON 으로 감싸 컨텍스트에 진입시킨다.
+    if r.returncode != 0 and (r.stderr or "").strip():
+        advisory = {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": r.stderr.strip(),
+            }
+        }
+        sys.stdout.write(json.dumps(advisory, ensure_ascii=False))
+        return
+
+    if r.stdout:
+        sys.stdout.write(r.stdout)
+    if r.stderr:
+        sys.stderr.write(r.stderr)
 
 
 def _emit_verified_advisory(root: Path) -> None:
