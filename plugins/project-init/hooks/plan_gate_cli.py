@@ -117,6 +117,24 @@ def cmd_approve(root, state) -> int:
     # todo.md 해시 검증 (gate 발동 시 캡처한 값과 비교)
     expected = gate.get("todo_md_sha256")
     current_sha, current_mtime = lib.hash_todo_md(root)
+
+    # 기준점 부재 + todo.md 존재 = "게이트가 열린 뒤 관측 밖 경로로 작성됨".
+    # gate 발동 시 todo.md 가 없었고(캡처 대상 없음) 이후 Write/Edit 도 한 번도 안 거쳤다는
+    # 뜻 — Bash heredoc·외부 에디터로만 쓰인 계획이다. 추적 밖 '수정'(아래 해시 불일치)은
+    # 잡으면서 '생성'만 침묵하던 비대칭을 없앤다. rearm 은 아래와 동일 기계를 쓴다.
+    if expected is None and current_sha is not None:
+        _err(
+            "[plan-gate approve] tasks/todo.md가 plan-gate 관측 밖 경로로 작성됨.\n"
+            f"  current_sha256={current_sha[:12]}…\n"
+            "\n"
+            "  👉 계획 내용을 확인했다면: 다시 /approve-plan 을 입력하면 통과됩니다.\n"
+            "  👉 계획을 다시 짜려면: /replan 입력 후 todo.md 작성 → /approve-plan."
+        )
+        gate["todo_md_sha256"] = current_sha
+        gate["todo_md_mtime"] = current_mtime
+        lib.save_state(root, state)
+        return 1
+
     if expected and current_sha != expected:
         _err(
             "[plan-gate approve] tasks/todo.md가 gate 발동 후 변경됨.\n"

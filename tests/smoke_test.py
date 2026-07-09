@@ -307,6 +307,31 @@ def t_todo_baseline_recapture(base: Path) -> None:
     out = run_hook(post, edit_payload("Edit", p / "app.py"), p).stdout
     check("코드 파일 편집 시 verifier 상기 유지", "verifier" in out, f"out={out[:80]!r}")
 
+    # 기준점 부재 + todo.md 존재 = 관측 밖 '생성' → 경고 (수정만 잡던 비대칭 제거)
+    p = make_project(base, "todo_untracked_create")
+    (p / "tasks").mkdir()
+    tracked_edit(p, p / "app.py", "x = 2\n")  # 게이트 개시 — 이때 todo.md 없음
+    check("게이트 개시 시 todo 없으면 기준점 None", get_gate(p)["todo_md_sha256"] is None)
+    (p / "tasks" / "todo.md").write_text("# Plan\n- [ ] EVIL\n", encoding="utf-8")  # 훅 미발화
+    r = _cli(p, "approve")
+    check("관측 밖 생성된 todo.md → 1차 approve 경고", r.returncode == 1, f"rc={r.returncode}")
+    check("경고 문구가 '관측 밖' 명시", "관측 밖" in r.stderr, f"stderr={r.stderr[:80]!r}")
+    check("경고 후 rearm → 2차 approve 통과", _cli(p, "approve").returncode == 0)
+
+    # 반대로 게이트 개시 후 '추적된' Write 로 계획을 쓰면 1차부터 통과해야 한다 (오탐 금지)
+    p = make_project(base, "todo_tracked_create")
+    (p / "tasks").mkdir()
+    tracked_edit(p, p / "app.py", "x = 2\n")
+    tracked_edit(p, p / "tasks" / "todo.md", "# Plan\n- [ ] a\n")
+    check("게이트 개시 후 추적 Write 로 작성 → 1차 approve 통과", _cli(p, "approve").returncode == 0)
+
+    # _SKIP_PREFIXES 는 절대경로에도 적용돼야 한다 (file_path 는 절대경로로 들어온다)
+    (p / "docs").mkdir(exist_ok=True)
+    out = run_hook(post, edit_payload("Edit", p / "docs" / "note.md"), p).stdout
+    check("docs/ 문서 편집엔 verifier 상기 억제 (절대경로)", "verifier" not in out, f"out={out[:80]!r}")
+    out = run_hook(post, edit_payload("Edit", p / ".claude" / "settings.json"), p).stdout
+    check(".claude/ 편집엔 verifier 상기 억제 (절대경로)", "verifier" not in out, f"out={out[:80]!r}")
+
 
 def t_verifier_grounding_enforce(base: Path) -> None:
     """update_docs 가 실행 grounding 을 기계 강제 — 전 항목 static ✅ 는 ❌ 로 강등.

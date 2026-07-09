@@ -58,6 +58,18 @@ def _is_todo_md(target: str, root: Path) -> bool:
         return False
 
 
+def _rel_to_root(target: str, root: Path) -> str:
+    """프로젝트 루트 기준 상대경로(POSIX 구분자). 밖이면 원본 그대로.
+
+    tool_input.file_path 는 절대경로로 들어오므로 _SKIP_PREFIXES 를 그대로
+    startswith 하면 영원히 거짓이 되어 제외 목록이 죽는다(문서 편집에도 상기 발화).
+    """
+    try:
+        return Path(target).resolve().relative_to(root.resolve()).as_posix()
+    except (ValueError, OSError):
+        return target
+
+
 def _recapture_todo_baseline(root: Path, state: dict, gate: dict) -> None:
     """추적된 todo.md 편집 직후 TOCTOU 기준점을 현재 내용으로 갱신한다."""
     sha, mtime = lib.hash_todo_md(root)
@@ -105,7 +117,7 @@ def main() -> int:
 
     if not target:
         return 0
-    if any(target.startswith(p) for p in _SKIP_PREFIXES):
+    if any(_rel_to_root(target, root).startswith(p) for p in _SKIP_PREFIXES):
         return 0
 
     count = gate.get("edit_count_post_approval", 0)
