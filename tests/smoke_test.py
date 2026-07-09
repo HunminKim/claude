@@ -257,6 +257,57 @@ def _cli(p: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def t_todo_baseline_recapture(base: Path) -> None:
+    """todo.md TOCTOU 기준점은 '추적된 편집'마다 재캡처된다 (verifier_remind PostToolUse).
+
+    plan_gate.py 는 PreToolUse 라 게이트 개시 시점에 '계획을 쓰기도 전의 todo.md' 를
+    캡처했다. 그 탓에 계획을 다듬은 뒤 /approve-plan 하면 해시 불일치로 1차 실패(rearm)가
+    정상 흐름에서 보장돼, 더블탭이 상시 통행세가 됐다(오탐이 기본값 → alarm fatigue).
+    재캡처 후 해시 불일치의 의미는 'plan-gate 가 관측 못 한 경로(Bash sed -i·외부 에디터)로
+    todo.md 가 바뀌었다' 로 좁혀진다 — 실제 은폐 가능한 유일한 변경 벡터.
+    """
+    print("[49] todo.md 기준점 재캡처")
+    pre = HOOKS / "plan_gate.py"
+    post = HOOKS / "verifier_remind.py"
+
+    def tracked_edit(p: Path, f: Path, content: str | None = None) -> None:
+        """PreToolUse → 실제 편집 → PostToolUse (실 툴 사이클)."""
+        run_hook(pre, edit_payload("Edit", f), p)
+        if content is not None:
+            f.write_text(content, encoding="utf-8")
+        run_hook(post, edit_payload("Edit", f), p)
+
+    # 정상 흐름: 게이트 개시 후 계획을 다듬어도 1차 approve 가 통과해야 한다
+    p = make_project(base, "todo_recapture_ok")
+    (p / "tasks").mkdir()
+    todo = p / "tasks" / "todo.md"
+    todo.write_text("# Plan (초안)\n- [ ] a\n", encoding="utf-8")
+    tracked_edit(p, p / "app.py", "x = 2\n")
+    for i in range(3):
+        tracked_edit(p, todo, f"# Plan v{i + 2}\n- [ ] a\n- [ ] s{i}\n")
+    r = _cli(p, "approve")
+    check("계획 다듬기 후 1차 approve 통과 (오탐 제거)", r.returncode == 0, f"rc={r.returncode}")
+    check("approve 후 gate approved", get_gate(p)["state"] == "approved")
+
+    # 은폐된 편집: 훅을 안 타는 변조는 여전히 잡아야 한다
+    p = make_project(base, "todo_recapture_untracked")
+    (p / "tasks").mkdir()
+    todo = p / "tasks" / "todo.md"
+    todo.write_text("# Plan\n- [ ] a\n", encoding="utf-8")
+    tracked_edit(p, p / "app.py", "x = 2\n")
+    tracked_edit(p, todo, "# Plan\n- [ ] a\n- [ ] b\n")
+    todo.write_text("# Plan\n- [ ] EVIL\n", encoding="utf-8")  # PostToolUse 미발화 = 은폐
+    r = _cli(p, "approve")
+    check("은폐된 todo.md 변조는 1차 approve 실패로 경고", r.returncode == 1, f"rc={r.returncode}")
+    check("경고 후 rearm → 2차 approve 통과", _cli(p, "approve").returncode == 0)
+
+    # 재캡처가 verifier 상기를 잡아먹지 않는다 (기존 동작 회귀 가드)
+    p = _approved_gate_project(base, "todo_recapture_verifier")
+    set_gate(p, edit_count_post_approval=2, verifier_status=None, approved_auto=False)
+    out = run_hook(post, edit_payload("Edit", p / "app.py"), p).stdout
+    check("코드 파일 편집 시 verifier 상기 유지", "verifier" in out, f"out={out[:80]!r}")
+
+
 def t_verifier_grounding_enforce(base: Path) -> None:
     """update_docs 가 실행 grounding 을 기계 강제 — 전 항목 static ✅ 는 ❌ 로 강등.
 
@@ -3018,6 +3069,7 @@ def main() -> int:
         t_plan_gate(base)
         t_skip_verify(base)
         t_update_docs(base)
+        t_todo_baseline_recapture(base)
         t_verifier_grounding_enforce(base)
         t_verdict_transitions(base)
         t_gate_close_helpers(base)
