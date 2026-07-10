@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""SessionStart hook — 같은 경로의 다른 Claude 세션 활동 환기.
+"""SessionStart hook — 세션 작업 환경 환기 (타 세션 활동 + worktree 위치).
 
 출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
 
+환기 1 — 같은 경로 타 세션 활동:
 같은 프로젝트 디렉토리에서 병렬 세션이 편집하면 tasks/todo.md·plan-gate 상태를
 공유해 충돌한다(TOCTOU 오탐·카운터 오염·전이 충돌). 세션 진입 시 다른 세션의
 최근 활동이 보이면 "확인해보세요" 환기만 한다 — 판정·이동은 사용자 몫이다.
@@ -17,12 +18,19 @@
 compact/resume 은 대화가 이어지는 중 — 같은 사실을 반복 환기하는 노이즈라 억제.
 프로세스 수만으로 판정하지 않는 근거: resume 후 방치된 탭이 프로세스로는 잡혀
 "사용 중 2개 vs 프로세스 3개" 불일치가 실측됨 — 활동(mtime)이 사용자 체감과 일치.
+
+환기 2 — worktree 작업 위치 앵커:
+링크된 git worktree(격리 사본)에서 작업 중이면 위치·브랜치·본체를 환기한다.
+타 세션 환기와 달리 compact 후에도 재주입한다 — 요약에서 위치 사실이 유실되면
+Claude 가 본체 체크아웃으로 착각할 수 있다(템플릿 CLAUDE.md compact 언어앵커와
+같은 원리). 단 "사용자에게 알리라" 지시는 세션 진입 시에만 붙인다(반복 공지 방지).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -110,6 +118,73 @@ def _other_claude_alive(own_cwd: str) -> bool | None:
     return False
 
 
+def _worktree_notice(cwd: str, source: str | None) -> str | None:
+    """링크된 worktree 에서 작업 중이면 환기 문구, 본체·비 git 이면 None.
+
+    판별: --git-dir 과 --git-common-dir 이 다르면 링크된 worktree (본체는 동일).
+    """
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--git-dir", "--git-common-dir"],
+            cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = r.stdout.splitlines()
+    if r.returncode != 0 or len(lines) != 2:
+        return None
+    # 상대 경로(.git 등)로 나올 수 있어 cwd 기준 절대화 후 비교
+    git_dir, common_dir = (os.path.realpath(os.path.join(cwd, x)) for x in lines)
+    if git_dir == common_dir:
+        return None  # 본체 체크아웃
+
+    main_root = os.path.dirname(common_dir)  # <본체>/.git → <본체>
+    try:
+        b = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+        branch = b.stdout.strip() or "?"
+    except (OSError, subprocess.SubprocessError):
+        branch = "?"
+
+    notice = (
+        f"[worktree] 🌿 이 세션은 git worktree(격리 사본)에서 작업 중입니다 "
+        f"(브랜치: {branch} · 본체: {main_root})."
+    )
+    if source not in ("compact", "resume"):
+        notice += (
+            "\n사용자에게 첫 응답에서 워크트리 작업 중임을 알리세요. "
+            "작업 완료 시 본체에서 merge 가 필요하다는 점을 기억하세요."
+        )
+    return notice
+
+
+def _concurrent_notice(data: dict, cwd: str) -> str | None:
+    """타 세션 최근 활동이 감지되면 환기 문구, 아니면 None."""
+    transcript_path = data.get("transcript_path") or ""
+    if not transcript_path:
+        return None
+
+    ages = _recent_other_transcripts(transcript_path)
+    if not ages:
+        return None
+
+    if _other_claude_alive(cwd) is False:
+        return None  # 신선한 잔재 jsonl 만 있고 프로세스는 없음 — 방금 닫힌 세션
+
+    minutes = int(min(ages) // 60)
+    last_seen = f"{minutes}분 전" if minutes else "1분 이내"
+    return (
+        f"[session-check] 👀 같은 프로젝트 경로에서 다른 Claude 세션의 최근 활동이 "
+        f"감지되었습니다 (활성 추정 {len(ages)}개 · 마지막 활동 {last_seen}).\n"
+        "사용자에게 첫 응답에서 알리세요: 다른 Claude 세션이 이 경로에서 활동 중인 것 "
+        "같습니다 — 의도한 병렬 작업인지 확인해보세요.\n"
+        "병렬로 편집 작업을 할 계획이라면 git worktree 분리를 권장하세요 "
+        "(같은 경로 병렬 편집은 tasks/todo.md·plan-gate 상태를 공유해 충돌합니다)."
+    )
+
+
 def _emit_context(text: str) -> None:
     result = {
         "hookSpecificOutput": {
@@ -126,32 +201,23 @@ def main() -> int:
     except Exception:
         return 0
 
-    # compact/resume 은 진행 중 대화 — 세션 진입 시 1회만 환기 (노이즈 억제)
-    if data.get("source") in ("compact", "resume"):
-        return 0
-
-    transcript_path = data.get("transcript_path") or ""
-    if not transcript_path:
-        return 0
-
-    ages = _recent_other_transcripts(transcript_path)
-    if not ages:
-        return 0
-
+    source = data.get("source")
     cwd = data.get("cwd") or os.getcwd()
-    if _other_claude_alive(cwd) is False:
-        return 0  # 신선한 잔재 jsonl 만 있고 프로세스는 없음 — 방금 닫힌 세션
+    messages = []
 
-    minutes = int(min(ages) // 60)
-    last_seen = f"{minutes}분 전" if minutes else "1분 이내"
-    _emit_context(
-        f"[session-check] 👀 같은 프로젝트 경로에서 다른 Claude 세션의 최근 활동이 "
-        f"감지되었습니다 (활성 추정 {len(ages)}개 · 마지막 활동 {last_seen}).\n"
-        "사용자에게 첫 응답에서 알리세요: 다른 Claude 세션이 이 경로에서 활동 중인 것 "
-        "같습니다 — 의도한 병렬 작업인지 확인해보세요.\n"
-        "병렬로 편집 작업을 할 계획이라면 git worktree 분리를 권장하세요 "
-        "(같은 경로 병렬 편집은 tasks/todo.md·plan-gate 상태를 공유해 충돌합니다)."
-    )
+    # worktree 위치 앵커 — compact/resume 에도 재주입 (요약 유실 방지)
+    wt = _worktree_notice(cwd, source)
+    if wt:
+        messages.append(wt)
+
+    # 타 세션 감지는 세션 진입 시 1회만 — compact/resume 재환기는 노이즈
+    if source not in ("compact", "resume"):
+        cs = _concurrent_notice(data, cwd)
+        if cs:
+            messages.append(cs)
+
+    if messages:
+        _emit_context("\n\n".join(messages))
     return 0
 
 

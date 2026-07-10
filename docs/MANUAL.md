@@ -368,7 +368,7 @@ project-init 의 18개 훅이 이벤트별로 묶여 있다(`detect_failure_loop
 | | * | `delegation_due_diligence` | 위임 시 5섹션 todo.md 가드 | 차단/환기 |
 | **Stop** | * | `plan_gate_stop_alert` | @verifier 미호출 경고 + thrash 임박 환기 (backstop, turn 강제) | 환기 |
 | **SessionStart** | * | `plan_gate_session_start` | 재진입 시 활성 게이트 상태 표시 | 환기 |
-| | * | `concurrent_session_check` | 같은 경로 타 세션 최근 활동 감지 → 확인 권고 (worktree 안내) | 환기 |
+| | * | `concurrent_session_check` | 같은 경로 타 세션 최근 활동 감지 → 확인 권고 (worktree 안내) + worktree 작업 위치 앵커(compact 재주입) | 환기 |
 | **SessionEnd** | * | `plan_gate_gc` | 고아 체크포인트·오래된 게이트 청소 | 사용자전용 |
 | **PermissionRequest** | * | `project_init_permission` | 초기화 중 파일 생성 자동 승인 (프로젝트 스코프 신호 + TTL) | allow |
 

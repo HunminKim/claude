@@ -3147,6 +3147,77 @@ def t_concurrent_session_check(base: Path) -> None:
     check("transcript_path 부재 → 침묵 통과", r.returncode == 0 and r.stdout == "")
 
 
+def t_worktree_notice(base: Path) -> None:
+    """링크된 worktree 세션 진입 시 위치·브랜치·본체 환기 (본체 체크아웃은 침묵).
+
+    타 세션 환기와 달리 compact 에도 앵커는 재주입하되(요약 유실 방지),
+    "사용자에게 알리라" 지시는 세션 진입 시에만 붙는다 (반복 공지 방지).
+    """
+    print("[54] worktree 작업 위치 환기")
+    hook = HOOKS / "concurrent_session_check.py"
+    p = make_project(base, "wt_main")
+    wt = base / "wt_copy"
+    subprocess.run(
+        ["git", "-C", str(p), "worktree", "add", "-b", "feat-wt", str(wt)],
+        check=True, env=GIT_ENV, capture_output=True,
+    )
+
+    def run_wt(pl: dict, cwd: Path) -> subprocess.CompletedProcess[str]:
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(cwd),
+               "SESSION_CHECK_PROC_ROOT": str(base / "proc_none")}
+        return subprocess.run(
+            [sys.executable, str(hook)], input=json.dumps(pl),
+            capture_output=True, text=True, cwd=str(cwd), env=env,
+        )
+
+    # 1. 본체 체크아웃 → worktree 환기 없음 (타 세션도 없으니 완전 침묵)
+    r = run_wt({"source": "startup", "cwd": str(p)}, p)
+    check("본체 체크아웃 → 침묵", r.returncode == 0 and r.stdout == "", f"out={r.stdout[:60]!r}")
+
+    # 2. worktree 진입 → 브랜치·본체 포함 환기 + 사용자 안내 지시
+    r = run_wt({"source": "startup", "cwd": str(wt)}, wt)
+    try:
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    except Exception:
+        ctx = ""
+    check(
+        "worktree → 위치 환기 (브랜치·본체·안내 지시)",
+        "[worktree]" in ctx and "feat-wt" in ctx and p.name in ctx and "알리세요" in ctx,
+        f"out={r.stdout[:100]!r}",
+    )
+
+    # 3. compact → 앵커는 재주입, 사용자 안내 지시는 생략
+    r = run_wt({"source": "compact", "cwd": str(wt)}, wt)
+    try:
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    except Exception:
+        ctx = ""
+    check(
+        "compact → 앵커만 재주입 (안내 지시 없음)",
+        "[worktree]" in ctx and "알리세요" not in ctx,
+        f"out={r.stdout[:100]!r}",
+    )
+
+    # 4. worktree + 타 세션 활동 동시 → 두 환기가 한 JSON 에 결합
+    tdir = base / "wt_transcripts"
+    tdir.mkdir()
+    own = tdir / "own.jsonl"
+    own.write_text("{}", encoding="utf-8")
+    (tdir / "other.jsonl").write_text("{}", encoding="utf-8")
+    r = run_wt(
+        {"source": "startup", "cwd": str(wt), "transcript_path": str(own)}, wt
+    )  # proc_root 부재 → 생존 판정 불가 fail-open
+    try:
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    except Exception:
+        ctx = ""
+    check(
+        "worktree + 타 세션 → 결합 환기",
+        "[worktree]" in ctx and "[session-check]" in ctx,
+        f"out={r.stdout[:100]!r}",
+    )
+
+
 def t_prompt_log_session_guard(base: Path) -> None:
     """prompt-log 멀티세션 가드 + RMW 락 + 미동의 mkdir 부작용 없음.
 
@@ -3492,6 +3563,7 @@ def main() -> int:
         t_update_docs_malformed(base)
         t_harness_update_heal(base)
         t_concurrent_session_check(base)
+        t_worktree_notice(base)
         t_prompt_log_session_guard(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
