@@ -54,6 +54,17 @@ def _scope_note(manifest, root) -> str:
     return f"\n  스코프 계약: {len(manifest['scope'])}개 패턴 저장됨 ({tail})"
 
 
+# 승인 직후 Claude 에게 진행 추적을 위임하는 환기 문구.
+# TodoWrite 목록은 Claude 소유다 — 표시 전용이며 gate 전이 근거가 아니다.
+# 완료 체크를 승인으로 받으면 Claude 가 스스로 gate 를 통과시키게 된다.
+_TODO_WRITE_HINT = (
+    "\n  📋 다음 행동: TodoWrite 를 호출해 승인된 tasks/todo.md 의 작업 항목을 옮긴다."
+    "\n     구현 편집(Edit/Write)보다 먼저 한다."
+    "\n     todo.md 가 단일 진실 원천 — TodoWrite 는 표시용 사본이며,"
+    "\n     항목을 완료로 표시해도 gate 는 닫히지 않습니다(verifier ✅ 후 /done)."
+)
+
+
 def _info(msg: str) -> None:
     sys.stdout.write(msg + "\n")
 
@@ -95,6 +106,7 @@ def _approve_fresh_gate(root, state) -> int:
         f"  tasks/todo.md 계획 확인 후 작업을 시작하세요.\n"
         f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복"
         + _scope_note(manifest, root)
+        + _TODO_WRITE_HINT
     )
     return 0
 
@@ -160,6 +172,7 @@ def cmd_approve(root, state) -> int:
         f"[plan-gate approve] 승인 완료: {gate['id']}\n"
         f"  임계값: 단일 파일 {lib.TRIGGER_REPEAT_RATIO}회 반복 (scope creep 방지)"
         + _scope_note(manifest, root)
+        + _TODO_WRITE_HINT
     )
     return 0
 

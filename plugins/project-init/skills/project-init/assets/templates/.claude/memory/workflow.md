@@ -105,6 +105,14 @@ Agent(subagent_type="Plan", prompt="""
 자기 변경을 "이미 있었다 / 이전 세션 변경이다"라고 오인 보고하는 사고를 막기 위한 게이트다.
 working tree는 메인과 공유되지만 context는 분리되어 있어, 시작 기준점 없이는 본인 변경을 식별할 수 없다.
 
+### 진행 추적 (TodoWrite)
+
+`/approve-plan` 이 `승인 완료`·`선승인 완료` 를 내면, **구현 편집(Edit/Write)보다 먼저** TodoWrite 를 한 번 호출해 승인된 `tasks/todo.md` 의 작업 항목을 옮긴다. 승인 거부·`이미 승인됨` 이면 호출하지 않는다(진행 중인 목록을 pending 으로 되돌리게 된다).
+
+- `todo.md` 가 단일 진실 원천, TodoWrite 는 **표시용 사본**이다 — 계획이 바뀌면 `todo.md` 를 먼저 고치고(`/replan`) TodoWrite 를 맞춘다
+- TodoWrite 항목을 전부 완료로 표시해도 **gate 는 닫히지 않는다** — 완료 표시는 Claude 자신이 하므로 승인 근거가 될 수 없다. gate 는 verifier ✅ 이후 `/done` 으로만 닫는다
+- 미승인(`created`) 게이트의 소편집에는 TodoWrite 를 쓰지 않는다 — 다음 사이클이 자동 롤오버로 닫는다
+
 ### 제약
 - `/approve-plan` 없이 서브에이전트에게 구현 위임 금지
 - 서브에이전트가 plan-gate limit 초과 시: 멈추고 메인에 보고 (자체 해결 불가)
