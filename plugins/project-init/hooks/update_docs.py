@@ -239,7 +239,24 @@ def _resolve_root(docs_dir: Path) -> Path | None:
     candidate = docs_dir.parent
     if lib.is_project_init_managed(candidate):
         return candidate
-    return lib.find_project_root()
+    # 결과 파일이 놓인 트리가 곧 올바른 루트 — find_project_root 의 워크트리 감지가
+    # docs 부모 기준으로 동작하도록 start 를 넘긴다(훅·CLI 와 같은 규칙).
+    return lib.find_project_root(docs_dir.parent)
+
+
+def _gate_touches_tree(gate: dict[str, Any], tree_root: Path) -> bool:
+    """gate 의 편집 카운터에 tree_root 하위 경로가 섞여 있는가 — 교차 집계의 직접 증거."""
+    try:
+        resolved = tree_root.resolve()
+    except OSError:
+        return False
+    for fp in gate.get("file_edit_counts", {}):
+        try:
+            Path(fp).resolve().relative_to(resolved)
+            return True
+        except (ValueError, OSError):
+            continue
+    return False
 
 
 def _process(docs_dir: Path, result: dict[str, Any]) -> tuple[int, bool]:
@@ -463,8 +480,8 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> tuple[int, bool]:
     # ── plan-gate state 갱신 (D3) ─────────────────────────────────────────
     # verifier 결과를 plan-gate 상태에 반영. 자동 /done이나 /rollback은 하지 않고,
     # 사용자에게 결정 토큰(/retry, /done, /rollback)을 요청하는 안내만 출력.
-    # delete_ok: 소비할 gate 가 아예 없으면 파일을 지워도 된다(기본값). 소비 가능한
-    # gate 를 만났는데 전이하지 못하면 False 로 내려 보존한다.
+    # delete_ok: 소비 가능한 gate 가 없거나 전이하지 못하면 False 로 보존한다 —
+    # 삭제하면 verifier ✅/❌ 가 유실된다("파일 삭제는 소비자 소유" 원칙).
     delete_ok = True
     try:
         _root = _resolve_root(docs_dir)
@@ -473,10 +490,29 @@ def _process(docs_dir: Path, result: dict[str, Any]) -> tuple[int, bool]:
         else:
             _state = lib.load_state(_root)
             _gate = lib.current_gate(_state)
+            # 워크트리 루트에 소비 가능한 gate 가 없으면 원본 체크아웃으로 1회 fallback —
+            # 루트 해석이 갈렸던 과거 상태(훅=원본에 집계, 결과 파일=워크트리)를 흡수한다.
+            # 단 원본 gate 의 편집 카운터에 이 워크트리 경로가 실제로 섞여 있을 때만
+            # (교차 오염의 직접 증거) — 없으면 무관한 병렬 세션의 gate 를 남의 판정으로
+            # 전이시키는 역방향 오염이 된다.
             if not _gate or _gate["state"] not in ("approved", "verified"):
+                _main = lib.worktree_main_root(_root)
+                if _main and lib.is_project_init_managed(_main):
+                    _m_state = lib.load_state(_main)
+                    _m_gate = lib.current_gate(_m_state)
+                    if (
+                        _m_gate
+                        and _m_gate["state"] in ("approved", "verified")
+                        and _gate_touches_tree(_m_gate, _root)
+                    ):
+                        _log("[update_docs] 워크트리에 gate 없음 — 교차 집계된 원본 gate 로 fallback")
+                        _root, _state, _gate = _main, _m_state, _m_gate
+            if not _gate or _gate["state"] not in ("approved", "verified"):
+                delete_ok = False  # 판정 보존 — 삭제하면 verifier ✅/❌ 가 유실된다
                 _log(
                     "[update_docs] ⚠️ 판정을 반영할 gate 가 없습니다"
-                    f"(state={_gate['state'] if _gate else None!r}) — gate 갱신 건너뜀"
+                    f"(state={_gate['state'] if _gate else None!r}) — gate 갱신 건너뜀.\n"
+                    "  결과 파일은 보존합니다 — /done 의 복구 경로 또는 재검증이 소비합니다."
                 )
             elif verdict not in ("✅", "❌"):
                 delete_ok = False  # 보존 — verifier 가 다시 쓰거나 /done 이 복구 시도

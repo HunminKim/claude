@@ -3218,6 +3218,132 @@ def t_worktree_notice(base: Path) -> None:
     )
 
 
+def t_worktree_state_isolation(base: Path) -> None:
+    """워크트리 병렬 세션 plan-gate 상태 분리 (worktree-plan-gate-interference 레포트).
+
+    (a) 루트 해석 단일화: linked worktree 세션의 편집은 env(원본 루트)가 아니라
+        워크트리 자체 상태에 집계된다 — 카운터 교차 오염 근원 차단. 플래그는
+        원본 fallback(설정 공유·상태 분리).
+    (b) thrash 판정 target 기준: 한 파일의 반복이 무관한 파일 편집을 연좌 차단하지 않는다.
+    (c) update_docs: 소비할 gate 가 없으면 판정 보존(삭제 금지). 원본 gate 로의
+        fallback 은 워크트리 경로가 교차 집계된 직접 증거가 있을 때만 — 없으면
+        무관한 병렬 세션 gate 를 남의 판정으로 전이시키는 역방향 오염이 된다.
+    """
+    print("[55] worktree plan-gate 상태 분리")
+    pg = HOOKS / "plan_gate.py"
+    ud = HOOKS / "update_docs.py"
+
+    def run_at(hook: Path, payload: dict, cwd: Path, env_root: Path):
+        """실전 재현: 훅 stdin cwd=워크트리, env CLAUDE_PROJECT_DIR=원본 루트."""
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(env_root)}
+        return subprocess.run(
+            [sys.executable, str(hook)], input=json.dumps({**payload, "cwd": str(cwd)}),
+            capture_output=True, text=True, cwd=str(cwd), env=env,
+        )
+
+    def add_worktree(main_p: Path, wt: Path, branch: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(main_p), "worktree", "add", "-b", branch, str(wt)],
+            check=True, env=GIT_ENV, capture_output=True,
+        )
+
+    def setup_docs(root: Path) -> Path:
+        docs = root / "docs"
+        docs.mkdir(exist_ok=True)
+        (docs / "checklist.md").write_text("### Phase 1\n| 1 | login | ⬜ | - |\n", encoding="utf-8")
+        (docs / "completion_report.md").write_text("# r\n", encoding="utf-8")
+        (docs / "technical_doc.md").write_text("# t\n", encoding="utf-8")
+        return docs
+
+    OK_RESULT = {
+        "feature_name": "login", "timestamp": "2026-07-10", "verdict": "✅",
+        "test_items": [{"item": "t", "result": "pass", "method": "isolated_exec"}],
+        "issues": [], "evidence": "ok", "implementation": {"files": []},
+        "checklist_phase": "Phase 1", "checklist_row": 1,
+    }
+
+    # ── (a) 워크트리 편집 → 워크트리 상태에 집계, 원본 무오염 ─────────────
+    main_p = make_project(base, "iso_main")
+    wt = base / "iso_wt"
+    add_worktree(main_p, wt, "iso-a")
+    r = run_at(pg, edit_payload("Edit", wt / "app.py"), wt, main_p)
+    wt_state = wt / ".claude" / "state" / "plan_gate.json"
+    check(
+        "워크트리 편집 → 워크트리 상태 생성 (env=원본 무시)",
+        r.returncode == 0 and wt_state.exists(),
+        f"rc={r.returncode} err={r.stderr[:80]!r}",
+    )
+    check("원본 상태 무오염", not (main_p / ".claude" / "state" / "plan_gate.json").exists())
+    wg = json.loads(wt_state.read_text(encoding="utf-8"))["gates"]
+    wgate = wg[list(wg)[-1]]
+    check(
+        "워크트리 파일이 워크트리 게이트에 집계 · 플래그는 원본 fallback 으로 활성",
+        str(wt / "app.py") in wgate.get("file_edit_counts", {})
+        and not (wt / ".claude" / "plan_gate_enabled").exists(),
+        f"counts={list(wgate.get('file_edit_counts', {}))}",
+    )
+
+    # ── (b) 연좌 차단 해제 — thrash 는 그 파일만 막는다 ──────────────────
+    p2 = make_project(base, "iso_thrash")
+    rcs = [run_hook(pg, edit_payload("Edit", p2 / "a.py"), p2).returncode for _ in range(5)]
+    rc_b = run_hook(pg, edit_payload("Edit", p2 / "b.py"), p2).returncode
+    rc_a = run_hook(pg, edit_payload("Edit", p2 / "a.py"), p2).returncode
+    check("a.py 5회째 차단 유지 (강화 방향 회귀 없음)", rcs[4] == 2, f"rcs={rcs}")
+    check("thrash 후 무관한 b.py 편집 통과 (연좌 해제)", rc_b == 0, f"rc={rc_b}")
+    check("a.py 재시도는 여전히 차단", rc_a == 2, f"rc={rc_a}")
+    set_gate(p2, state="approved")
+    rc_b2 = run_hook(pg, edit_payload("Edit", p2 / "b.py"), p2).returncode
+    rc_a2 = run_hook(pg, edit_payload("Edit", p2 / "a.py"), p2).returncode
+    check(
+        "approved: b.py 통과 · a.py thrash 차단",
+        rc_b2 == 0 and rc_a2 == 2, f"b={rc_b2} a={rc_a2}",
+    )
+
+    # ── (c-1) 소비할 gate 없음 → 판정 보존 (기존: 삭제로 판정 유실) ───────
+    p3 = make_project(base, "iso_preserve")
+    (p3 / ".claude" / "agents").mkdir(parents=True)
+    (p3 / ".claude" / "agents" / "verifier.md").write_text("# v", encoding="utf-8")
+    rj3 = setup_docs(p3) / ".verifier_result.json"
+    rj3.write_text(json.dumps(OK_RESULT, ensure_ascii=False), encoding="utf-8")
+    r = run_hook(ud, {"tool_name": "Write", "tool_input": {"file_path": str(rj3)}}, p3)
+    check(
+        "gate 없음 → 결과 파일 보존 (판정 유실 방지)",
+        r.returncode == 0 and rj3.exists(),
+        f"rc={r.returncode} exists={rj3.exists()}",
+    )
+
+    # ── (c-2) 원본 fallback — 교차 집계 증거 있을 때만 발동 ───────────────
+    m_a = _approved_gate_project(base, "iso_fb_hit")
+    wt_a = base / "iso_fb_hit_wt"
+    add_worktree(m_a, wt_a, "iso-fb-a")
+    (wt_a / ".claude" / "agents").mkdir(parents=True)
+    (wt_a / ".claude" / "agents" / "verifier.md").write_text("# v", encoding="utf-8")
+    set_gate(m_a, state="approved", file_edit_counts={str(wt_a / "x.py"): 3})  # 오염 증거
+    rj_a = setup_docs(wt_a) / ".verifier_result.json"
+    rj_a.write_text(json.dumps(OK_RESULT, ensure_ascii=False), encoding="utf-8")
+    r = run_at(ud, {"tool_name": "Write", "tool_input": {"file_path": str(rj_a)}}, wt_a, m_a)
+    check(
+        "교차 집계된 원본 gate 로 fallback → 판정 반영·파일 소비",
+        get_gate(m_a).get("verifier_status") == "✅" and not rj_a.exists(),
+        f"vs={get_gate(m_a).get('verifier_status')} exists={rj_a.exists()} err={r.stderr[:80]!r}",
+    )
+
+    m_b = _approved_gate_project(base, "iso_fb_miss")
+    wt_b = base / "iso_fb_miss_wt"
+    add_worktree(m_b, wt_b, "iso-fb-b")
+    (wt_b / ".claude" / "agents").mkdir(parents=True)
+    (wt_b / ".claude" / "agents" / "verifier.md").write_text("# v", encoding="utf-8")
+    rj_b = setup_docs(wt_b) / ".verifier_result.json"
+    rj_b.write_text(json.dumps(OK_RESULT, ensure_ascii=False), encoding="utf-8")
+    r = run_at(ud, {"tool_name": "Write", "tool_input": {"file_path": str(rj_b)}}, wt_b, m_b)
+    g_b = get_gate(m_b)
+    check(
+        "증거 없는 원본 gate 는 불가침 (역방향 오염 방지) + 판정 보존",
+        g_b["state"] == "approved" and g_b.get("verifier_status") is None and rj_b.exists(),
+        f"state={g_b['state']} vs={g_b.get('verifier_status')} exists={rj_b.exists()}",
+    )
+
+
 def t_prompt_log_session_guard(base: Path) -> None:
     """prompt-log 멀티세션 가드 + RMW 락 + 미동의 mkdir 부작용 없음.
 
@@ -3564,6 +3690,7 @@ def main() -> int:
         t_harness_update_heal(base)
         t_concurrent_session_check(base)
         t_worktree_notice(base)
+        t_worktree_state_isolation(base)
         t_prompt_log_session_guard(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)

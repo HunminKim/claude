@@ -73,7 +73,7 @@ def main() -> int:
     except Exception:
         return 0
 
-    root = lib.find_project_root()
+    root = lib.find_project_root(data.get("cwd") or None)
     if root is None:
         return 0
 

@@ -119,7 +119,7 @@ def main() -> int:
     if tool_name not in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         return 0
 
-    root = lib.find_project_root()
+    root = lib.find_project_root(data.get("cwd") or None)
     if root is None or not lib.is_plan_gate_enabled(root):
         return 0  # plan-gate 비활성화
 
@@ -286,11 +286,12 @@ def main() -> int:
 
     # ── soft hint (thrash 트리거 직전) ──────────────────────────────────
     # created/approved 모두 같은 파일 반복(thrash) 임박 시 부드러운 경고 (차단 X).
-    _max_repeat = lib._max_code_repeat(gate)
+    # 판정은 target 파일 자체의 반복 횟수 — 게이트 전역 max 는 연좌 차단을 부른다.
+    _repeat = lib._code_repeat_for(gate, target)
     if (
         gate["state"] in ("created", "approved")
-        and not lib.trigger_threshold_exceeded(gate)
-        and _max_repeat == lib.TRIGGER_REPEAT_RATIO - 1
+        and not lib.trigger_threshold_exceeded(gate, target)
+        and _repeat == lib.TRIGGER_REPEAT_RATIO - 1
     ):
         advisories.append(lib.format_soft_hint(gate))
         _emit_advisories(advisories)
@@ -298,7 +299,7 @@ def main() -> int:
         return 0
 
     # ── 트리거 도달 → 차단 ──────────────────────────────────────────────
-    if gate["state"] == "created" and lib.trigger_threshold_exceeded(gate):
+    if gate["state"] == "created" and lib.trigger_threshold_exceeded(gate, target):
         gate["initial_edit_count"] = gate["edit_count"]
         gate["initial_unique_files"] = len(gate["unique_files"])
 
@@ -327,9 +328,9 @@ def main() -> int:
     # ── 승인 후 thrash 차단 (flailing) ───────────────────────────────────
     # scope-creep 볼륨 차단(v1)은 제거됨 — 스코프 강제는 매니페스트(step3+)가 대체.
     # 단 '같은 파일을 수렴 없이 반복'은 승인 후에도 thrash 로 잡는다(사용자 가치 보존).
-    if gate["state"] == "approved" and lib.trigger_threshold_exceeded(gate):
+    if gate["state"] == "approved" and lib.trigger_threshold_exceeded(gate, target):
         lib.log_audit(root, "thrash_approved", gate_id=gate["id"],
-                      max_repeat=lib._max_code_repeat(gate))
+                      max_repeat=lib._code_repeat_for(gate, target))
         lib.save_state(root, state)
         _print_stderr(lib.format_thrash_message(gate))
         return 2

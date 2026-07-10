@@ -71,12 +71,57 @@ GATE_STATES = {"created", "approved", "verified", "rolled_back", "done"}
 
 
 # ── 프로젝트 감지 ────────────────────────────────────────────────────────
-def find_project_root() -> Path | None:
-    """CLAUDE_PROJECT_DIR 우선, 없으면 cwd 상위에서 .claude/를 찾는다."""
+def _worktree_gitdir(p: Path) -> Path | None:
+    """p 가 linked git worktree 루트면 gitdir(Path) 반환, 아니면 None.
+
+    linked worktree 는 `.git` 이 'gitdir: <main>/.git/worktrees/<name>' 텍스트
+    파일이다. 서브모듈(.git/modules/)과 구분하기 위해 worktrees 경로를 요구한다.
+    git 실행 없이 감지 — 의존성 없음.
+    """
+    marker = p / ".git"
+    if not marker.is_file():
+        return None
+    try:
+        text = marker.read_text(encoding="utf-8", errors="ignore").strip()
+    except OSError:
+        return None
+    if not text.startswith("gitdir:"):
+        return None
+    gitdir = Path(text[len("gitdir:"):].strip())
+    # git 2.48+ relative-paths 모드는 상대 경로를 쓴다 — 마커 위치 기준 절대화
+    if not gitdir.is_absolute():
+        gitdir = (p / gitdir).resolve()
+    if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
+        return None
+    return gitdir
+
+
+def worktree_main_root(root: Path) -> Path | None:
+    """linked worktree 루트면 원본(main) 체크아웃 루트를 반환, 아니면 None."""
+    gitdir = _worktree_gitdir(root)
+    if gitdir is None:
+        return None
+    return gitdir.parent.parent.parent  # <main>/.git/worktrees/<n> → <main>
+
+
+def find_project_root(start: str | os.PathLike | None = None) -> Path | None:
+    """작업 트리 기준 프로젝트 루트 — 훅·CLI·update_docs 3소비자의 단일 출처.
+
+    linked git worktree 루트를 CLAUDE_PROJECT_DIR 보다 우선한다. 워크트리 병렬
+    세션에서 훅에는 원본 루트가 CLAUDE_PROJECT_DIR 로 주입되지만 Bash
+    (plan_gate_cli)에는 없다 — env 를 무조건 우선하면 훅=원본 / CLI=워크트리로
+    상태가 갈라져 교차 오염된다(2026-07-10 daesung 실측). 훅은 훅 stdin 의
+    `cwd` 필드를 start 로 넘겨 결정론을 확보한다(훅 프로세스 cwd 와 다를 수 있음).
+    """
+    cwd = Path(start).resolve() if start else Path.cwd().resolve()
+    # 1) cwd 상위에서 linked worktree 루트 탐색 (env 보다 우선 — 트리별 상태 분리)
+    for parent in [cwd] + list(cwd.parents):
+        if _worktree_gitdir(parent) is not None:
+            return parent
+    # 2) 기존 규칙 그대로: env 우선, 없으면 cwd 상위 .claude/ 탐색
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
         return Path(env)
-    cwd = Path.cwd()
     for parent in [cwd] + list(cwd.parents):
         if (parent / ".claude").exists():
             return parent
@@ -94,8 +139,13 @@ def is_project_init_managed(root: Path) -> bool:
 def is_plan_gate_enabled(root: Path) -> bool:
     """.claude/plan_gate_enabled 파일 존재 시 plan-gate 활성.
     verifier.md와 독립적으로 on/off 가능.
+    워크트리에 플래그가 없으면(하네스 미커밋 브랜치) 원본 체크아웃의 플래그를
+    따른다 — 설정(플래그)은 공유, 상태(plan_gate.json)는 트리별 분리.
     """
-    return (root / PLAN_GATE_FLAG).exists()
+    if (root / PLAN_GATE_FLAG).exists():
+        return True
+    main = worktree_main_root(root)
+    return main is not None and (main / PLAN_GATE_FLAG).exists()
 
 
 def is_plan_gate_manageable(root: Path) -> bool:
@@ -799,9 +849,20 @@ def enter_verified(gate: dict[str, Any], verdict: str) -> dict[str, Any]:
 
 # ── 트리거 휴리스틱 (D5) ─────────────────────────────────────────────────
 def _max_code_repeat(gate: dict[str, Any]) -> int:
-    """코드 파일 중 가장 많이 편집된 횟수. doc 파일은 제외."""
+    """코드 파일 중 가장 많이 편집된 횟수. doc 파일은 제외. (status/advisory 표시 전용)"""
     counts = gate.get("file_edit_counts", {})
     return max((c for fp, c in counts.items() if not is_doc_path(fp)), default=0)
+
+
+def _code_repeat_for(gate: dict[str, Any], target: str | None) -> int:
+    """지금 편집하려는 파일 자체의 반복 편집 횟수. target 없음·doc 파일은 0.
+
+    게이트 전역 max 로 판정하면 한 파일의 thrash 가 무관한 파일의 편집까지
+    연좌 차단한다(트리 공유 세션에서 특히 치명 — 2026-07-10 daesung 실측).
+    """
+    if not target or is_doc_path(target):
+        return 0
+    return int(gate.get("file_edit_counts", {}).get(target, 0))
 
 
 def _unique_code_files(gate: dict[str, Any]) -> int:
@@ -809,8 +870,8 @@ def _unique_code_files(gate: dict[str, Any]) -> int:
     return sum(1 for fp in gate["unique_files"] if not is_doc_path(fp))
 
 
-def trigger_threshold_exceeded(gate: dict[str, Any]) -> bool:
-    return _max_code_repeat(gate) >= TRIGGER_REPEAT_RATIO
+def trigger_threshold_exceeded(gate: dict[str, Any], target: str | None) -> bool:
+    return _code_repeat_for(gate, target) >= TRIGGER_REPEAT_RATIO
 
 
 def converged_since_last_edit(gate: dict[str, Any]) -> bool:

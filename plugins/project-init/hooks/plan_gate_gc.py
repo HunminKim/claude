@@ -102,11 +102,13 @@ def gc_checkpoints(root, current: str | None) -> int:
 
 def main() -> int:
     try:
-        json.load(sys.stdin)  # input 폐기
+        data = json.load(sys.stdin)
     except Exception:
-        pass
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
 
-    root = lib.find_project_root()
+    root = lib.find_project_root(data.get("cwd") or None)
     if root is None or not lib.is_plan_gate_enabled(root):
         return 0
 

@@ -94,7 +94,7 @@ def main() -> int:
 
     advisories: list[str] = []
 
-    root = lib.find_project_root()
+    root = lib.find_project_root(data.get("cwd") or None)
     if root is None or not lib.is_plan_gate_enabled(root):
         return 0
 
