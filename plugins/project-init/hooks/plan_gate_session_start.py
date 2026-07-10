@@ -69,7 +69,7 @@ def _heal_interrupted_update(root) -> str | None:
 
 def main() -> int:
     try:
-        json.load(sys.stdin)
+        data = json.load(sys.stdin)
     except Exception:
         return 0
 
@@ -79,7 +79,12 @@ def main() -> int:
 
     # 중단된 harness-update 자가복구 — enabled 가 꺼진 상태를 고치는 단계라
     # is_plan_gate_enabled 체크보다 반드시 앞서야 한다.
-    heal_msg = _heal_interrupted_update(root)
+    # 단 compact/resume 은 대화가 이어지는 중 — 진행 중인 /harness-update 의 마커를
+    # 죽은 업데이트로 오인해 plan-gate 를 되살리면 남은 벌크 편집이 게이트에 걸린다.
+    # 새 세션 진입(startup/clear/미상)일 때만 heal 한다.
+    heal_msg = None
+    if data.get("source") not in ("compact", "resume"):
+        heal_msg = _heal_interrupted_update(root)
 
     if not lib.is_plan_gate_enabled(root):
         return 0

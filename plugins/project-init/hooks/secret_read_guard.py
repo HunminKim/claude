@@ -166,6 +166,12 @@ def _glob_targets_secret(glob: str) -> bool:
     glob 이 실제로 비밀을 매칭하면 차단한다. 단 너무 넓은 글롭(`*` 등, 리터럴 core<3)이나
     범용 확장자 glob(`*.json` 등)은 특정 겨냥이 아니라고 보고 통과시킨다.
     """
+    # 와일드카드 없는 basename 은 리터럴 지목 — 파일 판정(_is_secret_file)을 재사용한다.
+    # credentials.json 류는 `*.json` 오탐 때문에 _REP_SECRETS 에 못 넣는데(위 주석),
+    # 그 부작용으로 glob="credentials.json"·"**/token.json" 이 새던 구멍을 막는다.
+    base = glob.replace("\\", "/").rsplit("/", 1)[-1]
+    if not any(c in base for c in "*?[") and _is_secret_file(base)[0]:
+        return True
     core = glob.replace("*", "").replace("?", "")
     if len(core) < 3:
         return False  # `*`·`??` 등 광역 글롭은 비밀 특정 겨냥으로 보지 않음

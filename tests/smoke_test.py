@@ -889,6 +889,11 @@ def t_secret_read_guard() -> None:
         ("Grep", {"path": "src", "glob": "*.json", "pattern": "x"}, 0),
         ("Grep", {"path": "src", "glob": "*.yaml", "pattern": "x"}, 0),
         ("Grep", {"path": "src", "glob": "*.toml", "pattern": "x"}, 0),
+        # PR#8 후속: 와일드카드 없는 exact-name glob 은 파일 판정 재사용 → 차단
+        ("Grep", {"path": "src", "glob": "credentials.json", "pattern": "x"}, 2),
+        ("Grep", {"path": ".", "glob": "**/token.json", "pattern": "x"}, 2),
+        ("Grep", {"path": ".", "glob": "service_account.json", "pattern": "x"}, 2),
+        ("Grep", {"path": "src", "glob": "config.json", "pattern": "x"}, 0),  # 리터럴 비비밀 통과
         ("Read", {"file_path": "/p/README.md"}, 0),
         ("Read", {"file_path": r"C:\proj\src\app.py"}, 0),                 # Windows 정상 경로 통과
         ("Read", {"file_path": "id_rsa.pub"}, 0),                           # 공개키 허용
@@ -3028,11 +3033,30 @@ def t_harness_update_heal(base: Path) -> None:
     marker.touch()
     enabled.unlink()
 
-    r = run_hook(hook, {}, p)
+    # PR#8 후속: compact/resume 은 대화가 이어지는 중 — heal 억제 (진행 중 업데이트 보호)
+    for src in ("compact", "resume"):
+        r = run_hook(hook, {"source": src}, p)
+        check(
+            f"{src} → heal 억제 (마커·비활성 유지)",
+            marker.exists() and not enabled.exists() and "다시 켰습니다" not in r.stdout,
+            f"enabled={enabled.exists()} marker={marker.exists()} out={r.stdout[:60]!r}",
+        )
+
+    r = run_hook(hook, {"source": "startup"}, p)
     healed = enabled.exists() and not marker.exists()
     check(
-        "마커 감지 → enabled 복구 + 마커 삭제 + 환기",
+        "startup 마커 감지 → enabled 복구 + 마커 삭제 + 환기",
         healed and "자동으로 다시 켰습니다" in r.stdout,
+        f"enabled={enabled.exists()} marker={marker.exists()} out={r.stdout[:60]!r}",
+    )
+
+    # source 미상(payload 에 없음)은 fail-safe 로 heal 유지
+    marker.touch()
+    enabled.unlink()
+    r = run_hook(hook, {}, p)
+    check(
+        "source 미상 → heal 유지 (fail-safe)",
+        enabled.exists() and not marker.exists() and "자동으로 다시 켰습니다" in r.stdout,
         f"enabled={enabled.exists()} marker={marker.exists()} out={r.stdout[:60]!r}",
     )
 
