@@ -2410,6 +2410,123 @@ def t_hook_future_imports() -> None:
     check("PEP604/제네릭 쓰는 훅은 future import 보유", not offenders, f"위반: {offenders}")
 
 
+def _git_t(p: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(p), *args], check=True, env=GIT_ENV, capture_output=True)
+
+
+def t_dependency_lock_check(base: Path) -> None:
+    """이미지 빌드 직전 lock 부재 → permissionDecision=ask.
+
+    daesung 회귀: 매니페스트는 추적되는데 uv.lock 이 .gitignore → docker build 성공 →
+    mlflow 재해상도 → 학습 14건 실패. 파일 존재가 아니라 git 추적 여부로 판정한다.
+    """
+    print("[50] 의존성 lock 감지 (빌드 직전 ask)")
+    hook = HOOKS / "dependency_lock_check.py"
+    p = make_project(base, "locked")
+    (p / "backend").mkdir()
+    (p / "backend" / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (p / ".gitignore").write_text("uv.lock\n", encoding="utf-8")
+    _git_t(p, "add", "-A")
+    _git_t(p, "commit", "-q", "-m", "manifest only")
+
+    def run(cmd: str):
+        return run_hook(hook, {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(p)}, p)
+
+    # lock 이 디스크에는 있지만 gitignore 됨 — 존재 검사로는 못 잡는 케이스
+    (p / "backend" / "uv.lock").write_text("# generated\n", encoding="utf-8")
+
+    r = run("docker build -t x .")
+    ok = r.returncode == 0 and r.stdout.strip()
+    check("빌드 명령 + lock 미추적 → 출력 있음", bool(ok), f"rc={r.returncode} out={r.stdout[:80]!r}")
+    if ok:
+        d = json.loads(r.stdout)["hookSpecificOutput"]
+        check("채널: permissionDecision=ask", d.get("permissionDecision") == "ask", str(d))
+        check("근거에 .gitignore 출처 첨부", ".gitignore:1" in d.get("permissionDecisionReason", ""), str(d)[:200])
+
+    r = run("ls -la")
+    check("빌드 아닌 명령 → 무출력", r.returncode == 0 and not r.stdout.strip(), f"out={r.stdout[:60]!r}")
+
+    r = run("docker compose build")
+    check("compose build 도 발화", bool(r.stdout.strip()), f"out={r.stdout[:60]!r}")
+
+    # lock_policy: none → 검사 생략
+    (p / "docs").mkdir()
+    (p / "docs" / "constraints.yaml").write_text("lock_policy: none\n", encoding="utf-8")
+    r = run("docker build .")
+    check("lock_policy=none → 무출력", not r.stdout.strip(), f"out={r.stdout[:60]!r}")
+
+    # lock 을 추적하면 결함 해소 (policy 되돌린 뒤)
+    (p / "docs" / "constraints.yaml").write_text("lock_policy: required\n", encoding="utf-8")
+    (p / ".gitignore").write_text("\n", encoding="utf-8")
+    _git_t(p, "add", "-A", "-f")
+    _git_t(p, "commit", "-q", "-m", "track lock")
+    r = run("docker build .")
+    check("lock 추적됨 → 무출력", not r.stdout.strip(), f"out={r.stdout[:60]!r}")
+
+    # 비-git 디렉토리는 판단 불가 → fail-open
+    ng = base / "nongit_lock"
+    (ng / "docs").mkdir(parents=True)
+    (ng / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    r = run_hook(hook, {"tool_name": "Bash", "tool_input": {"command": "docker build ."}, "cwd": str(ng)}, ng)
+    check("비-git → fail-open 무출력", r.returncode == 0 and not r.stdout.strip(), f"out={r.stdout[:60]!r}")
+
+
+def t_bash_verifier_remind(base: Path) -> None:
+    """Bash 전용 작업(docker build 등)도 verifier 상기를 받는다 — 사각지대 봉합.
+
+    회귀 원본: verifier_remind 매처가 Edit|Write 뿐이라 파일을 안 고치는 빌드·배포·학습은
+    edit_count 가 0에 머물러 상기가 영원히 발화하지 않았다.
+    """
+    print("[51] Bash 전용 작업 verifier 상기")
+    sys.path.insert(0, str(HOOKS))
+    import plan_gate_lib as lib  # noqa: PLC0415
+
+    check("docker build 는 실질 명령", lib.is_substantive_command("docker build ."), "")
+    check("ls 는 read-only", not lib.is_substantive_command("ls -la"), "")
+    check("git status 는 read-only", not lib.is_substantive_command("git status"), "")
+    check("git push 는 실질 명령", lib.is_substantive_command("git push"), "")
+    check("복합 read-only 는 read-only", not lib.is_substantive_command("cd src && ls | grep x"), "")
+    check("복합에 실질 하나면 실질", lib.is_substantive_command("cd src && docker build ."), "")
+
+    bash_hook = HOOKS / "plan_gate_bash.py"
+    p = make_project(base, "bashremind")
+    run_hook(HOOKS / "plan_gate.py", edit_payload("Edit", p / "app.py"), p)
+    set_gate(
+        p,
+        state="approved",
+        approved_auto=False,
+        verifier_status=None,
+        edit_count_post_approval=0,
+        bash_count_post_approval=0,
+    )
+
+    def bash(cmd: str, code: int = 0):
+        return run_hook(bash_hook, {"tool_name": "Bash", "tool_response": {"exit_code": code}, "tool_input": {"command": cmd}}, p)
+
+    bash("ls -la")
+    check("read-only Bash 는 카운트 안 함", get_gate(p).get("bash_count_post_approval") == 0, str(get_gate(p)))
+
+    bash("docker build .", 1)
+    check("실패한 Bash 는 카운트 안 함", get_gate(p).get("bash_count_post_approval") == 0, str(get_gate(p)))
+
+    r1 = bash("docker build .")
+    check("1회차 실질 Bash → 카운트 1", get_gate(p).get("bash_count_post_approval") == 1, str(get_gate(p)))
+    check("1회차엔 상기 없음", not r1.stdout.strip(), f"out={r1.stdout[:60]!r}")
+
+    r2 = bash("docker build .")
+    ok = bool(r2.stdout.strip())
+    check("2회차 실질 Bash → 상기 발화", ok, f"out={r2.stdout[:80]!r}")
+    if ok:
+        d = json.loads(r2.stdout)["hookSpecificOutput"]
+        check("채널: additionalContext", "additionalContext" in d, str(d)[:120])
+        check("@verifier 안내 포함", "@verifier" in d.get("additionalContext", ""), str(d)[:120])
+
+    # verifier 가 이미 돌았으면 상기하지 않는다
+    set_gate(p, verifier_status="✅", bash_count_post_approval=1)
+    r3 = bash("docker build .")
+    check("verifier 완료 후 상기 억제", not r3.stdout.strip(), f"out={r3.stdout[:60]!r}")
+
+
 def t_stdio_utf8_guard(base: Path) -> None:
     """모든 훅 엔트리포인트가 stdio 를 UTF-8 로 고정 — cp949 콘솔 크래시 회귀 방지.
 
@@ -3088,6 +3205,124 @@ def t_prompt_log_consent_sanitize(base: Path) -> None:
             os.environ["HOME"] = old_home
 
 
+def _verifier_result(verdict: str, method: str = "production_exec") -> dict:
+    return {
+        "feature_name": "f", "timestamp": "t", "task_type": "implementation",
+        "verdict": verdict, "failure_category": None,
+        "test_items": [{"item": "x", "result": "✅", "method": method}],
+        "issues": [], "evidence": "e", "implementation": {"files": []},
+    }
+
+
+def t_verifier_gate_deadlock(base: Path) -> None:
+    """verifier ✅ 인데 /done 이 영구 거부되던 데드락 (2026-07-10, docs/20260710_*.md).
+
+    update_docs 가 gate 갱신에 실패해도 finally 로 결과 파일을 지워, 복구 경로
+    (_recover_verifier_from_file)의 재료가 사라졌다. 게이트 갱신은 두 조건에서
+    조용히 건너뛰어졌다 — verdict 문자열 이탈("✅ 통과")과 cwd 기반 루트 탐지 실패.
+    전자는 grounding 강등(if verdict == "✅")까지 통째로 우회시켜, 전 항목 static 인
+    검증이 ✅ 로 감사 문서에 박히는 관대한 오염을 만들었다.
+    """
+    print("[52] verifier gate 데드락 (verdict 정규화 · 결정론 root · 소비자 소유 삭제)")
+    sys.path.insert(0, str(HOOKS))
+    import plan_gate_lib as lib  # noqa: PLC0415
+
+    # ── verdict 정규화: 조건 없는 통과만 ✅, 실패는 관대하게 ❌, 나머지는 ❓ ──
+    for raw, want in [
+        ("✅", "✅"), ("✅ 통과", "✅"), ("✅ PASS", "✅"), ("  ✅  ", "✅"),
+        ("❌", "❌"), ("❌ 실패", "❌"),
+        ("✅ (일부 항목 실패)", "❓"), ("✅/❌ 혼합", "❓"), ("✅ 조건부 통과", "❓"),
+        ("", "❓"), ("PASS", "❓"),
+    ]:
+        check(f"normalize_verdict({raw!r}) == {want}", lib.normalize_verdict(raw) == want,
+              f"got={lib.normalize_verdict(raw)!r}")
+
+    def _run(p: Path, rj: Path, payload_path: str, *, isolated: bool = False):
+        payload = {"tool_name": "Write", "cwd": str(p), "tool_input": {"file_path": payload_path}}
+        if not isolated:
+            return run_hook(HOOKS / "update_docs.py", payload, p)
+        # 케이스 C 재현: CLAUDE_PROJECT_DIR 없음 + 프로세스 cwd 가 프로젝트 밖
+        return subprocess.run(
+            [sys.executable, str(HOOKS / "update_docs.py")],
+            input=json.dumps(payload), capture_output=True, text=True,
+            cwd=str(base), env=dict(GIT_ENV),
+        )
+
+    def _write(p: Path, result: dict) -> Path:
+        docs = p / "docs"
+        docs.mkdir(exist_ok=True)
+        (docs / "completion_report.md").write_text("# r\n", encoding="utf-8")
+        rj = docs / ".verifier_result.json"
+        rj.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        return rj
+
+    # ── B) verdict 문자열 이탈 → 정규화되어 gate 전이 ──
+    p = _approved_gate_project(base, "deadlock_b")
+    rj = _write(p, _verifier_result("✅ 통과"))
+    _run(p, rj, str(rj))
+    check("B: '✅ 통과' → gate verified ✅ + 파일 소비",
+          get_gate(p).get("verifier_status") == "✅" and not rj.exists(),
+          f"status={get_gate(p).get('verifier_status')!r} exists={rj.exists()}")
+
+    # ── C) CLAUDE_PROJECT_DIR 없음 + cwd 밖 + 상대경로 → 훅입력 cwd 로 루트 유도 ──
+    p = _approved_gate_project(base, "deadlock_c")
+    rj = _write(p, _verifier_result("✅"))
+    _run(p, rj, "docs/.verifier_result.json", isolated=True)
+    check("C: cwd 밖에서도 gate 전이 (결정론 root)",
+          get_gate(p).get("verifier_status") == "✅" and not rj.exists(),
+          f"status={get_gate(p).get('verifier_status')!r} exists={rj.exists()}")
+
+    # ── D) 문자열 이탈이 grounding 강등을 우회하지 못한다 ──
+    p = _approved_gate_project(base, "deadlock_d")
+    rj = _write(p, _verifier_result("✅ 통과", method="static"))
+    _run(p, rj, str(rj))
+    rep = (p / "docs" / "completion_report.md").read_text(encoding="utf-8")
+    check("D: '✅ 통과' + 전항목 static → ❌ 강등 (관대한 오염 차단)",
+          get_gate(p).get("verifier_status") == "❌" and "실행 grounding 위반" in rep,
+          f"status={get_gate(p).get('verifier_status')!r}")
+
+    # ── E) 조건부 통과는 승격하지 않는다 (fail-open 방지) + 보존 + 경고 ──
+    p = _approved_gate_project(base, "deadlock_e")
+    rj = _write(p, _verifier_result("✅ (일부 항목 실패)"))
+    r = _run(p, rj, str(rj))
+    check("E: 조건부 통과 → gate 미전이 + 결과 파일 보존",
+          get_gate(p).get("verifier_status") is None and rj.exists(),
+          f"status={get_gate(p).get('verifier_status')!r} exists={rj.exists()}")
+    check("E: 무음 실패 아님 (stderr 경고)", "verdict 파싱 불가" in r.stderr,
+          f"stderr[:120]={r.stderr[:120]!r}")
+    check("E: /done 은 거부 (모호한 판정을 통과시키지 않는다)",
+          _cli(p, "done").returncode == 1)
+
+    # ── F) 소비 못한 ✅ 파일이 남아 /done 이 복구하고, 복구가 그 파일을 폐기한다 ──
+    p = _approved_gate_project(base, "deadlock_f")
+    rj = _write(p, _verifier_result("✅"))
+    out = _cli(p, "done")
+    check("F: 잔존 결과 파일로 /done 복구 성공 (데드락 해소)",
+          out.returncode == 0 and "상태 복구" in (out.stdout + out.stderr),
+          f"rc={out.returncode}")
+    check("F: 복구가 결과 파일을 폐기 (중복 소비 차단)", not rj.exists())
+
+    # ── G) 낡은 판정이 새 gate 를 승격시키지 못한다 (stale 가드) ──
+    p = _approved_gate_project(base, "deadlock_g")
+    set_gate(p, state="approved", approved_at="2026-07-10T05:00:00+00:00")
+    rj = _write(p, _verifier_result("✅"))
+    old = time.mktime((2026, 7, 10, 1, 0, 0, 0, 0, -1))  # gate 승인 이전
+    os.utime(rj, (old, old))
+    out = _cli(p, "done")
+    check("G: stale 결과 파일 → 복구 거부 + gate 미승격",
+          out.returncode == 1 and get_gate(p).get("verifier_status") is None,
+          f"rc={out.returncode} status={get_gate(p).get('verifier_status')!r}")
+    check("G: 거부 사유가 stale 임을 밝힌다", "오래됐습니다" in (out.stdout + out.stderr))
+
+    # ── H) gate 가 닫히면 미소비 결과 파일이 폐기된다 (다음 gate 오염 차단) ──
+    p = _approved_gate_project(base, "deadlock_h")
+    rj = _write(p, _verifier_result("✅ 조건부 통과"))
+    _run(p, rj, str(rj))
+    check("H: 닫기 전 보존", rj.exists())
+    _cli(p, "skip-verify")
+    check("H: /skip-verify 로 gate 닫히면 폐기", not rj.exists())
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="harness_smoke_") as td:
         base = Path(td)
@@ -3142,6 +3377,9 @@ def main() -> int:
         t_prompt_log_session_guard(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)
+        t_dependency_lock_check(base)
+        t_bash_verifier_remind(base)
+        t_verifier_gate_deadlock(base)
         # base 를 쓰는 테스트는 반드시 with 블록 안에서 — 블록 밖에서 호출하면
         # 삭제된 임시 경로를 재생성해 실행마다 /tmp/harness_smoke_* 가 누수된다
         t_stdio_utf8_guard(base)

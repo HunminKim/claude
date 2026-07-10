@@ -165,24 +165,41 @@ def cmd_approve(root, state) -> int:
 
 
 def _recover_verifier_from_file(root, gate, state) -> bool:
-    """update_docs.py가 gate 업데이트를 놓쳤을 때 verifier_result.json에서 직접 복구."""
-    import json
-    from pathlib import Path as _Path
+    """update_docs.py가 gate 업데이트를 놓쳤을 때 verifier_result.json에서 직접 복구.
 
-    result_path = _Path(root) / "docs" / ".verifier_result.json"
+    verdict 정규화는 update_docs 와 동일한 단일 출처(lib.normalize_verdict)를 쓴다 —
+    한쪽만 관대하면 `"✅ 통과"` 가 문서에는 반영되고 복구는 거부되는 비대칭이 생긴다.
+    낡은 판정 차단: 이 함수는 gate id 대조가 없으므로, 현재 gate 승인보다 오래된
+    파일이면 거부한다(그렇지 않으면 검증한 적 없는 gate 가 남의 ✅ 로 done 이 된다).
+    """
+    import json
+
+    result_path = lib.verifier_result_path(root)
     if not result_path.exists():
         return False
+    if lib.verifier_result_is_stale(root, gate):
+        _err(
+            "[plan-gate done] ⚠️ 결과 파일이 현재 gate 승인보다 오래됐습니다 — 복구 거부.\n"
+            "  이전 gate 의 판정입니다. @verifier 를 다시 호출하세요."
+        )
+        return False
     try:
-        verdict = json.loads(result_path.read_text(encoding="utf-8", errors="ignore")).get("verdict")
+        raw = json.loads(result_path.read_text(encoding="utf-8", errors="ignore")).get("verdict")
     except Exception:
         return False
+    verdict = lib.normalize_verdict(raw)
     if verdict not in ("✅", "❌"):
+        _err(
+            f"[plan-gate done] ⚠️ 결과 파일의 verdict 를 판정할 수 없습니다({str(raw)!r}).\n"
+            '  verdict 는 정확히 "✅" 또는 "❌" 여야 합니다 — @verifier 를 다시 호출하세요.'
+        )
         return False
     try:
         lib.enter_verified(gate, verdict)  # verified 진입 단일 출처 (직접 대입 금지)
     except ValueError:
         return False  # cmd_done 가드상 도달 불가 상태 — 복구 대신 미검증 경로로
     lib.save_state(root, state)
+    lib.discard_verifier_result(root)  # 소비 완료 — 남기면 다음 gate 가 재소비한다
     _info(f"[plan-gate done] verifier_result.json에서 상태 복구: {verdict}")
     return True
 

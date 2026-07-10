@@ -26,8 +26,11 @@ verifier 호출 환기 메시지를 주입한다. 차단하지 않는다.
   - gate["state"] == "approved" AND verifier_status is None
   - approved_auto == False (project-init 스캐폴딩 제외)
   - 수정 파일이 코드 파일 (docs/ tasks/ .claude/ .git 제외)
-  - edit_count_post_approval >= 2 (첫 편집엔 출력 X)
-  - 짝수 편집 횟수마다 1번 출력
+  - verifier_remind_count(gate) >= 2 (첫 작업엔 출력 X)
+  - 짝수 작업 횟수마다 1번 출력
+
+카운터는 편집(여기) + 실질 Bash(plan_gate_bash.py) 합산이다 — 매처가 Edit 계열뿐이라
+`docker build` 같은 Bash 전용 작업이 검증 상기를 영원히 못 받던 사각지대를 메운다.
 """
 
 from __future__ import annotations
@@ -120,7 +123,8 @@ def main() -> int:
     if any(_rel_to_root(target, root).startswith(p) for p in _SKIP_PREFIXES):
         return 0
 
-    count = gate.get("edit_count_post_approval", 0)
+    # 편집 + 실질 Bash 합산 — Bash 전용 작업(빌드·배포·학습)도 같은 총계에 누적된다.
+    count = lib.verifier_remind_count(gate)
     if count < 2 or count % 2 != 0:
         return 0
 
@@ -128,7 +132,7 @@ def main() -> int:
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "additionalContext": (
-                f"[plan-gate] 💡 코드 수정 {count}회 — @verifier 검증이 아직 없습니다.\n"
+                f"[plan-gate] 💡 승인 후 작업 {count}회 — @verifier 검증이 아직 없습니다.\n"
                 "  기능 구현이 완료됐으면 @verifier 를 호출해 검증하세요."
             ),
         }

@@ -25,6 +25,8 @@ tools: Read, Bash, Write, Edit
 |--------------------------------------------------------|----------|
 | Dockerfile (이미지 빌드 정의, 런타임 환경)              | infra    |
 | docker-compose.yml (서비스/네트워크/볼륨 정의)         | infra    |
+| 의존성 **lock** 파일 (uv.lock, package-lock.json, Cargo.lock 등) | infra    |
+| 의존성 **매니페스트** 의 버전 제약 (pyproject.toml `[project.dependencies]` 등) | infra (버전·핀) / backend (패키지 선택) |
 | 컨테이너 *내부* 에서 실행되는 애플리케이션 코드        | backend / frontend / deeplearning |
 | Kubernetes manifest (Deployment/Service/Ingress/ConfigMap/Secret 정의) | infra    |
 | Helm chart, Kustomize overlay                          | infra    |
@@ -54,11 +56,40 @@ tools: Read, Bash, Write, Edit
 
 - **IaC**: 멱등성, plan/apply 분리, state 관리, workspace 분리(dev/staging/prod), module 재사용
 - **컨테이너**: multi-stage build, 이미지 크기 최적화, base image 보안, 비루트 사용자, layer caching
+- **재현성 (의존성)**: lock 커밋, lock 강제 빌드, 경계 핀 일치 — 아래 원칙 참조
 - **오케스트레이션**: liveness/readiness probe, 리소스 limit/request, HPA, PodDisruptionBudget, rolling update 전략
 - **CI/CD**: 단계 분리(lint → test → build → deploy), secret 주입 방식, artifact 보존, 캐싱 전략
 - **클라우드**: 최소 권한 IAM, 보안 그룹/방화벽 규칙, 네트워크 분리, 백업·DR
 - **시크릿**: 평문 커밋 금지, 키 회전, 환경별 분리, 접근 감사 로그
 - **모니터링**: SLO/SLI 정의, alert fatigue 방지, 로그 보존 기간, 비용 영향
+
+## 재현성 원칙 (의존성 — 위반 시 런타임에 터진다)
+
+**빌드 성공은 의존성 정합성의 증거가 아니다.** lock 이 없어도 빌드는 통과한다 — 그게 바로 lock 이
+필요한 이유다. lock 부재는 빌드가 아니라 런타임에 드러난다. 아래 셋을 구현 시 반드시 확보한다.
+
+1. **lock 을 만들고 커밋한다.** 매니페스트(`pyproject.toml` 등)가 추적되는데 대응 lock 이
+   `.gitignore` 되어 있으면 그 자체가 결함이다. `git ls-files` 로 확인한다 — 디스크에 파일이
+   있어도 추적되지 않으면 없는 것이다. lock 은 손으로 관리하지 않는다: `uv add` · `npm install` ·
+   `cargo add` 가 매니페스트와 lock 을 원자적으로 함께 갱신한다.
+
+2. **빌드가 lock 을 강제하게 한다.** 커밋된 lock 을 빌드가 무시하면 장식이다.
+   - 금지: `COPY pyproject.toml uv.lock* ./` — 글로브 `*` 가 lock 부재를 빌드 실패가 아니라
+     **조용한 재해상도**로 바꾼다. `COPY pyproject.toml uv.lock ./` 로 쓴다(없으면 빌드가 죽는다).
+   - 금지: 플래그 없는 `uv sync` · `npm install` · `pip install -r`
+   - 사용: `uv sync --frozen`(또는 `--locked`) · `npm ci` · `cargo build --locked`
+   - 환경별로 계약이 다르다: 로컬 개발은 갱신 허용(`uv sync`), 이미지·CI 는 갱신 금지(`--frozen`).
+   - 부수 효과: lock 과 매니페스트를 소스보다 먼저 `COPY` 하면 의존성 레이어가 독립 캐시된다 —
+     소스만 바뀐 재빌드가 설치를 통째로 건너뛴다.
+
+3. **경계 핀을 일치시킨다.** 이미지 태그만 핀하고 그 안의 라이브러리가 부동이면 결함이다.
+   프로세스 경계를 넘어 **직렬화된 데이터를 주고받는** 라이브러리(예: 클라이언트가 쓴 모델
+   아티팩트를 서버가 읽는 mlflow)는 서버 이미지와 클라이언트 버전이 같아야 한다. 그 목록을
+   `docs/constraints.yaml` 의 `boundary_pins` 에 선언한다 — verifier 가 그것만 대조한다.
+   전 의존성을 일일이 대조하지 않는다. 경계를 넘지 않는 라이브러리는 버전이 달라도 무해하다.
+
+> 매니페스트를 exact-pin(`==`)으로 도배하고 싶어지면 lock 이 없다는 신호다. 매니페스트는 느슨한
+> 제약을, lock 은 구체 버전을 갖는다. 그리고 exact-pin 은 transitive 의존성을 잡지 못한다.
 
 ## 구현 절차
 

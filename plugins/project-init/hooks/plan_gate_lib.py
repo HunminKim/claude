@@ -428,10 +428,16 @@ def rollback_checkpoint(root: Path, gate: dict[str, Any]) -> bool:
 
 
 def cleanup_checkpoint(root: Path, gate: dict[str, Any]) -> None:
-    """체크포인트 정리: git 프라이빗 ref 삭제 + cp 디렉토리 제거(best-effort)."""
+    """gate 닫힘 정리: git 프라이빗 ref 삭제 + cp 디렉토리 + 미소비 verifier 결과 제거.
+
+    do_gate_done(=/done·/skip-verify)과 rollback_to_checkpoint(=/rollback)이 공유하는
+    유일한 gate 닫힘 지점이다. 결과 파일을 여기서 함께 폐기하지 않으면, 소비되지 못한
+    판정이 다음 gate 로 넘어가 검증한 적 없는 gate 를 done 으로 만든다. 전부 best-effort.
+    """
     if gate.get("checkpoint_commit"):
         _git(root, "update-ref", "-d", snapshot_ref(gate["id"]))
     shutil.rmtree(cp_checkpoint_dir(root, gate["id"]), ignore_errors=True)
+    discard_verifier_result(root)
 
 
 # ── layer-2 스코프 스윕 (R1 — git-status 구동, 매니페스트 비의존) ──────────
@@ -601,6 +607,7 @@ def make_gate(gate_id: str | None = None) -> dict[str, Any]:
         "state": "created",
         "edit_count": 0,
         "edit_count_post_approval": 0,       # 승인 후 편집 수 (verifier_remind 용)
+        "bash_count_post_approval": 0,       # 승인 후 실질 Bash 성공 수 (verifier_remind 용 — Bash 전용 작업 커버)
         "unique_files": [],
         "file_edit_counts": {},              # {파일경로: 편집횟수} — thrash(반복) 감지용
         "initial_edit_count": None,
@@ -674,6 +681,7 @@ def transition(gate: dict[str, Any], name: str) -> dict[str, Any]:
         gate["approved_at"] = now_iso()
         gate["approved_auto"] = name == "approve_auto"
         gate["edit_count_post_approval"] = 0
+        gate["bash_count_post_approval"] = 0
         # 승인 시점 누적치를 initial 로 1회 고정(이미 있으면 보존 — 재승인 누적 방지)
         if gate.get("initial_edit_count") is None:
             gate["initial_edit_count"] = gate.get("edit_count", 0)
@@ -683,6 +691,7 @@ def transition(gate: dict[str, Any], name: str) -> dict[str, Any]:
         gate["state"] = "approved"
         gate["verifier_status"] = None
         gate["edit_count_post_approval"] = 0
+        gate["bash_count_post_approval"] = 0
         gate["file_edit_counts"] = {}
     elif name == "replan":
         # 계획 재작성 → 체크포인트만 유지, 카운터·계획·scope 전부 리셋
@@ -691,6 +700,7 @@ def transition(gate: dict[str, Any], name: str) -> dict[str, Any]:
         gate["approved_at"] = None
         gate["edit_count"] = 0
         gate["edit_count_post_approval"] = 0
+        gate["bash_count_post_approval"] = 0
         gate["file_edit_counts"] = {}
         gate["unique_files"] = []
         gate["initial_edit_count"] = None
@@ -703,6 +713,72 @@ def transition(gate: dict[str, Any], name: str) -> dict[str, Any]:
         gate["manifest_sha256"] = None
         gate["verifier_status"] = None
     return gate
+
+
+# ── verifier 판정 문자열 정규화 (단일 출처) ──────────────────────────────
+# verifier 는 LLM 이라 verdict 에 수식어가 붙는다. 정확 일치만 요구하면 gate 갱신이
+# 조용히 누락되고(→ /done 영구 거부 + grounding 강등 우회), 반대로 접두만 보면
+# "✅ (일부 항목 실패)" 같은 조건부 통과까지 승격되는 fail-open 이 된다.
+# 규칙: 조건 없는 통과만 ✅ / 실패는 관대하게 ❌ / 나머지는 ❓(전이 금지, 호출자가 경고).
+_BENIGN_PASS_SUFFIX = frozenset({"", "통과", "pass", "passed", "성공", "ok"})
+_VERDICT_SUFFIX_STRIP = " \t:：·—–-()[]{}<>\"'`.,"
+
+
+def normalize_verdict(raw: Any) -> str:
+    """verifier verdict 를 ✅/❌/❓ 로 정규화. update_docs 와 복구 경로가 공유한다."""
+    s = str(raw or "").strip()
+    if not s:
+        return "❓"
+    if s.startswith("❌"):
+        return "❌"
+    if s.startswith("✅"):
+        rest = s[1:]
+        if "❌" in rest:
+            return "❓"  # ✅/❌ 혼재 — 판정 불가
+        if rest.strip(_VERDICT_SUFFIX_STRIP).lower() in _BENIGN_PASS_SUFFIX:
+            return "✅"
+        return "❓"  # 조건부 통과("조건부", "일부 실패") — 승격 금지
+    return "❓"
+
+
+# ── verifier 결과 파일 (control-plane) ───────────────────────────────────
+def verifier_result_path(root: Path) -> Path:
+    """verifier 판정 결과 파일 경로 — update_docs / plan_gate_cli 공유 단일 출처."""
+    return Path(root) / "docs" / ".verifier_result.json"
+
+
+def discard_verifier_result(root: Path) -> None:
+    """결과 파일 폐기(best-effort). 소비에 성공했거나 gate 가 닫힐 때만 호출한다.
+
+    소비 실패 시 삭제하면 복구 경로(_recover_verifier_from_file)의 재료가 사라져
+    /done 이 영구 거부된다. 반대로 gate 가 닫혔는데 남겨두면 낡은 판정이 다음
+    gate 를 승격시킨다 — 삭제 시점은 이 둘 사이에 정확히 놓여야 한다.
+    """
+    try:
+        verifier_result_path(root).unlink()
+    except OSError:
+        pass
+
+
+def verifier_result_is_stale(root: Path, gate: dict[str, Any]) -> bool:
+    """결과 파일이 현재 gate 승인 시각보다 오래됐는가 (= 이전 gate 의 판정).
+
+    복구 경로는 gate id 대조가 없다. 낡은 파일이 남아 있으면 검증한 적 없는 새
+    gate 가 남의 ✅ 로 done 처리된다. mtime 대조로 그 경로를 막는다.
+    판단 불가(시각 없음·파일 없음·파싱 실패)면 stale 아님으로 본다(fail-open —
+    정상 사용을 막지 않기 위해. 진짜 방어는 gate 닫힘 시 discard 다).
+    """
+    approved_at = gate.get("approved_at")
+    if not approved_at:
+        return False
+    try:
+        approved = datetime.fromisoformat(approved_at)
+        mtime = datetime.fromtimestamp(verifier_result_path(root).stat().st_mtime, timezone.utc)
+    except (OSError, ValueError):
+        return False
+    if approved.tzinfo is None:
+        approved = approved.replace(tzinfo=timezone.utc)
+    return mtime < approved
 
 
 def enter_verified(gate: dict[str, Any], verdict: str) -> dict[str, Any]:
@@ -786,6 +862,53 @@ def is_verification_command(command: str) -> bool:
     if not command:
         return False
     return bool(_VERIFY_RE.search(command) or _VERIFY_COMPOUND_RE.search(command))
+
+
+# ── 실질 작업 Bash 판별 (verifier_remind 의 Bash 전용 작업 커버) ──────────────
+# 배경: verifier_remind 는 Edit|Write 매처에만 걸려 있어 `docker build`·학습 API 호출처럼
+# 파일을 안 고치는 작업은 검증 상기가 영원히 발화하지 않았다(사각지대). 명령어 화이트리스트
+# (docker|curl|kubectl…)는 반드시 새므로, 대신 Claude Code 의 **내장 read-only 집합**을
+# 제외 목록으로 쓴다 — 이 집합은 공식 문서에 고정돼 있어 안정적이다.
+_READ_ONLY_CMDS = frozenset(
+    {"ls", "cat", "echo", "pwd", "head", "tail", "grep", "find", "wc", "which", "diff", "stat", "du", "cd"}
+)
+# git 은 서브커맨드로 갈린다 — 조회 계열만 read-only (tag/config/push 등은 상태를 바꾼다)
+_GIT_READ_ONLY_SUB = frozenset(
+    {"status", "log", "diff", "show", "ls-files", "rev-parse", "check-ignore", "blame", "describe"}
+)
+# 복합 명령 구분자 — 권한 규칙과 동일하게 각 서브명령을 독립 평가한다
+_CMD_SEPARATOR_RE = re.compile(r"&&|\|\||\||;|\n")
+
+
+def _subcommand_is_read_only(sub: str) -> bool:
+    """서브명령 하나가 내장 read-only 집합에 속하나. 판단 불가는 False(fail-closed = 실질 작업)."""
+    tokens = sub.strip().split()
+    if not tokens:
+        return True  # 빈 조각은 무시 (구분자 분해 부산물)
+    head = tokens[0]
+    if head == "git":
+        return len(tokens) > 1 and tokens[1] in _GIT_READ_ONLY_SUB
+    return head in _READ_ONLY_CMDS
+
+
+def is_substantive_command(command: str) -> bool:
+    """Bash 명령이 '실질 작업'인가 — 전 서브명령이 read-only 면 False.
+
+    fail-closed: 모르는 명령은 실질 작업으로 센다. 상기(advisory)라 오탐 비용이 낮고,
+    미탐(빌드·배포·학습이 검증 없이 지나감)의 비용이 훨씬 크다.
+    """
+    if not command or not command.strip():
+        return False
+    return not all(_subcommand_is_read_only(s) for s in _CMD_SEPARATOR_RE.split(command))
+
+
+def verifier_remind_count(gate: dict[str, Any]) -> int:
+    """승인 후 누적 작업 수 = 편집 + 실질 Bash. verifier_remind 발화 기준의 단일 진실 원천.
+
+    두 훅(verifier_remind=Edit 경로, plan_gate_bash=Bash 경로)이 같은 총계를 보므로,
+    한 작업이 총계를 1 올리고 짝수일 때만 발화 → 두 훅이 같은 총계에 이중 발화하지 않는다.
+    """
+    return gate.get("edit_count_post_approval", 0) + gate.get("bash_count_post_approval", 0)
 
 
 # ── 편집 규모 추정 (큰 미승인 변경 환기용) ───────────────────────────────

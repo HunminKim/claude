@@ -21,6 +21,26 @@ arch_rules: []
 #   - "DB 접근은 repository 계층만 허용"
 #   - "도메인 레이어는 외부 라이브러리 import 금지"
 
+# 의존성 lock 정책 — dependency_lock_check 훅(PreToolUse Bash)이 이미지 빌드 직전에 읽는다.
+#   required (기본): 매니페스트가 git 에 추적되면 대응 lock 도 추적돼야 한다.
+#                    아니면 빌드 전 permissionDecision=ask 로 승격된다.
+#   none:            검사 생략. 라이브러리처럼 lock 을 의도적으로 커밋하지 않는 저장소 전용.
+# lock 이 없으면 빌드마다 의존성이 새로 해상도되고, 그 실패는 빌드가 아니라 런타임에 드러난다.
+lock_policy: required
+
+# 프로세스 경계를 넘어 직렬화된 데이터를 주고받는 라이브러리만 선언한다.
+# verifier 의 infra 프로파일이 **이 목록만** 대조한다 — 전 의존성 전수 대조는 하지 않는다.
+# 판별 기준: 클라이언트가 쓴 데이터를 별도 프로세스·컨테이너가 읽는가?
+#   그렇다 → 경계 핀 (mlflow, protobuf, grpc, pyarrow, 스키마 마이그레이션 라이브러리 등)
+#   아니다 → 선언 불필요 (numpy·pandas 처럼 프로세스 안에서 살다 죽는 것)
+# 비워두면 대조를 생략한다.
+boundary_pins: []
+# 예시:
+# boundary_pins:
+#   - library: mlflow
+#     client_declared: backend/pyproject.toml   # 클라이언트 버전이 선언된 곳
+#     server_image: ghcr.io/mlflow/mlflow:v3.6.0  # 서버 이미지 태그 (compose.yml 등)
+
 # 파이프라인 단계 순서 (verifier가 순서 준수 여부를 검증한다)
 # 단계 누락 시 verifier가 ❌ 처리. 프로젝트에 맞게 수정하거나 비워두면 검사 생략.
 pipeline_steps: []

@@ -12,11 +12,17 @@ touched 매니페스트가 아닌 실제 working tree 변경을 보므로 `echo 
 반복 편집 카운터(file_edit_counts)를 리셋해, 수렴 중인 정상 반복은 thrash 트리거에
 걸리지 않고 수렴 없는 flailing 만 도달하게 한다.
 
+역할 3 (Bash 전용 작업의 verifier 상기): verifier_remind 는 매처가 Edit|Write 계열이라
+`docker build`·학습 API 호출처럼 파일을 고치지 않는 작업에선 영원히 발화하지 않았다.
+성공한 실질 Bash(내장 read-only 집합 밖)를 세어 같은 총계·같은 조건으로 상기한다.
+채널이 역할 1 과 동일(additionalContext)하므로 훅을 늘리지 않고 한 프로세스에서 처리한다.
+
 동작 단계:
   1. stdin JSON 에서 tool_name=Bash + 활성 게이트 확인 (아니면 no-op)
   2. scope_mode != off + 매니페스트 선언 시 layer-2 스윕(enforce 롤백 / shadow 기록)
   3. exit 0 이면 green-bash 리셋
-  4. 스코프 위반이 있었으면 Claude 에 환기(additionalContext)
+  4. exit 0 + 실질 명령이면 bash_count_post_approval 증가 → verifier 상기 판정
+  5. 스코프 위반·verifier 상기가 있었으면 Claude 에 환기(additionalContext, 병합 1회)
 
 출력 채널: 환기 (스코프 위반 시 exit 0 + stdout hookSpecificOutput.additionalContext
 JSON — Claude 가 롤백·위반을 인지해 desync 방지). 위반 없으면 무출력(silent exit 0).
@@ -78,6 +84,22 @@ def _sweep_advisory(root, gate, mode: str) -> str | None:
     return lib.format_scope_sweep(removed, warned, effective, mode)
 
 
+def _verifier_reminder(gate) -> str | None:
+    """승인 후 실질 작업이 짝수번째면 verifier 상기 메시지. 조건은 verifier_remind.py 와 동일."""
+    if gate.get("state") != "approved":
+        return None
+    if gate.get("verifier_status") is not None or gate.get("approved_auto"):
+        return None
+    count = lib.verifier_remind_count(gate)
+    if count < 2 or count % 2 != 0:
+        return None
+    return (
+        f"[plan-gate] 💡 승인 후 작업 {count}회 — @verifier 검증이 아직 없습니다.\n"
+        "  빌드·배포·학습처럼 파일을 고치지 않는 작업도 검증 대상입니다. "
+        "종료 코드 0 과 HTTP 2xx 는 작업 성공이 아닙니다 — @verifier 를 호출하세요."
+    )
+
+
 def main() -> int:
     try:
         data = json.load(sys.stdin)
@@ -100,7 +122,8 @@ def main() -> int:
     # exit 0 이라도 "검증 명령"(테스트·빌드·린트)만 수렴으로 인정한다. ls·cat·git
     # status 같은 읽기전용 성공이 카운터를 리셋하면 thrash·롤오버 신호가 무력화된다.
     command = (data.get("tool_input") or {}).get("command", "")
-    if not failed_event and exit_code == 0 and lib.is_verification_command(command):
+    green = not failed_event and exit_code == 0
+    if green and lib.is_verification_command(command):
         had_counts = bool(gate.get("file_edit_counts"))
         gate["last_successful_bash_ts"] = lib.now_iso()
         gate["file_edit_counts"] = {}
@@ -108,8 +131,17 @@ def main() -> int:
         if had_counts:
             lib.log_audit(root, "green_bash_reset", gate_id=gate["id"])
 
-    if advisory:
-        _emit_advisory(advisory)
+    # ── 실질 Bash 누적 → verifier 상기 (Bash 전용 작업 사각지대 봉합) ────────
+    # 성공한 실질 작업만 센다. 실패한 빌드는 "검증할 것이 생겼다"는 신호가 아니다.
+    reminder = None
+    if green and lib.is_substantive_command(command):
+        gate["bash_count_post_approval"] = gate.get("bash_count_post_approval", 0) + 1
+        lib.save_state(root, state)
+        reminder = _verifier_reminder(gate)
+
+    msgs = [m for m in (advisory, reminder) if m]
+    if msgs:
+        _emit_advisory("\n\n".join(msgs))
     return 0
 
 

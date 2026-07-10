@@ -9,6 +9,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dangerous_bash_check.py",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/dependency_lock_check.py",
+            "timeout": 10
           }
         ]
       },
