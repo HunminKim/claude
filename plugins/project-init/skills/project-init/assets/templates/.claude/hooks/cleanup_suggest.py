@@ -121,9 +121,11 @@ def scan_temp_files(root: Path, patterns: dict) -> list[Path]:
         rel = path.relative_to(root)
         name = path.name
         stem = path.stem
-        str_rel = str(rel)
+        # as_posix + "/" 경계 — str(rel).startswith(d) 는 tmp/ 가 tmpfile.txt 같은
+        # 파일명 접두까지 매치하는 오탐 (Windows 역슬래시 경로에서도 동일 판정 유지)
+        rel_posix = rel.as_posix()
 
-        if any(str_rel.startswith(d) for d in temp_dirs):
+        if any(rel_posix.startswith(d + "/") for d in temp_dirs):
             found.append(path)
             continue
         if any(name.startswith(p) for p in prefixes):

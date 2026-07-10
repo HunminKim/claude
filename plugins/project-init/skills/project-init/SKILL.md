@@ -324,9 +324,11 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 - `.claude/constraints.yaml` — 의존성·아키텍처 제약 + 임시 파일 네이밍 규칙 SSOT (기계용 설정 — 사용자용 docs/ 가 아니라 .claude/ 에 둔다)
 
 **임시 파일 네이밍 규칙** (`.claude/constraints.yaml > temp_patterns`):
-- 접두사: `tmp_`, `scratch_`, `debug_` (예: `tmp_analysis.py`, `debug_output.csv`)
-- 접미사: `_tmp`, `_scratch`, `_debug` (예: `result_tmp.csv`, `weights_debug.pt`)
+- 접두사: `tmp_`, `scratch_` (예: `tmp_analysis.py`, `scratch_test.csv`)
+- 접미사: `_tmp`, `_scratch` (예: `result_tmp.csv`)
 - 디렉토리: `tmp/`, `scratch/`, `.experiments/`
+- `debug_`/`_debug` 는 기본 제외 — 임베디드 C/C++ 등의 정식 소스(`*_debug.h`)와 오탐 충돌.
+  디버그 산출물을 잡으려면 constraints.yaml 에 명시 추가한다(opt-in)
 - 세션 종료 시 Stop 훅이 자동 감지 → Claude에게 정리 여부 질문
 - pre-commit 에서 임시 파일 커밋 시도 시 차단
 

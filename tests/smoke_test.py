@@ -1229,10 +1229,15 @@ def t_cleanup_untracked_only(base: Path) -> None:
     subprocess.run(["git", "-C", str(p), "commit", "-qm", "src"], check=True)
     (p / "fcws_debug.h").write_text("int y;\n")  # untracked 이지만 debug — 기본패턴서 제외돼야
     (p / "tmp_scratch.json").write_text("{}\n")  # untracked 임시 산출물 (tmp_ prefix)
+    (p / "scratchpad.py").write_text("x = 1\n")  # dirs 패턴 scratch/ 가 파일명 접두로 오탐하면 안 됨
+    (p / "tmp").mkdir()
+    (p / "tmp" / "inner.log").write_text("log\n")  # dirs 패턴은 디렉토리 하위만 감지
     out = run_hook(hook, {}, p).stdout
     check("tracked isp_debug.h 미감지 (untracked-only)", "isp_debug.h" not in out, f"out={out[:200]!r}")
     check("untracked *_debug.h 미감지 (DEFAULT 에서 debug 제거)", "fcws_debug.h" not in out, f"out={out[:200]!r}")
     check("untracked tmp_ 산출물 감지", "tmp_scratch.json" in out, f"out={out[:200]!r}")
+    check("dirs 패턴 파일명 접두 미매치 (scratchpad.py)", "scratchpad.py" not in out, f"out={out[:300]!r}")
+    check("dirs 패턴 디렉토리 하위 감지 (tmp/inner.log)", "inner.log" in out, f"out={out[:300]!r}")
 
 
 def t_done_from_created(base: Path) -> None:
