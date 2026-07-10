@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """아키텍처 검증 스크립트 — .githooks/pre-push 에서 호출된다.
-docs/constraints.yaml 의 banned/arch_rules를 읽어 위반 여부를 검사한다.
+.claude/constraints.yaml 의 banned/arch_rules를 읽어 위반 여부를 검사한다.
 PyYAML 없으면 검증을 스킵하고 성공으로 종료한다.
 
 다언어 지원: banned 의존성을 언어별 import 문법(Python/JS·TS/Go/Rust)으로 검사한다.
@@ -33,9 +33,9 @@ LANG_RULES: list[tuple[tuple[str, ...], list[str]]] = [
 ]
 
 def load_constraints() -> dict:
-    constraints_path = PROJECT_ROOT / "docs" / "constraints.yaml"
+    constraints_path = PROJECT_ROOT / ".claude" / "constraints.yaml"
     if not constraints_path.exists():
-        print("[validate_arch] docs/constraints.yaml 없음 — 검증 스킵")
+        print("[validate_arch] .claude/constraints.yaml 없음 — 검증 스킵")
         return {}
     try:
         import yaml

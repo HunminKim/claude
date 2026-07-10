@@ -103,7 +103,7 @@ bash install.sh
 | `CLAUDE.md` (≤100줄) | **프로젝트 고유 정보만** (빌드/테스트 명령, 비자명 제약, 알려진 버그) | 항상 |
 | `.claude/memory/workflow.md` | 일반 절차 규칙 (TDD, phase-gate, 위임) | SessionStart @참조 |
 | `.claude/rules/code-style.md` | 파일 타입별 조건부 코드 규칙 | 코드 편집 시 |
-| `docs/constraints.yaml` | 의존성·아키텍처·파이프라인 SSOT (pre-push·verifier 공유) | 도구가 읽음 |
+| `.claude/constraints.yaml` | 의존성·아키텍처·파이프라인 SSOT (pre-push·verifier 공유) | 도구가 읽음 |
 
 ### 생성 디렉토리 구조
 
@@ -116,12 +116,13 @@ project-root/
 ├── .githooks/                pre-commit, pre-push, post-checkout
 ├── .claude/
 │   ├── settings.json         훅 등록 SSOT
+│   ├── constraints.yaml      의존성·아키텍처 제약 SSOT (훅·verifier 가 읽음)
 │   ├── rules/code-style.md
 │   ├── memory/{workflow,lessons}.md
 │   ├── hooks/                6개 로컬 훅
 │   ├── agents/               verifier + backend/frontend/infra/deeplearning/llm-agent
 │   └── state/                plan-gate 런타임 상태
-├── docs/                     plan·decisions·constraints·checklist·technical_doc 등
+├── docs/                     plan·decisions·checklist·technical_doc 등
 ├── tasks/todo.md             세션 작업 계획 (plan-gate 매니페스트 위치)
 └── scripts/validate_arch.py  아키텍처 제약 검사
 ```

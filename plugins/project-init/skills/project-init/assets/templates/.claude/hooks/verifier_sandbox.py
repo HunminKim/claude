@@ -11,7 +11,7 @@ Bash 명령이 production 경로(runs/, outputs/ 등)에 직접 쓰기를 시도
 감지 범위: shell redirect, Python open(쓰기 모드), 주요 직렬화 함수.
 간접 쓰기(project 내부 함수 경유)는 감지 불가 — verifier.md 원칙으로 보완.
 
-production_paths 는 docs/constraints.yaml 에서 프로젝트별 설정 가능.
+production_paths 는 .claude/constraints.yaml 에서 프로젝트별 설정 가능.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def _find_project_root() -> Path | None:
 def _load_prod_paths(root: Path) -> list[str]:
     try:
         import yaml
-        with open(root / "docs" / "constraints.yaml", encoding="utf-8", errors="ignore") as f:
+        with open(root / ".claude" / "constraints.yaml", encoding="utf-8", errors="ignore") as f:
             data = yaml.safe_load(f) or {}
         paths = data.get("production_paths", [])
         if paths:

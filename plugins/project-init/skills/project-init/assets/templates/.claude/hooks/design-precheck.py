@@ -2,13 +2,10 @@
 """UserPromptSubmit hook — 설계 키워드 감지 시 5단계 체크리스트를 Claude context에 주입.
 
 출력 채널: 환기 (exit 0 + stdout hookSpecificOutput.additionalContext JSON)
-
-docs/constraints.yaml 이 없으면 무음 종료 (초기화 전 오작동 방지).
 """
 from __future__ import annotations
 
-import json, os, re, sys
-from pathlib import Path
+import json, re, sys
 
 # Windows cp949 등 비UTF-8 콘솔에서 이모지·em-dash 입출력 시 UnicodeError 방지 (stdio UTF-8 고정)
 for _s in (sys.stdin, sys.stdout, sys.stderr):
@@ -32,18 +29,6 @@ def detect_design(text: str) -> bool:
     en_hits = sum(1 for p in EN_DESIGN if re.search(p, text, re.IGNORECASE))
     return ko_hits >= 1 or en_hits >= 2
 
-def find_project_root() -> Path | None:
-    env_root = os.environ.get("CLAUDE_PROJECT_DIR")
-    if env_root:
-        p = Path(env_root)
-        if (p / "docs" / "constraints.yaml").exists():
-            return p
-        return None
-    for p in [Path.cwd()] + list(Path.cwd().parents):
-        if (p / "docs" / "constraints.yaml").exists():
-            return p
-    return None
-
 def main():
     try:
         data = json.load(sys.stdin)
@@ -55,15 +40,12 @@ def main():
         sys.exit(0)
     if not detect_design(prompt):
         sys.exit(0)
-    root = find_project_root()
-    if root is None:
-        sys.exit(0)
     div = "━" * 57
     msg = "\n".join([
         "", div,
         "[DESIGN PRECHECK] 설계 요청 감지 — 구현 전 5단계 확인",
         div, "",
-        "1. docs/constraints.yaml 확인 — 이 설계가 기존 의존성 규칙을 위반하는가?",
+        "1. .claude/constraints.yaml 확인 — 이 설계가 기존 의존성 규칙을 위반하는가?",
         "2. docs/decisions.md 확인 — 이미 결정된 사항과 충돌하는가? (D-번호 참조)",
         "3. docs/glossary.yaml 확인 — 새 개념의 용어가 기존 용어와 일치하는가?",
         "4. docs/plan.md 확인 — 현재 Sprint/Phase 범위 내 작업인가?",

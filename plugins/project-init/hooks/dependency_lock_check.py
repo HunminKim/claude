@@ -20,7 +20,8 @@
     daesung 케이스는 존재 검사로는 잡히지 않는다.
   - 차단(exit 2)이 아니라 `ask` 다. 라이브러리처럼 lock 을 의도적으로 커밋하지 않는
     정당한 경우가 있고, 그때 사용자가 넘길 수 있어야 한다. 영구 해제는
-    `docs/constraints.yaml` 의 `lock_policy: none`.
+    `.claude/constraints.yaml` 의 `lock_policy: none`
+    (v2.18.0 이전 프로젝트의 `docs/constraints.yaml` 도 폴백으로 읽는다).
   - 대조는 여기서 하지 않는다. 서버/클라이언트 경계 핀 대조는 verifier 의 infra 프로파일이
     `constraints.yaml` 의 `boundary_pins` 만 보고 수행한다 (전수 대조 금지).
 """
@@ -71,17 +72,20 @@ def _git(root: Path, *args: str) -> str | None:
 
 
 def _lock_policy(root: Path) -> str:
-    """docs/constraints.yaml 의 lock_policy. 파일·키 부재 시 'required'.
+    """constraints.yaml 의 lock_policy. 파일·키 부재 시 'required'.
 
+    `.claude/constraints.yaml` 우선, 구세대(v2.18.0 이전) 프로젝트의
+    `docs/constraints.yaml` 폴백 — 먼저 존재하는 파일 하나만 읽는다.
     stdlib 만 쓰므로 yaml 파서 없이 단일 스칼라 키만 정규식으로 읽는다.
     """
-    path = root / "docs" / "constraints.yaml"
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return "required"
-    m = _LOCK_POLICY_RE.search(text)
-    return m.group(1).lower() if m else "required"
+    for path in (root / ".claude" / "constraints.yaml", root / "docs" / "constraints.yaml"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        m = _LOCK_POLICY_RE.search(text)
+        return m.group(1).lower() if m else "required"
+    return "required"
 
 
 def _ignored_by(root: Path, rel: str) -> str | None:
@@ -145,7 +149,7 @@ def main() -> int:
         "그 실패는 빌드가 아니라 런타임에 드러납니다. 빌드 통과를 정합성의 증거로 삼지 마세요.\n"
         "  해법: lock 을 생성·커밋하고(`uv add`/`npm install` 이 자동 갱신) 빌드를 "
         "`uv sync --frozen`·`npm ci` 처럼 lock 강제 모드로 바꾸세요.\n"
-        "  의도적으로 lock 을 커밋하지 않는 저장소면 docs/constraints.yaml 에 `lock_policy: none` 을 넣으세요."
+        "  의도적으로 lock 을 커밋하지 않는 저장소면 .claude/constraints.yaml 에 `lock_policy: none` 을 넣으세요."
     )
     payload = {
         "hookSpecificOutput": {

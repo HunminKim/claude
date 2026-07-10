@@ -36,4 +36,3 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 | [완료 보고서](docs/completion_report.md) | 테스트 결과 (verifier 자동 업데이트) |
 | [기술 문서](docs/technical_doc.md) | 구현 세부사항 |
 | [배포 가이드](docs/deployment_guide.md) | 환경 설정·실행 방법 |
-| [의존성 제약](docs/constraints.yaml) | banned/allowed 의존성 SSOT |

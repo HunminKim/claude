@@ -7,7 +7,7 @@
 다음 응답에서 반영한다. systemMessage는 사용자 터미널 전용이라
 "Claude에게 정리 제안" 의도에 맞지 않는다 (채널 교정).
 
-docs/constraints.yaml 의 temp_patterns 기준으로 스캔.
+.claude/constraints.yaml 의 temp_patterns 기준으로 스캔.
 임시 파일이 없으면 무음 종료.
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ SCAN_BUDGET_SEC = 5.0
 
 # debug_/_debug 는 기본값에서 제외한다 — 임베디드 C/C++ 등에서 *_debug.h/.c 같은
 # 정식 소스와 광범위하게 충돌(오탐)하기 때문. 디버그 산출물(debug_output.json 등)을
-# 잡으려면 프로젝트가 docs/constraints.yaml 의 temp_patterns 에 명시 추가한다(opt-in).
+# 잡으려면 프로젝트가 .claude/constraints.yaml 의 temp_patterns 에 명시 추가한다(opt-in).
 DEFAULT_PATTERNS = {
     "prefixes": ["tmp_", "scratch_"],
     "suffixes": ["_tmp", "_scratch"],
@@ -41,17 +41,12 @@ DEFAULT_PATTERNS = {
 }
 
 
-def find_project_root() -> Path | None:
+def find_project_root() -> Path:
     env_root = os.environ.get("CLAUDE_PROJECT_DIR")
     if env_root:
-        p = Path(env_root)
-        if (p / "docs" / "constraints.yaml").exists() or (p / "CLAUDE.md").exists():
-            return p
-        return None
-    for p in [Path.cwd()] + list(Path.cwd().parents):
-        if (p / "docs" / "constraints.yaml").exists():
-            return p
-    return None
+        return Path(env_root)
+    # 이 훅은 <root>/.claude/hooks/ 에 설치된다 — 마커 파일 없이 위치에서 역산
+    return Path(__file__).resolve().parents[2]
 
 
 def _warn_missing_yaml(constraints: Path) -> None:
@@ -64,13 +59,13 @@ def _warn_missing_yaml(constraints: Path) -> None:
         encoding="utf-8", errors="ignore"
     ):
         sys.stderr.write(
-            "[cleanup-suggest] PyYAML 미설치 — docs/constraints.yaml 의 temp_patterns 를 "
+            "[cleanup-suggest] PyYAML 미설치 — .claude/constraints.yaml 의 temp_patterns 를 "
             "읽지 못해 기본 패턴으로 폴백합니다. `pip install pyyaml` 후 커스텀이 적용됩니다.\n"
         )
 
 
 def load_patterns(root: Path) -> dict:
-    constraints = root / "docs" / "constraints.yaml"
+    constraints = root / ".claude" / "constraints.yaml"
     try:
         import yaml
     except ImportError:
@@ -165,9 +160,6 @@ def main():
         sys.exit(0)
 
     root = find_project_root()
-    if root is None:
-        sys.exit(0)
-
     patterns = load_patterns(root)
     files = scan_temp_files(root, patterns)
     if not files:
@@ -180,7 +172,7 @@ def main():
         lines.append(f"  {f.relative_to(root)}  ({fmt_size(st.st_size)}, {fmt_mtime(st.st_mtime)})")
     lines += [
         "",
-        "docs/constraints.yaml > temp_patterns 네이밍 규칙에 해당하는 파일입니다.",
+        ".claude/constraints.yaml > temp_patterns 네이밍 규칙에 해당하는 파일입니다.",
         "→ Claude: 위 임시 파일 정리를 사용자에게 제안하라.",
         "  사용자가 삭제할 파일을 지정하거나 '모두 삭제'라고 답하면 삭제를 진행한다.",
         div, "",

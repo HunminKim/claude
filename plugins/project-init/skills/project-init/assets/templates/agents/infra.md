@@ -85,7 +85,7 @@ tools: Read, Bash, Write, Edit
 3. **경계 핀을 일치시킨다.** 이미지 태그만 핀하고 그 안의 라이브러리가 부동이면 결함이다.
    프로세스 경계를 넘어 **직렬화된 데이터를 주고받는** 라이브러리(예: 클라이언트가 쓴 모델
    아티팩트를 서버가 읽는 mlflow)는 서버 이미지와 클라이언트 버전이 같아야 한다. 그 목록을
-   `docs/constraints.yaml` 의 `boundary_pins` 에 선언한다 — verifier 가 그것만 대조한다.
+   `.claude/constraints.yaml` 의 `boundary_pins` 에 선언한다 — verifier 가 그것만 대조한다.
    전 의존성을 일일이 대조하지 않는다. 경계를 넘지 않는 라이브러리는 버전이 달라도 무해하다.
 
 > 매니페스트를 exact-pin(`==`)으로 도배하고 싶어지면 lock 이 없다는 신호다. 매니페스트는 느슨한

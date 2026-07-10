@@ -1222,8 +1222,7 @@ def t_cleanup_untracked_only(base: Path) -> None:
     print("[15] cleanup_suggest 오탐 방지")
     hook = TEMPLATES / ".claude" / "hooks" / "cleanup_suggest.py"
     p = make_project(base, "cleanup")
-    (p / "docs").mkdir()
-    (p / "docs" / "constraints.yaml").write_text("temp_patterns: {}\n")  # 빈값 → DEFAULT_PATTERNS
+    (p / ".claude" / "constraints.yaml").write_text("temp_patterns: {}\n")  # 빈값 → DEFAULT_PATTERNS
     (p / "src").mkdir()
     (p / "src" / "isp_debug.h").write_text("int x;\n")  # tracked 정식 소스
     subprocess.run(["git", "-C", str(p), "add", "src/isp_debug.h"], check=True)
@@ -1305,8 +1304,7 @@ def t_stop_hook_active_guard(base: Path) -> None:
     """
     print("[39] Stop 훅 stop_hook_active 가드")
     p = make_project(base, "stopguard")
-    (p / "docs").mkdir()
-    (p / "docs" / "constraints.yaml").write_text("temp_patterns: {}\n")
+    (p / ".claude" / "constraints.yaml").write_text("temp_patterns: {}\n")
     (p / "tmp_x.json").write_text("{}\n")  # cleanup 이 잡을 untracked 임시 산출물
     cs = TEMPLATES / ".claude" / "hooks" / "cleanup_suggest.py"
     check("cleanup active=false → 감지 출력", "tmp_x.json" in run_hook(cs, {"stop_hook_active": False}, p).stdout)
@@ -2449,14 +2447,23 @@ def t_dependency_lock_check(base: Path) -> None:
     r = run("docker compose build")
     check("compose build 도 발화", bool(r.stdout.strip()), f"out={r.stdout[:60]!r}")
 
-    # lock_policy: none → 검사 생략
+    # lock_policy: none → 검사 생략 (구세대 프로젝트의 docs/ 경로 폴백)
     (p / "docs").mkdir()
     (p / "docs" / "constraints.yaml").write_text("lock_policy: none\n", encoding="utf-8")
     r = run("docker build .")
-    check("lock_policy=none → 무출력", not r.stdout.strip(), f"out={r.stdout[:60]!r}")
+    check("lock_policy=none (docs/ 레거시 폴백) → 무출력", not r.stdout.strip(), f"out={r.stdout[:60]!r}")
+
+    # 신 경로 .claude/ 가 docs/ 보다 우선
+    (p / ".claude" / "constraints.yaml").write_text("lock_policy: required\n", encoding="utf-8")
+    r = run("docker build .")
+    check(".claude/ required 가 docs/ none 에 우선 → 출력 있음", bool(r.stdout.strip()), f"out={r.stdout[:60]!r}")
+
+    (p / ".claude" / "constraints.yaml").write_text("lock_policy: none\n", encoding="utf-8")
+    r = run("docker build .")
+    check("lock_policy=none (.claude/) → 무출력", not r.stdout.strip(), f"out={r.stdout[:60]!r}")
 
     # lock 을 추적하면 결함 해소 (policy 되돌린 뒤)
-    (p / "docs" / "constraints.yaml").write_text("lock_policy: required\n", encoding="utf-8")
+    (p / ".claude" / "constraints.yaml").write_text("lock_policy: required\n", encoding="utf-8")
     (p / ".gitignore").write_text("\n", encoding="utf-8")
     _git_t(p, "add", "-A", "-f")
     _git_t(p, "commit", "-q", "-m", "track lock")

@@ -117,6 +117,7 @@ CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
 .plan-gateignore                ← plan-gate 편집 카운터 제외 목록 (문서·메타파일)
 .claude/
 ├── settings.json               ← 훅 등록 SSOT (아래 hooks/ 6종 전부 여기 배선됨)
+├── constraints.yaml            ← 의존성·아키텍처 제약 SSOT (훅·verifier 가 읽음)
 ├── rules/
 │   └── code-style.md           ← 코드 스타일 규칙 (코드 파일 편집 시 자동 로드)
 ├── memory/
@@ -138,7 +139,6 @@ CLAUDE.md                       ← AI 협업 규칙 (100줄 이내)
 docs/
 ├── plan.md                     ← 개발 계획 (Phase/Sprint 로드맵)
 ├── decisions.md                ← 설계 결정 로그 (D-번호 append-only)
-├── constraints.yaml            ← 의존성·아키텍처 제약 SSOT
 ├── glossary.yaml               ← 용어 규범 SSOT
 ├── context_note.md             ← 맥락 노트             (개발 전 작성)
 ├── checklist.md                ← 체크리스트            (verifier가 소단위마다 업데이트)
@@ -315,15 +315,15 @@ git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 ```
 - `pre-commit`: CLAUDE.md 린트 명령어 자동 실행
-- `pre-push`: `docs/constraints.yaml` 기반 아키텍처 위반 검사
+- `pre-push`: `.claude/constraints.yaml` 기반 아키텍처 위반 검사
 
 **4계층 규칙 분산 구조 안내**:
 - `CLAUDE.md` — 프로젝트 특화 규칙 (100줄 이내)
 - `.claude/rules/code-style.md` — 상세 코드 규칙 (코드 파일 편집 시 자동 로드)
 - `.claude/memory/lessons.md` — 교정 패턴 누적 (세션 시작 시 복습)
-- `docs/constraints.yaml` — 의존성·아키텍처 제약 + 임시 파일 네이밍 규칙 SSOT
+- `.claude/constraints.yaml` — 의존성·아키텍처 제약 + 임시 파일 네이밍 규칙 SSOT (기계용 설정 — 사용자용 docs/ 가 아니라 .claude/ 에 둔다)
 
-**임시 파일 네이밍 규칙** (`docs/constraints.yaml > temp_patterns`):
+**임시 파일 네이밍 규칙** (`.claude/constraints.yaml > temp_patterns`):
 - 접두사: `tmp_`, `scratch_`, `debug_` (예: `tmp_analysis.py`, `debug_output.csv`)
 - 접미사: `_tmp`, `_scratch`, `_debug` (예: `result_tmp.csv`, `weights_debug.pt`)
 - 디렉토리: `tmp/`, `scratch/`, `.experiments/`
@@ -519,9 +519,9 @@ chmod +x .githooks/pre-commit .githooks/pre-push .githooks/post-checkout
 
 `assets/templates/docs/decisions.md` 파일을 읽어 사용한다.
 
-### docs/constraints.yaml 템플릿
+### .claude/constraints.yaml 템플릿
 
-`assets/templates/docs/constraints.yaml` 파일을 읽어 사용한다.
+`assets/templates/.claude/constraints.yaml` 파일을 읽어 사용한다.
 
 ### docs/glossary.yaml 템플릿
 

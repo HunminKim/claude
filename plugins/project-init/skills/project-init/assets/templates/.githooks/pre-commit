@@ -55,7 +55,7 @@ if [ -n "$SHRUNK" ]; then
     echo "[pre-commit] 의도한 변경이면 그대로 커밋하세요 (차단하지 않음)." >&2
 fi
 
-# 임시 파일 커밋 방어: docs/constraints.yaml 의 temp_patterns 기준
+# 임시 파일 커밋 방어: .claude/constraints.yaml 의 temp_patterns 기준
 if command -v python3 &>/dev/null; then
     TEMP_STAGED=$(PROJECT_ROOT="$PROJECT_ROOT" python3 << 'PYEOF'
 import subprocess, os
@@ -66,7 +66,7 @@ try:
     import yaml
     # encoding 명시 — Windows(Git Bash+cp949 파이썬)에서 한국어 주석 포함 yaml 이
     # UnicodeDecodeError 로 죽어 커스텀 temp_patterns 이 조용히 무시되던 사각 방지
-    with open(root / 'docs' / 'constraints.yaml', encoding='utf-8', errors='ignore') as f:
+    with open(root / '.claude' / 'constraints.yaml', encoding='utf-8', errors='ignore') as f:
         data = yaml.safe_load(f) or {}
     p = data.get('temp_patterns', {})
     # debug_/_debug 는 기본 제외 — 정식 소스(*_debug.h 등)와 오탐. 잡으려면 constraints.yaml 에 opt-in.
