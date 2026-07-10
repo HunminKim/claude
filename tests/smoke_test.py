@@ -3066,6 +3066,87 @@ def t_harness_update_heal(base: Path) -> None:
     check("마커 없으면 무개입", r2.stdout == "" and (p2 / ".claude" / "plan_gate_enabled").exists())
 
 
+def t_concurrent_session_check(base: Path) -> None:
+    """같은 경로 타 세션 활동 감지 — 환기 채널 행위 검증.
+
+    시그널 2단: 트랜스크립트 mtime(활동) + 프로세스 생존(닫힌 세션 잔재 오탐 억제).
+    가짜 /proc 트리(SESSION_CHECK_PROC_ROOT 주입)로 생존 판정까지 행위로 검증한다.
+    """
+    print("[53] 같은 경로 타 세션 활동 환기")
+    hook = HOOKS / "concurrent_session_check.py"
+    p = make_project(base, "concurrent")
+
+    tdir = base / "transcripts"
+    tdir.mkdir()
+    own = tdir / "own-session.jsonl"
+    own.write_text("{}", encoding="utf-8")
+    other = tdir / "other-session.jsonl"
+    other.write_text("{}", encoding="utf-8")
+
+    # 가짜 /proc: 같은 cwd 의 살아있는 claude 1개 (조상 아닌 고정 pid)
+    proc_alive = base / "proc_alive"
+    pd = proc_alive / "99999999"
+    pd.mkdir(parents=True)
+    (pd / "comm").write_text("claude\n", encoding="utf-8")
+    try:
+        os.symlink(str(p), str(pd / "cwd"))
+        can_symlink = True
+    except OSError:
+        can_symlink = False  # Windows 비관리자 등 — 생존 양성 케이스만 스킵
+    proc_dead = base / "proc_dead"  # 프로세스 트리에 claude 없음
+    proc_dead.mkdir()
+
+    payload = {"source": "startup", "transcript_path": str(own), "cwd": str(p)}
+
+    def run_cs(pl: dict, proc_root: Path) -> subprocess.CompletedProcess[str]:
+        env = {**GIT_ENV, "CLAUDE_PROJECT_DIR": str(p),
+               "SESSION_CHECK_PROC_ROOT": str(proc_root)}
+        return subprocess.run(
+            [sys.executable, str(hook)], input=json.dumps(pl),
+            capture_output=True, text=True, cwd=str(p), env=env,
+        )
+
+    # 1. 신선한 타 세션 + 생존 프로세스 → 환기 (SessionStart 래퍼 JSON)
+    if can_symlink:
+        r = run_cs(payload, proc_alive)
+        try:
+            ctx = json.loads(r.stdout)["hookSpecificOutput"]
+            ok = ctx["hookEventName"] == "SessionStart" and "session-check" in ctx["additionalContext"]
+        except Exception:
+            ok = False
+        check("타 세션 활동 + 생존 → 환기 JSON", r.returncode == 0 and ok, f"out={r.stdout[:80]!r}")
+    else:
+        skip("타 세션 활동 + 생존 → 환기 JSON", "symlink 불가 환경")
+
+    # 2. 신선한 잔재 jsonl 만 있고 프로세스 부재 → 방금 닫힌 세션으로 보고 억제
+    r = run_cs(payload, proc_dead)
+    check("타 세션 프로세스 없음 → 억제", r.returncode == 0 and r.stdout == "", f"out={r.stdout[:60]!r}")
+
+    # 3. /proc 미지원(비 Linux) → 판정 불가 fail-open 으로 환기 유지 (환기 채널이라 오탐 무해)
+    r = run_cs(payload, base / "proc_missing")
+    check("프로세스 판정 불가 → fail-open 환기", "session-check" in r.stdout, f"out={r.stdout[:60]!r}")
+
+    # 4. compact/resume 은 진행 중 대화 — 재환기 노이즈 억제
+    for src in ("compact", "resume"):
+        r = run_cs({**payload, "source": src}, proc_alive)
+        check(f"{src} → 억제", r.stdout == "", f"out={r.stdout[:60]!r}")
+
+    # 5. 활동 창(10분) 밖 mtime 만 → 억제
+    stale = time.time() - 3600
+    os.utime(other, (stale, stale))
+    r = run_cs(payload, proc_alive)
+    check("오래된 활동만 → 억제", r.stdout == "", f"out={r.stdout[:60]!r}")
+
+    # 6. agent-* 사이드체인은 타 세션이 아님 → 억제
+    (tdir / "agent-x.jsonl").write_text("{}", encoding="utf-8")
+    r = run_cs(payload, proc_alive)
+    check("agent-* 사이드체인 제외", r.stdout == "", f"out={r.stdout[:60]!r}")
+
+    # 7. transcript_path 부재 → 침묵 통과 (훅이 흐름을 막지 않는다)
+    r = run_cs({"source": "startup", "cwd": str(p)}, proc_alive)
+    check("transcript_path 부재 → 침묵 통과", r.returncode == 0 and r.stdout == "")
+
+
 def t_prompt_log_session_guard(base: Path) -> None:
     """prompt-log 멀티세션 가드 + RMW 락 + 미동의 mkdir 부작용 없음.
 
@@ -3410,6 +3491,7 @@ def main() -> int:
         t_failed_bash_no_green_reset(base)
         t_update_docs_malformed(base)
         t_harness_update_heal(base)
+        t_concurrent_session_check(base)
         t_prompt_log_session_guard(base)
         t_failure_loop_guard(base)
         t_prompt_log_consent_sanitize(base)

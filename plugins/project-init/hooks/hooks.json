@@ -156,6 +156,11 @@
             "type": "command",
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/plan_gate_session_start.py",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/concurrent_session_check.py",
+            "timeout": 10
           }
         ]
       }
