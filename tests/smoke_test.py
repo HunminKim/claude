@@ -3343,6 +3343,35 @@ def t_worktree_state_isolation(base: Path) -> None:
         f"state={g_b['state']} vs={g_b.get('verifier_status')} exists={rj_b.exists()}",
     )
 
+    # ── (c-3) 중첩 managed 프로젝트 → verdict 는 파일 위치가 아니라 세션 루트로 ──
+    # B(managed)를 세션 루트 A 하위로 복사한 형상. verifier 결과가 B/docs 에 떨어져도
+    # gate 는 세션 활성 gate(A)가 받아야 한다. 이전엔 파일에 가장 가까운 managed(B)의
+    # 낡은 gate 에 오스탬프 + 파일 소비 → A 는 판정 유실(split-brain, 2026-07-16 실측).
+    sess = _approved_gate_project(base, "iso_nested")            # 세션 루트 A (활성 gate)
+    nested = sess / "experiments" / "DRL"                        # 중첩 managed B
+    (nested / ".claude" / "state").mkdir(parents=True)
+    (nested / ".claude" / "agents").mkdir(parents=True)
+    (nested / ".claude" / "agents" / "verifier.md").write_text("# v", encoding="utf-8")
+    # B 의 낡은 approved gate(직전 사이클 잔재) — 오스탬프 유혹 대상
+    (nested / ".claude" / "state" / "plan_gate.json").write_text(json.dumps({
+        "current_gate_id": "stale_drl",
+        "gates": {"stale_drl": {"id": "stale_drl", "state": "approved",
+                                "file_edit_counts": {}, "verifier_status": None}},
+    }), encoding="utf-8")
+    rj_n = setup_docs(nested) / ".verifier_result.json"
+    rj_n.write_text(json.dumps(OK_RESULT, ensure_ascii=False), encoding="utf-8")
+    r = run_at(ud, {"tool_name": "Write", "tool_input": {"file_path": str(rj_n)}}, sess, sess)
+    check(
+        "중첩 managed: verdict 가 세션 루트(A) gate 로 라우팅 + 파일 소비",
+        get_gate(sess).get("verifier_status") == "✅" and not rj_n.exists(),
+        f"A_vs={get_gate(sess).get('verifier_status')} exists={rj_n.exists()} err={r.stderr[:80]!r}",
+    )
+    check(
+        "중첩 B 의 낡은 gate 는 불가침 (split-brain 오스탬프 없음)",
+        get_gate(nested).get("verifier_status") is None,
+        f"B_vs={get_gate(nested).get('verifier_status')}",
+    )
+
 
 def t_prompt_log_session_guard(base: Path) -> None:
     """prompt-log 멀티세션 가드 + RMW 락 + 미동의 mkdir 부작용 없음.

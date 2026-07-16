@@ -230,17 +230,25 @@ def _diff_is_docs_only(docs_dir: Path) -> bool:
 
 
 def _resolve_root(docs_dir: Path) -> Path | None:
-    """gate 루트 유도 — 결과 파일 절대경로 기준(결정론) 우선, 실패 시 env/cwd 탐색.
+    """gate 루트 유도 — find_project_root 의 워크트리→env(세션 루트) 정책에 완전 위임.
 
-    문서 갱신은 docs_dir(절대경로)를 쓰는데 gate 갱신만 find_project_root()(env/cwd)를
-    써서, 훅 프로세스의 cwd 가 프로젝트 밖이면 문서만 갱신되고 gate 는 조용히 누락됐다.
-    두 부작용이 같은 루트를 공유하면 함께 성공하거나 함께 실패한다.
+    이전 구현은 "파일에 가장 가까운 managed 루트"(docs_dir.parent 가 managed 면 즉시
+    반환)를 gate 루트로 썼다. 그 탓에 세션 루트(A) 안에 또다른 managed 프로젝트(B)를
+    중첩(예: B 를 A 하위로 복사)하면, verifier 결과가 B/docs 에 떨어질 때 gate 를 세션
+    활성 gate(A)가 아니라 B 의 낡은 gate 에 오스탬프하고 결과 파일까지 소비해, A 의 진짜
+    gate 는 판정을 영영 못 받는 split-brain 이 났다(2026-07-16 daesung/DRL 실측).
+
+    gate 는 파일 위치가 아니라 '세션'이 소유한다 — 한 세션엔 활성 gate 가 하나뿐이고
+    그 루트는 env `CLAUDE_PROJECT_DIR`(워크트리면 링크 트리)로 결정된다. find_project_root
+    가 바로 그 규칙(워크트리 우선 → env → .claude 상위)이므로, 문서·gate·CLI 3소비자가
+    같은 SSOT 를 본다. 결과 파일이 세션 루트 '안'에 있으면(중첩 포함) 항상 세션 루트로
+    수렴 — 관찰된 버그가 여기 해당한다.
+
+    ponytail: 결과 파일이 세션 루트 '밖'의 형제 managed 트리에 있으면(verifier 가 선언
+    루트 밖에 결과를 쓰는 병리적 코너) 세션 gate 가 남의 verdict 로 스탬프될 수 있다.
+    정상 워크플로우(verifier cwd = 프로젝트 내부)에선 도달 불가에 가까워 미대응 —
+    필요해지면 결과 파일에 gate_id 를 실어 기대치 일치 시에만 스탬프하도록 강화.
     """
-    candidate = docs_dir.parent
-    if lib.is_project_init_managed(candidate):
-        return candidate
-    # 결과 파일이 놓인 트리가 곧 올바른 루트 — find_project_root 의 워크트리 감지가
-    # docs 부모 기준으로 동작하도록 start 를 넘긴다(훅·CLI 와 같은 규칙).
     return lib.find_project_root(docs_dir.parent)
 
 
