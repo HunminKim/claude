@@ -1032,9 +1032,13 @@ def t_delegation_guard(base: Path) -> None:
     (proj / ".claude" / "agents" / "backend.md").write_text("# backend")
     (proj / ".claude" / "agents" / "data.md").write_text("# data")
 
-    def run(subagent: str, prompt: str) -> subprocess.CompletedProcess[str]:
-        payload = {"tool_name": "Agent", "tool_input": {"subagent_type": subagent, "prompt": prompt}}
-        return run_hook(hook, payload, proj)
+    def run(
+        subagent: str, prompt: str, background: bool | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        tool_input: dict = {"subagent_type": subagent, "prompt": prompt}
+        if background is not None:
+            tool_input["run_in_background"] = background
+        return run_hook(hook, {"tool_name": "Agent", "tool_input": tool_input}, proj)
 
     full = "TASK: x\nUSER_DECISIONS: 없음\nCONSTRAINTS: y\nGATE: approved"
     check("커스텀 backend + 4블록 누락 → 차단", run("backend", "x").returncode == 2)
@@ -1047,6 +1051,29 @@ def t_delegation_guard(base: Path) -> None:
     check("커스텀 @data 에이전트도 가드 발화 (일반화)", run("data", "x").returncode == 2)
     check("유틸 Plan 에이전트는 통과", run("Plan", "x").returncode == 0)
     check("미정의 에이전트는 통과", run("nonexistent", "x").returncode == 0)
+
+    # 동기 호출 환기 — 에이전트 종류 무관, 명시적 false 에만 발화 (생략=툴 기본 백그라운드)
+    r = run("Plan", "x", background=False)
+    check(
+        "유틸 에이전트 동기 호출 → 백그라운드 환기",
+        r.returncode == 0 and "run_in_background" in r.stdout,
+        f"rc={r.returncode} out={r.stdout[:80]}",
+    )
+    check("run_in_background 생략 → 환기 없음 (silent)", run("Plan", "x").stdout.strip() == "")
+    check(
+        "run_in_background=true → 환기 없음 (silent)",
+        run("Plan", "x", background=True).stdout.strip() == "",
+    )
+    r = run("backend", full, background=False)
+    check(
+        "도메인 위임 동기 호출 → Plan 검증 + 백그라운드 환기 병합",
+        r.returncode == 0 and "Plan subagent" in r.stdout and "run_in_background" in r.stdout,
+        f"rc={r.returncode} out={r.stdout[:120]}",
+    )
+    check(
+        "4블록 누락은 백그라운드 환기보다 우선 차단",
+        run("backend", "x", background=False).returncode == 2,
+    )
 
     # SSOT: 두 위임 훅은 유틸-에이전트 집합/도메인 판정을 delegation_common 한 곳에서만
     # 가져온다 — 어느 한쪽이 _UTILITY_SUBAGENTS 를 로컬 재정의하면 재분기(M2 회귀)다.
